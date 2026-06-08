@@ -27,24 +27,24 @@ simulate_and_capture_deps() {
   local deps=""
 
   if command -v dnf &>/dev/null; then
-    # Ejecutar la simulacion y capturar la salida
-    local output=$(dnf remove "$package" -y --assumeno 2>&1)
-
-    # Extraer la seccion de dependencias (despues de "Removing unused dependencies:" hasta "Transaction Summary")
-    deps=$(echo "$output" | sed -n '/Removing unused dependencies:/,/Transaction Summary/p' | grep -E "^  [a-z]" | awk '{print $1}')
-
-    # Si estamos en español, buscar "Quitando dependencias no usadas:"
-    if [ -z "$deps" ]; then
-      deps=$(echo "$output" | sed -n '/Quitando dependencias no usadas:/,/Resumen de la transacción/p' | grep -E "^  [a-z]" | awk '{print $1}')
-    fi
+    # Para dnf, usar awk para extraer dependencias (funciona en ingles y español)
+    deps=$(dnf remove "$package" -y --assumeno 2>/dev/null | awk '
+      /Removing unused dependencies:/ {f=1; next}
+      /Quitando dependencias no usadas:/ {f=1; next}
+      /Transaction Summary/ {exit}
+      /Resumen de la transacción/ {exit}
+      f {print $1}
+    ')
 
   elif command -v yum &>/dev/null; then
-    local output=$(yum remove "$package" -y --assumeno 2>&1)
-    # Para yum, el formato puede ser diferente
-    deps=$(echo "$output" | sed -n '/Removing for dependencies:/,/Transaction Summary/p' | grep -E "^  [a-z]" | awk '{print $1}')
-    if [ -z "$deps" ]; then
-      deps=$(echo "$output" | sed -n '/Quitando por dependencias:/,/Resumen de la transacción/p' | grep -E "^  [a-z]" | awk '{print $1}')
-    fi
+    # Para yum, similar
+    deps=$(yum remove "$package" -y --assumeno 2>/dev/null | awk '
+      /Removing for dependencies:/ {f=1; next}
+      /Quitando por dependencias:/ {f=1; next}
+      /Transaction Summary/ {exit}
+      /Resumen de la transacción/ {exit}
+      f {print $1}
+    ')
   fi
 
   echo "$deps"
