@@ -114,48 +114,43 @@ check_lvm() {
   fi
 }
 
-# # ==============================================
-# FUNCION PARA DESHABILITAR MODULO (CORREGIDO)
 # ==============================================
-disable_filesystem_module() {
-  local module="$1"
-  local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
+# DESHABILITAR SISTEMAS DE ARCHIVOS NO USADOS (CORREGIDO)
+# ==============================================
+disable_modules() {
+  local modules="cramfs squashfs udf freevxfs jffs2 hfs hfsplus"
 
-  echo -e "\n${BLUE}[*] Verificando modulo: $module${NC}"
+  echo -e "\n${BLUE}[*] Deshabilitando sistemas de archivos no usados...${NC}"
 
-  if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
-    echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
-    return 0
-  fi
+  for module in $modules; do
+    local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
 
-  # Verificar si ya esta correctamente deshabilitado
-  # La condicion correcta es: install $module /bin/false debe existir
-  if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
-    echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
-    return 0
-  fi
-
-  # Si existe configuracion con /bin/true, eliminarla o corregirla
-  if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
-    echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      for f in /etc/modprobe.d/*.conf; do
-        if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
-          sed -i 's/^install $module \/bin\/true/install $module \/bin\/false/' "$f"
-          echo -e "${GREEN}[✓] $module corregido a /bin/false en $f${NC}"
-          FIXED=$((FIXED + 1))
-        fi
-      done
+    # Verificar si el modulo existe en el sistema
+    if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
+      echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
+      continue
     fi
-    return 0
-  fi
 
-  # El modulo no esta deshabilitado
-  echo -e "${RED}[!] $module NO esta deshabilitado${NC}"
+    # Verificar si ya esta correctamente deshabilitado
+    if grep -q "^install $module /bin/false" "$conf_file" 2>/dev/null; then
+      echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
+      continue
+    fi
 
-  if [ "$AUTO_FIX" = true ]; then
-    # Crear archivo de configuracion
-    cat >"$conf_file" <<EOF
+    # Si existe configuracion incorrecta (con /bin/true), eliminarla
+    if grep -q "^install $module /bin/true" /etc/modprobe.d/*.conf 2>/dev/null; then
+      echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i '/^install '$module' \/bin\/true/d' /etc/modprobe.d/*.conf 2>/dev/null
+        sed -i '/^# Deshabilitar '$module'/d' /etc/modprobe.d/*.conf 2>/dev/null
+        echo -e "${GREEN}[✓] Configuracion incorrecta eliminada${NC}"
+      fi
+    fi
+
+    echo -e "${RED}[!] $module NO esta deshabilitado${NC}"
+
+    if [ "$AUTO_FIX" = true ]; then
+      cat >"$conf_file" <<EOF
 # ==============================================
 # Hardening: Modulo $module deshabilitado
 # Script: FS-hardening.sh
@@ -164,14 +159,21 @@ disable_filesystem_module() {
 install $module /bin/false
 blacklist $module
 EOF
-    echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${YELLOW}    Recomendacion: Crear $conf_file con:${NC}"
-    echo -e "      install $module /bin/false"
-    echo -e "      blacklist $module"
-    WARNINGS=$((WARNINGS + 1))
-  fi
+      echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
+
+      # Si el modulo esta cargado, descargarlo
+      if lsmod | grep -q "^$module"; then
+        rmmod "$module" 2>/dev/null
+        echo -e "${GREEN}[✓] $module descargado del kernel${NC}"
+      fi
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}    Recomendacion: Crear $conf_file con:${NC}"
+      echo -e "      install $module /bin/false"
+      echo -e "      blacklist $module"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  done
 }
 
 # ==============================================
