@@ -1957,26 +1957,27 @@ show_final_summary() {
   local total=$TOTAL_TESTS
   local percentage=$((PASSED * 100 / total))
 
-  echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  VERIFICACION CIS BENCHMARK COMPLETADA${NC}"
-  echo -e "${GREEN}============================================${NC}"
-  echo -e "\n${YELLOW}RESUMEN FINAL:${NC}"
-  echo -e "  • Tests PASADOS: ${GREEN}${PASSED}${NC}"
-  echo -e "  • Tests FALLADOS (CRITICOS): ${RED}${FAILED}${NC}"
-  echo -e "  • Tests WARNING: ${YELLOW}${WARN}${NC}"
-  echo -e "  • Total tests: ${BLUE}${total}${NC}"
-  echo -e "\n${YELLOW}Porcentaje de cumplimiento: ${GREEN}${percentage}%${NC}"
-
-  echo -e "\n${YELLOW}RECOMENDACIONES GENERALES:${NC}"
-  echo -e "  • Los tests en ${RED}ROJO${NC} requieren atencion inmediata - representan riesgos de seguridad"
-  echo -e "  • Los tests en ${YELLOW}AMARILLO${NC} son mejorables - implementar segun politica"
-  echo -e "  • Revise el reporte completo en: ${REPORT_FILE}"
-
-  echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  Reporte guardado en: ${REPORT_FILE}${NC}"
-  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
-  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
-  echo -e "${GREEN}============================================${NC}"
+  # Escribir en pantalla y en log usando heredoc
+  {
+    echo -e "\n${GREEN}============================================${NC}"
+    echo -e "${GREEN}  VERIFICACION CIS BENCHMARK COMPLETADA${NC}"
+    echo -e "${GREEN}============================================${NC}"
+    echo -e "\n${YELLOW}RESUMEN FINAL:${NC}"
+    echo -e "  • Tests PASADOS: ${GREEN}${PASSED}${NC}"
+    echo -e "  • Tests FALLADOS (CRITICOS): ${RED}${FAILED}${NC}"
+    echo -e "  • Tests WARNING: ${YELLOW}${WARN}${NC}"
+    echo -e "  • Total tests: ${BLUE}${total}${NC}"
+    echo -e "\n${YELLOW}Porcentaje de cumplimiento: ${GREEN}${percentage}%${NC}"
+    echo -e "\n${YELLOW}RECOMENDACIONES GENERALES:${NC}"
+    echo -e "  • Los tests en ${RED}ROJO${NC} requieren atencion inmediata - representan riesgos de seguridad"
+    echo -e "  • Los tests en ${YELLOW}AMARILLO${NC} son mejorables - implementar segun politica"
+    echo -e "  • Revise el reporte completo en: ${REPORT_FILE}"
+    echo -e "\n${GREEN}============================================${NC}"
+    echo -e "${GREEN}  Reporte guardado en: ${REPORT_FILE}${NC}"
+    echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+    echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+    echo -e "${GREEN}============================================${NC}"
+  } | tee -a "$REPORT_FILE"
 }
 
 # ==============================================
