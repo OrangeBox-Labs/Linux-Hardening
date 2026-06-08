@@ -280,8 +280,8 @@ main() {
   echo -e "${GREEN}  Cron Hardening - CIS 5.1.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  # Modo verificación (sin --fix)
-  if [ -z "$1" ]; then
+  # Modo verificación (sin argumentos)
+  if [ $# -eq 0 ]; then
     AUTO_FIX=false
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -290,19 +290,25 @@ main() {
     echo -e "${YELLOW}Los siguientes problemas fueron detectados:${NC}\n"
   fi
 
-  # Modo automático con --fix
+  # Modo automático con --fix o -f
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     AUTO_FIX=true
     make_backup
     show_intro
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}\n"
-    show_usage
   fi
 
-  # Modo ayuda (--help)
+  # Modo ayuda
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
+  fi
+
+  # Si no es --help y no es --fix, y hay argumentos desconocidos, mostrar error
+  if [ $# -gt 0 ] && [ "$1" != "--fix" ] && [ "$1" != "-f" ] && [ "$1" != "--help" ] && [ "$1" != "-h" ]; then
+    echo -e "${RED}[!] Opción desconocida: $1${NC}"
+    show_usage
+    exit 1
   fi
 
   check_cron_enabled
