@@ -25,6 +25,24 @@ JOURNALD_CONF="/etc/systemd/journald.conf"
 BACKUP_DIR="/root/rsyslog-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./rsyslog-hardening.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./rsyslog-hardening.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -44,31 +62,6 @@ make_backup() {
 }
 
 # ==============================================
-# FUNCION PARA VERIFICAR Y CONFIGURAR
-# ==============================================
-check_config() {
-  local file="$1"
-  local pattern="$2"
-  local description="$3"
-  local expected="$4"
-
-  if grep -q "$pattern" "$file" 2>/dev/null; then
-    echo -e "${GREEN}[✓] $description${NC}"
-    return 0
-  else
-    echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-    if [ "$AUTO_FIX" = true ] && [ -n "$expected" ]; then
-      echo "$expected" >>"$file"
-      echo -e "${GREEN}[✓] Configuracion agregada: $expected${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 1
-  fi
-}
-
-# ==============================================
 # 4.2.1.1 - ENSURE RSYSLOG IS INSTALLED
 # ==============================================
 check_rsyslog_installed() {
@@ -79,10 +72,15 @@ check_rsyslog_installed() {
   else
     echo -e "${RED}[!] rsyslog no instalado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      yum install rsyslog -y 2>/dev/null || dnf install rsyslog -y 2>/dev/null
+      if command -v dnf &>/dev/null; then
+        dnf install rsyslog -y 2>/dev/null
+      else
+        yum install rsyslog -y 2>/dev/null
+      fi
       echo -e "${GREEN}[✓] rsyslog instalado${NC}"
       FIXED=$((FIXED + 1))
     else
+      echo -e "${YELLOW}    Recomendacion: Instalar rsyslog${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -155,7 +153,7 @@ check_file_permissions() {
     fi
   fi
 
-  # Verificar que no exista umask incorrecta
+  # Verificar umask
   if grep -q "^\$Umask" "$RSYSLOG_CONF" 2>/dev/null; then
     if grep -q "^\$Umask 0027" "$RSYSLOG_CONF" 2>/dev/null; then
       echo -e "${GREEN}[✓] Umask correcta (0027)${NC}"
@@ -175,13 +173,9 @@ check_file_permissions() {
 # ==============================================
 # 4.2.1.4 - ENSURE RSYSLOG CONFIGURED TO SEND LOGS TO REMOTE HOST
 # ==============================================
-# ==============================================
-# 4.2.1.4 - ENSURE RSYSLOG CONFIGURED TO SEND LOGS TO REMOTE HOST
-# ==============================================
 check_remote_logging() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.4 - Verificando envio de logs a host remoto...${NC}"
 
-  # Verificar si ya existe configuracion remota
   if grep -q "^[^#].*@.*" "$RSYSLOG_CONF" 2>/dev/null; then
     echo -e "${GREEN}[✓] Logs ya se envian a host remoto${NC}"
     local remote_dest=$(grep "^[^#].*@.*" "$RSYSLOG_CONF" | head -1)
@@ -208,14 +202,11 @@ check_remote_logging() {
         read -r remote_proto
 
         if [[ "$remote_proto" =~ ^[Tt][Cc][Pp]$ ]]; then
-          # TCP usa @@
-          local remote_config="*.* @@$remote_host:$remote_port"
+          remote_config="*.* @@$remote_host:$remote_port"
         else
-          # UDP usa @
-          local remote_config="*.* @$remote_host:$remote_port"
+          remote_config="*.* @$remote_host:$remote_port"
         fi
 
-        # Agregar configuracion al final del archivo
         echo "" >>"$RSYSLOG_CONF"
         echo "# Envio de logs a servidor remoto (CIS 4.2.1.4)" >>"$RSYSLOG_CONF"
         echo "$remote_config" >>"$RSYSLOG_CONF"
@@ -241,7 +232,6 @@ check_remote_logging() {
 check_remote_accept() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.5 - Verificando aceptacion de logs remotos...${NC}"
 
-  # Verificar si el sistema esta configurado para aceptar logs remotos
   if grep -q "^[^#].*:514" "$RSYSLOG_CONF" 2>/dev/null || grep -q "^[^#].*modload.*imtcp" "$RSYSLOG_CONF" 2>/dev/null; then
     echo -e "${YELLOW}[!] Este sistema ACEPTA logs remotos (es servidor de logs)${NC}"
     echo -e "${YELLOW}    Verificar que solo acepte de fuentes autorizadas${NC}"
@@ -260,13 +250,13 @@ configure_journald() {
   # 4.2.2.1 - ENSURE JOURNALD SENT TO RSYSLOG
   echo -e "\n${YELLOW}[*] 4.2.2.1 - Verificando envio de journald a rsyslog...${NC}"
 
-  if grep -q "^ForwardToSyslog=yes" "$JOURNALD_CONF" 2>/dev/null; then
+  if grep -q "^[#]*\s*ForwardToSyslog=yes" "$JOURNALD_CONF" 2>/dev/null; then
     echo -e "${GREEN}[✓] ForwardToSyslog=yes${NC}"
   else
-    echo -e "${RED}[!] ForwardToSyslog no configurado${NC}"
+    echo -e "${RED}[!] ForwardToSyslog no configurado correctamente${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^ForwardToSyslog" "$JOURNALD_CONF"; then
-        sed -i 's/^ForwardToSyslog.*/ForwardToSyslog=yes/' "$JOURNALD_CONF"
+      if grep -q "^[#]*\s*ForwardToSyslog" "$JOURNALD_CONF"; then
+        sed -i 's/^[#]*\s*ForwardToSyslog.*/ForwardToSyslog=yes/' "$JOURNALD_CONF"
       else
         echo "ForwardToSyslog=yes" >>"$JOURNALD_CONF"
       fi
@@ -280,13 +270,13 @@ configure_journald() {
   # 4.2.2.2 - ENSURE JOURNALD COMPRESS LARGE FILES
   echo -e "\n${YELLOW}[*] 4.2.2.2 - Verificando compresion de archivos grandes...${NC}"
 
-  if grep -q "^Compress=yes" "$JOURNALD_CONF" 2>/dev/null; then
+  if grep -q "^[#]*\s*Compress=yes" "$JOURNALD_CONF" 2>/dev/null; then
     echo -e "${GREEN}[✓] Compress=yes${NC}"
   else
-    echo -e "${RED}[!] Compress no configurado${NC}"
+    echo -e "${RED}[!] Compress no configurado correctamente${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^Compress" "$JOURNALD_CONF"; then
-        sed -i 's/^Compress.*/Compress=yes/' "$JOURNALD_CONF"
+      if grep -q "^[#]*\s*Compress" "$JOURNALD_CONF"; then
+        sed -i 's/^[#]*\s*Compress.*/Compress=yes/' "$JOURNALD_CONF"
       else
         echo "Compress=yes" >>"$JOURNALD_CONF"
       fi
@@ -300,13 +290,13 @@ configure_journald() {
   # 4.2.2.3 - ENSURE JOURNALD WRITE LOGFILES TO PERSISTENT DISK
   echo -e "\n${YELLOW}[*] 4.2.2.3 - Verificando almacenamiento persistente...${NC}"
 
-  if grep -q "^Storage=persistent" "$JOURNALD_CONF" 2>/dev/null; then
+  if grep -q "^[#]*\s*Storage=persistent" "$JOURNALD_CONF" 2>/dev/null; then
     echo -e "${GREEN}[✓] Storage=persistent${NC}"
   else
     echo -e "${RED}[!] Storage no configurado como persistente${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^Storage" "$JOURNALD_CONF"; then
-        sed -i 's/^Storage.*/Storage=persistent/' "$JOURNALD_CONF"
+      if grep -q "^[#]*\s*Storage" "$JOURNALD_CONF"; then
+        sed -i 's/^[#]*\s*Storage.*/Storage=persistent/' "$JOURNALD_CONF"
       else
         echo "Storage=persistent" >>"$JOURNALD_CONF"
       fi
@@ -355,9 +345,8 @@ check_log_permissions() {
 # REINICIAR SERVICIOS
 # ==============================================
 restart_services() {
-  echo -e "\n${BLUE}[*] Reiniciando servicios...${NC}"
-
   if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${BLUE}[*] Reiniciando servicios...${NC}"
     systemctl restart rsyslog
     systemctl restart systemd-journald
     echo -e "${GREEN}[✓] Servicios reiniciados${NC}"
@@ -369,12 +358,15 @@ restart_services() {
 # ==============================================
 show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  RSYSLOG HARDENING COMPLETADO${NC}"
+  echo -e "${GREEN}  RSYSLOG HARDENING${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VER LOGS:${NC}"
   echo -e "  tail -f /var/log/messages"
@@ -383,24 +375,11 @@ show_summary() {
   echo -e "\n${YELLOW}PARA VER ESTADO:${NC}"
   echo -e "  systemctl status rsyslog"
   echo -e "  systemctl status systemd-journald"
-}
 
-# ==============================================
-# MOSTRAR INTRO
-# ==============================================
-show_intro() {
-  echo -e "${YELLOW}"
-  echo "Este script configura rsyslog y journald segun CIS Benchmark"
-  echo ""
-  echo "LOS CAMBIOS INCLUYEN:"
-  echo "  - Permisos de archivos de log (640 para archivos, 750 para directorios)"
-  echo "  - Configuracion de journald para persistencia y compresion"
-  echo "  - Envio de logs de journald a rsyslog"
-  echo ""
-  echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
-  echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
+  echo -e "\n${GREEN}============================================${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+  echo -e "${GREEN}============================================${NC}"
 }
 
 # ==============================================
@@ -411,17 +390,30 @@ main() {
   echo -e "${GREEN}  Rsyslog Hardening - CIS 4.2.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
-    AUTO_FIX=true
-    make_backup
-    show_intro
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+  # Modo ayuda
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
+  # Modo verificación (sin --fix)
+  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
+
+  # Modo automático (--fix o -f)
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  fi
+
+  # Ejecutar verificaciones/correcciones
   check_rsyslog_installed
   check_rsyslog_enabled
   check_file_permissions
@@ -431,6 +423,10 @@ main() {
   check_log_permissions
   restart_services
   show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
