@@ -3,7 +3,7 @@
 # ==============================================
 # Script: rsyslog-hardening.sh
 # Autor: Felipe Roman
-# Web: www.orangebox.cl
+# Web: https://www.orangebox.cl
 # Email: froman@orangebox.cl
 # Descripcion: Configura rsyslog segun CIS Benchmark
 #              CIS 4.2.1 - 4.2.3
@@ -48,16 +48,60 @@ show_usage() {
 make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
-    if [ -f "$RSYSLOG_CONF" ]; then
-      cp "$RSYSLOG_CONF" "$BACKUP_DIR/"
-    fi
-    if [ -f "$JOURNALD_CONF" ]; then
-      cp "$JOURNALD_CONF" "$BACKUP_DIR/"
-    fi
-    if [ -d "$RSYSLOG_D_DIR" ]; then
-      cp -r "$RSYSLOG_D_DIR" "$BACKUP_DIR/"
-    fi
+    [ -f "$RSYSLOG_CONF" ] && cp "$RSYSLOG_CONF" "$BACKUP_DIR/"
+    [ -f "$JOURNALD_CONF" ] && cp "$JOURNALD_CONF" "$BACKUP_DIR/"
+    [ -d "$RSYSLOG_D_DIR" ] && cp -r "$RSYSLOG_D_DIR" "$BACKUP_DIR/"
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  fi
+}
+
+# ==============================================
+# FUNCION GENERICA PARA CONFIGURAR PARAMETROS DE JOURNALD
+# ==============================================
+configure_journald_param() {
+  local param="$1"
+  local expected="$2"
+  local description="$3"
+
+  # Buscar linea existente (comentada o activa)
+  if grep -q "^[#]*\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
+    # Verificar si esta comentada
+    if grep -q "^#\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
+      echo -e "${YELLOW}[!] $description esta comentado${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i "s/^#\s*${param}=${expected}/${param}=${expected}/" "$JOURNALD_CONF"
+        echo -e "${GREEN}[✓] $description descomentado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      echo -e "${GREEN}[✓] $description${NC}"
+    fi
+    return 0
+  fi
+
+  # Buscar si existe con otro valor
+  if grep -q "^[#]*\s*${param}=" "$JOURNALD_CONF" 2>/dev/null; then
+    echo -e "${RED}[!] $description tiene valor incorrecto${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      sed -i "s/^[#]*\s*${param}=.*/${param}=${expected}/" "$JOURNALD_CONF"
+      echo -e "${GREEN}[✓] $description corregido a ${expected}${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
+
+  # No existe la linea
+  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
+  if [ "$AUTO_FIX" = true ]; then
+    echo "${param}=${expected}" >>"$JOURNALD_CONF"
+    echo -e "${GREEN}[✓] $description configurado como ${expected}${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -125,13 +169,24 @@ check_rsyslog_enabled() {
 check_file_permissions() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.3 - Verificando permisos de archivos de log...${NC}"
 
-  # Verificar o agregar directiva $FileCreateMode
+  # $FileCreateMode
   if grep -q "^\$FileCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] FileCreateMode configurado${NC}"
+    if grep -q "^\$FileCreateMode 0640" "$RSYSLOG_CONF" 2>/dev/null; then
+      echo -e "${GREEN}[✓] FileCreateMode 0640${NC}"
+    else
+      echo -e "${RED}[!] FileCreateMode valor incorrecto${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i 's/^\$FileCreateMode.*/$FileCreateMode 0640/' "$RSYSLOG_CONF"
+        echo -e "${GREEN}[✓] FileCreateMode corregido a 0640${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    fi
   else
     echo -e "${RED}[!] FileCreateMode no configurado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      echo "\$FileCreateMode 0640" >>"$RSYSLOG_CONF"
+      echo '$FileCreateMode 0640' >>"$RSYSLOG_CONF"
       echo -e "${GREEN}[✓] FileCreateMode 0640 agregado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -139,13 +194,24 @@ check_file_permissions() {
     fi
   fi
 
-  # Verificar o agregar directiva $DirCreateMode
+  # $DirCreateMode
   if grep -q "^\$DirCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] DirCreateMode configurado${NC}"
+    if grep -q "^\$DirCreateMode 0750" "$RSYSLOG_CONF" 2>/dev/null; then
+      echo -e "${GREEN}[✓] DirCreateMode 0750${NC}"
+    else
+      echo -e "${RED}[!] DirCreateMode valor incorrecto${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i 's/^\$DirCreateMode.*/$DirCreateMode 0750/' "$RSYSLOG_CONF"
+        echo -e "${GREEN}[✓] DirCreateMode corregido a 0750${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    fi
   else
     echo -e "${RED}[!] DirCreateMode no configurado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      echo "\$DirCreateMode 0750" >>"$RSYSLOG_CONF"
+      echo '$DirCreateMode 0750' >>"$RSYSLOG_CONF"
       echo -e "${GREEN}[✓] DirCreateMode 0750 agregado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -153,20 +219,22 @@ check_file_permissions() {
     fi
   fi
 
-  # Verificar umask
+  # $Umask
   if grep -q "^\$Umask" "$RSYSLOG_CONF" 2>/dev/null; then
     if grep -q "^\$Umask 0027" "$RSYSLOG_CONF" 2>/dev/null; then
-      echo -e "${GREEN}[✓] Umask correcta (0027)${NC}"
+      echo -e "${GREEN}[✓] Umask 0027${NC}"
     else
-      echo -e "${RED}[!] Umask incorrecta${NC}"
+      echo -e "${RED}[!] Umask valor incorrecto${NC}"
       if [ "$AUTO_FIX" = true ]; then
-        sed -i 's/^\$Umask.*/\$Umask 0027/' "$RSYSLOG_CONF"
-        echo -e "${GREEN}[✓] Umask corregida a 0027${NC}"
+        sed -i 's/^\$Umask.*/$Umask 0027/' "$RSYSLOG_CONF"
+        echo -e "${GREEN}[✓] Umask corregido a 0027${NC}"
         FIXED=$((FIXED + 1))
       else
         WARNINGS=$((WARNINGS + 1))
       fi
     fi
+  else
+    echo -e "${YELLOW}[!] Umask no configurado (opcional)${NC}"
   fi
 }
 
@@ -211,10 +279,10 @@ check_remote_logging() {
         echo "# Envio de logs a servidor remoto (CIS 4.2.1.4)" >>"$RSYSLOG_CONF"
         echo "$remote_config" >>"$RSYSLOG_CONF"
 
-        echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port ($remote_proto)${NC}"
+        echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port${NC}"
         FIXED=$((FIXED + 1))
       else
-        echo -e "${RED}[!] No se ingreso destino remoto, omitiendo configuracion${NC}"
+        echo -e "${RED}[!] No se ingreso destino remoto${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
     else
@@ -242,71 +310,25 @@ check_remote_accept() {
 }
 
 # ==============================================
-# CONFIGURAR JOURNALD
+# CONFIGURAR JOURNALD (usando funcion generica)
 # ==============================================
 configure_journald() {
   echo -e "\n${BLUE}[*] Configurando journald...${NC}"
-
-  # 4.2.2.1 - ENSURE JOURNALD SENT TO RSYSLOG
   echo -e "\n${YELLOW}[*] 4.2.2.1 - Verificando envio de journald a rsyslog...${NC}"
+  configure_journald_param "ForwardToSyslog" "yes" "ForwardToSyslog"
 
-  if grep -q "^[#]*\s*ForwardToSyslog=yes" "$JOURNALD_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] ForwardToSyslog=yes${NC}"
-  else
-    echo -e "${RED}[!] ForwardToSyslog no configurado correctamente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^[#]*\s*ForwardToSyslog" "$JOURNALD_CONF"; then
-        sed -i 's/^[#]*\s*ForwardToSyslog.*/ForwardToSyslog=yes/' "$JOURNALD_CONF"
-      else
-        echo "ForwardToSyslog=yes" >>"$JOURNALD_CONF"
-      fi
-      echo -e "${GREEN}[✓] ForwardToSyslog=yes configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  # 4.2.2.2 - ENSURE JOURNALD COMPRESS LARGE FILES
   echo -e "\n${YELLOW}[*] 4.2.2.2 - Verificando compresion de archivos grandes...${NC}"
+  configure_journald_param "Compress" "yes" "Compress"
 
-  if grep -q "^[#]*\s*Compress=yes" "$JOURNALD_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] Compress=yes${NC}"
-  else
-    echo -e "${RED}[!] Compress no configurado correctamente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^[#]*\s*Compress" "$JOURNALD_CONF"; then
-        sed -i 's/^[#]*\s*Compress.*/Compress=yes/' "$JOURNALD_CONF"
-      else
-        echo "Compress=yes" >>"$JOURNALD_CONF"
-      fi
-      echo -e "${GREEN}[✓] Compress=yes configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  # 4.2.2.3 - ENSURE JOURNALD WRITE LOGFILES TO PERSISTENT DISK
   echo -e "\n${YELLOW}[*] 4.2.2.3 - Verificando almacenamiento persistente...${NC}"
+  configure_journald_param "Storage" "persistent" "Storage"
 
-  if grep -q "^[#]*\s*Storage=persistent" "$JOURNALD_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] Storage=persistent${NC}"
-  else
-    echo -e "${RED}[!] Storage no configurado como persistente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if grep -q "^[#]*\s*Storage" "$JOURNALD_CONF"; then
-        sed -i 's/^[#]*\s*Storage.*/Storage=persistent/' "$JOURNALD_CONF"
-      else
-        echo "Storage=persistent" >>"$JOURNALD_CONF"
-      fi
-      echo -e "${GREEN}[✓] Storage=persistent configurado${NC}"
-      mkdir -p /var/log/journal
-      systemctl restart systemd-journald
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
+  # Crear directorio para journal persistente si es necesario
+  if [ "$AUTO_FIX" = true ] && [ ! -d /var/log/journal ]; then
+    mkdir -p /var/log/journal
+    systemctl restart systemd-journald
+    echo -e "${GREEN}[✓] Directorio /var/log/journal creado${NC}"
+    FIXED=$((FIXED + 1))
   fi
 }
 
@@ -396,7 +418,7 @@ main() {
     exit 0
   fi
 
-  # Modo verificación (sin --fix)
+  # Modo verificación
   if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -405,7 +427,7 @@ main() {
     AUTO_FIX=false
   fi
 
-  # Modo automático (--fix o -f)
+  # Modo automático
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -413,7 +435,7 @@ main() {
     make_backup
   fi
 
-  # Ejecutar verificaciones/correcciones
+  # Ejecutar verificaciones
   check_rsyslog_installed
   check_rsyslog_enabled
   check_file_permissions
