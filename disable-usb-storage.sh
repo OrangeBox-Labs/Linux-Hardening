@@ -54,8 +54,7 @@ disable_usb_storage() {
       echo -e "${GREEN}[✓] usb-storage deshabilitado${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: Crear $CONF_FILE con 'install usb-storage /bin/true'${NC}"
-      echo -e "${YELLOW}    Luego ejecutar: rmmod usb-storage${NC}"
+      echo -e "${YELLOW}    Para corregir ejecutar: ./disable-usb-storage.sh --fix${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
