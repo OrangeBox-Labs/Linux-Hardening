@@ -22,6 +22,25 @@ AUTO_FIX=false
 BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
+# FUNCION PARA MOSTRAR AYUDA
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./cron-hardening.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./cron-hardening.sh --fix"
+  echo ""
+  echo -e "${YELLOW}NOTA:${NC} Se requiere acceso root para ejecutar este script"
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -257,25 +276,33 @@ show_intro() {
 # ==============================================
 main() {
 
-  # Detectar si el script se ejecutó con --fix
-  if [[ ! "$*" =~ --fix ]]; then
-    show_intro
-    echo "Modo verificación: use --fix para aplicar cambios"
-    exit 0
-  fi
-
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Cron Hardening - CIS 5.1.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
+  # Modo verificación (sin --fix)
+  if [ -z "$1" ]; then
+    AUTO_FIX=false
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo ""
+    echo -e "${YELLOW}Los siguientes problemas fueron detectados:${NC}\n"
+  fi
+
+  # Modo automático con --fix
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     AUTO_FIX=true
     make_backup
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+    show_intro
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}\n"
+    show_usage
+  fi
+
+  # Modo ayuda (--help)
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
   check_cron_enabled
