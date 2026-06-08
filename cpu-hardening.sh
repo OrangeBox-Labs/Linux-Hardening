@@ -268,7 +268,7 @@ main() {
   echo -e "${GREEN}============================================${NC}"
 
   if [ $WARNINGS -gt 0 ]; then
-    echo -e "  • Para corregir ejecuta: ./cpu-hardening.sh --fix \n"
+    echo -e "\n  • Para corregir ejecuta: ./cpu-hardening.sh --fix \n"
   fi
 
   if [ $FIXED -gt 0 ]; then
