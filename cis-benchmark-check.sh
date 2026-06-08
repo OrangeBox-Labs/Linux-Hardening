@@ -91,30 +91,69 @@ is_system_account() {
 }
 
 # ==============================================
-# 1.1.1.1 - DESHABILITAR SQUASHFS
+# 1.1.1.1 - DESHABILITAR SQUASHFS (CORREGIDO)
 # ==============================================
 check_squashfs() {
-  if modprobe -n -v squashfs 2>&1 | grep -q "install /bin/false\|not found"; then
-    if ! lsmod | grep -q "^squashfs"; then
-      log_result "PASS" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "" "" "$GREEN"
+  local module="squashfs"
+  local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
+
+  # Verificar si el modulo existe en el sistema
+  if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
+    log_result "PASS" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "El modulo no existe en el sistema" "" "$GREEN"
+    return 0
+  fi
+
+  # Verificar si esta deshabilitado por configuracion
+  if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
+    # Verificar si esta cargado actualmente
+    if lsmod | grep -q "^$module"; then
+      log_result "WARN" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "Modulo configurado para no cargarse, pero actualmente esta cargado" "Ejecutar: rmmod $module para descargarlo" "$YELLOW"
+      return 2
+    else
+      log_result "PASS" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "Modulo configurado para no cargarse y no esta activo" "" "$GREEN"
       return 0
     fi
   fi
-  log_result "FAIL" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "El modulo squashfs esta habilitado" "Crear archivo /etc/modprobe.d/squashfs.conf con: install squashfs /bin/false y blacklist squashfs. Luego ejecutar: rmmod squashfs" "$RED"
+
+  # Verificar si el modulo esta cargado actualmente
+  if lsmod | grep -q "^$module"; then
+    log_result "FAIL" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "El modulo esta cargado y no configurado para bloquearse" "Crear archivo /etc/modprobe.d/99-disable-squashfs.conf con: install squashfs /bin/false y blacklist squashfs. Luego ejecutar: rmmod squashfs" "$RED"
+    return 1
+  fi
+
+  # Si llego aqui, el modulo existe pero no esta cargado ni configurado
+  log_result "FAIL" "1.1.1.1 - Deshabilitar montaje de sistemas de archivos squashfs" "El modulo puede ser cargado (no configurado para bloquearse)" "Crear archivo /etc/modprobe.d/99-disable-squashfs.conf con: install squashfs /bin/false y blacklist squashfs" "$RED"
   return 1
 }
 
 # ==============================================
-# 1.1.1.2 - DESHABILITAR UDF
+# 1.1.1.2 - DESHABILITAR UDF (CORREGIDO)
 # ==============================================
 check_udf() {
-  if modprobe -n -v udf 2>&1 | grep -q "install /bin/false\|not found"; then
-    if ! lsmod | grep -q "^udf"; then
-      log_result "PASS" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "" "" "$GREEN"
+  local module="udf"
+  local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
+
+  if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
+    log_result "PASS" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "El modulo no existe en el sistema" "" "$GREEN"
+    return 0
+  fi
+
+  if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
+    if lsmod | grep -q "^$module"; then
+      log_result "WARN" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "Modulo configurado para no cargarse, pero actualmente esta cargado" "Ejecutar: rmmod $module" "$YELLOW"
+      return 2
+    else
+      log_result "PASS" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "Modulo configurado para no cargarse y no esta activo" "" "$GREEN"
       return 0
     fi
   fi
-  log_result "FAIL" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "El modulo udf esta habilitado" "Crear archivo /etc/modprobe.d/udf.conf con: install udf /bin/false y blacklist udf. Luego ejecutar: rmmod udf" "$RED"
+
+  if lsmod | grep -q "^$module"; then
+    log_result "FAIL" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "El modulo esta cargado y no configurado" "Crear archivo /etc/modprobe.d/99-disable-udf.conf con: install udf /bin/false y blacklist udf. Luego ejecutar: rmmod udf" "$RED"
+    return 1
+  fi
+
+  log_result "FAIL" "1.1.1.2 - Deshabilitar montaje de sistemas de archivos udf" "El modulo puede ser cargado (no configurado para bloquearse)" "Crear archivo /etc/modprobe.d/99-disable-udf.conf con: install udf /bin/false y blacklist udf" "$RED"
   return 1
 }
 
