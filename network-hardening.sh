@@ -3,11 +3,11 @@
 # ==============================================
 # Script: network-hardening.sh
 # Autor: Felipe Roman
-# Web: www.orangebox.cl
+# Web: https://www.orangebox.cl
 # Email: froman@orangebox.cl
-# Descripcion: Hardening de red - CIS 3.2.x, 3.3.x, 3.4.x
-#              Solo aplica sysctl y deshabilita modulos
-#              NO cambia reglas de firewall
+# Descripcion: Hardening de red - CIS 3.1.x, 3.2.x, 3.3.x, 3.4.x
+#              Aplica sysctl, deshabilita modulos peligrosos
+#              NO cambia reglas de firewall existentes
 # ==============================================
 
 RED='\033[0;31m'
@@ -22,6 +22,25 @@ AUTO_FIX=false
 
 SYSCTL_FILE="/etc/sysctl.d/99-network-hardening.conf"
 BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
+
+# ==============================================
+# LISTA DE MODULOS A DESHABILITAR
+# ==============================================
+MODULES_TO_DISABLE=(
+  "tipc:Transparent Inter-Process Communication (cluster communication)"
+  "dccp:Datagram Congestion Control Protocol (streaming multimedia)"
+  "sctp:Stream Control Transmission Protocol (telefonia IP)"
+  "rds:Reliable Datagram Sockets (Oracle RDS)"
+  "atm:Asynchronous Transfer Mode"
+  "decnet:Digital Equipment Corporation DECnet"
+  "llc2:Logical Link Control type 2"
+  "psnap:SubNetwork Attachment Point"
+  "appletalk:AppleTalk"
+  "ipx:Internetwork Packet Exchange"
+  "ax25:Amateur Radio X.25"
+  "netrom:NET/ROM (amateur radio)"
+  "rose:Rose (amateur radio)"
+)
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
@@ -47,15 +66,14 @@ show_usage() {
 make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
-    if [ -f /etc/sysctl.conf ]; then
-      cp /etc/sysctl.conf "$BACKUP_DIR/"
-    fi
+    [ -f /etc/sysctl.conf ] && cp /etc/sysctl.conf "$BACKUP_DIR/"
+    [ -d /etc/modprobe.d ] && cp -r /etc/modprobe.d "$BACKUP_DIR/"
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
   fi
 }
 
 # ==============================================
-# FUNCION PARA CONFIGURAR SYSCTL
+# FUNCION PARA CONFIGURAR SYSCTL (maneja comentados)
 # ==============================================
 set_sysctl() {
   local param=$1
@@ -68,16 +86,41 @@ set_sysctl() {
     return 0
   fi
 
-  echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    if grep -q "^$param" "$SYSCTL_FILE" 2>/dev/null; then
-      sed -i "s/^$param.*/$param = $value/" "$SYSCTL_FILE"
-    else
-      echo "$param = $value" >>"$SYSCTL_FILE"
+  # Verificar si existe en el archivo (comentado o activo)
+  if grep -q "^[#]*\s*${param}\s*=" "$SYSCTL_FILE" 2>/dev/null; then
+    # Verificar si esta comentado con el valor correcto
+    if grep -q "^#\s*${param}\s*=\s*${value}" "$SYSCTL_FILE" 2>/dev/null; then
+      echo -e "${YELLOW}[!] $description esta comentado${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i "s/^#\s*${param}\s*=.*/${param} = ${value}/" "$SYSCTL_FILE"
+        sysctl -w "$param=$value" >/dev/null 2>&1
+        echo -e "${GREEN}[✓] $description descomentado y corregido: $value${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+      return 0
     fi
+
+    # Existe con otro valor (comentado o activo)
+    echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      sed -i "s/^[#]*\s*${param}\s*=.*/${param} = ${value}/" "$SYSCTL_FILE"
+      sysctl -w "$param=$value" >/dev/null 2>&1
+      echo -e "${GREEN}[✓] $description corregido: $value${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
+
+  # No existe la linea
+  echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
+  if [ "$AUTO_FIX" = true ]; then
+    echo "$param = $value" >>"$SYSCTL_FILE"
     sysctl -w "$param=$value" >/dev/null 2>&1
-    echo -e "${GREEN}[✓] $description corregido: $value${NC}"
+    echo -e "${GREEN}[✓] $description configurado: $value${NC}"
     FIXED=$((FIXED + 1))
   else
     WARNINGS=$((WARNINGS + 1))
@@ -85,28 +128,57 @@ set_sysctl() {
 }
 
 # ==============================================
-# FUNCION PARA VERIFICAR MODULO
+# FUNCION PARA DESHABILITAR MODULO (maneja comentados)
 # ==============================================
-check_module() {
+disable_module() {
   local module=$1
   local description=$2
+  local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
 
   echo -e "\n${BLUE}[*] Verificando modulo: $module - $description${NC}"
 
-  if lsmod | grep -q "^$module"; then
-    echo -e "${RED}[!] $module esta CARGADO${NC}"
+  # Verificar si el modulo existe en el sistema
+  if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
+    echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
+    return 0
+  fi
 
+  # Verificar si ya esta deshabilitado
+  if [ -f "$conf_file" ] && grep -q "^install $module /bin/false" "$conf_file" 2>/dev/null; then
+    echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
+    return 0
+  fi
+
+  # Verificar si existe configuracion comentada
+  if [ -f "$conf_file" ] && grep -q "^#\s*install $module /bin/false" "$conf_file" 2>/dev/null; then
+    echo -e "${YELLOW}[!] $module configuracion comentada${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      rmmod "$module" 2>/dev/null
-      echo "install $module /bin/true" >"/etc/modprobe.d/${module}.conf"
-      echo -e "${GREEN}[✓] $module deshabilitado${NC}"
+      sed -i "s/^#\s*install $module \/bin\/false/install $module \/bin\/false/" "$conf_file"
+      sed -i "s/^#\s*blacklist $module/blacklist $module/" "$conf_file"
+      echo -e "${GREEN}[✓] $module configuracion descomentada${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: Deshabilitar $module${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
+    return 0
+  fi
+
+  echo -e "${RED}[!] $module existe - debe deshabilitarse${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo "install $module /bin/false" >"$conf_file"
+    echo "blacklist $module" >>"$conf_file"
+
+    if lsmod | grep -q "^$module"; then
+      rmmod "$module" 2>/dev/null
+      echo -e "${GREEN}[✓] $module descargado${NC}"
+    fi
+
+    echo -e "${GREEN}[✓] $module deshabilitado${NC}"
+    FIXED=$((FIXED + 1))
   else
-    echo -e "${GREEN}[✓] $module no esta cargado${NC}"
+    echo -e "${YELLOW}    Recomendacion: Deshabilitar $module${NC}"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -181,8 +253,44 @@ flush_routes() {
 # ==============================================
 show_header() {
   echo -e "${GREEN}============================================${NC}"
-  echo -e "${GREEN}  Network Hardening - CIS 3.2.x - 3.4.x${NC}"
+  echo -e "${GREEN}  Network Hardening - CIS 3.1.x - 3.4.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
+}
+
+# ==============================================
+# 3.1.2 - DISABLE DCCP
+# ==============================================
+disable_dccp() {
+  echo -e "\n${BLUE}[*] CIS 3.1.2 - Deshabilitando DCCP${NC}"
+  echo -e "${YELLOW}    Datagram Congestion Control Protocol (streaming multimedia)${NC}"
+  disable_module "dccp" "DCCP"
+}
+
+# ==============================================
+# 3.1.3 - DISABLE TIPC
+# ==============================================
+disable_tipc() {
+  echo -e "\n${BLUE}[*] CIS 3.1.3 - Deshabilitando TIPC${NC}"
+  echo -e "${YELLOW}    Transparent Inter-Process Communication (cluster communication)${NC}"
+  disable_module "tipc" "TIPC"
+}
+
+# ==============================================
+# 3.1.4 - DISABLE SCTP
+# ==============================================
+disable_sctp() {
+  echo -e "\n${BLUE}[*] CIS 3.1.4 - Deshabilitando SCTP${NC}"
+  echo -e "${YELLOW}    Stream Control Transmission Protocol (telefonia IP)${NC}"
+  disable_module "sctp" "SCTP"
+}
+
+# ==============================================
+# 3.1.5 - DISABLE RDS
+# ==============================================
+disable_rds() {
+  echo -e "\n${BLUE}[*] CIS 3.1.5 - Deshabilitando RDS${NC}"
+  echo -e "${YELLOW}    Reliable Datagram Sockets (Oracle RDS)${NC}"
+  disable_module "rds" "RDS"
 }
 
 # ==============================================
@@ -232,6 +340,7 @@ disable_secure_redirects() {
 log_martians() {
   echo -e "\n${BLUE}[*] CIS 3.3.4 - Habilitando logging de paquetes sospechosos${NC}"
   echo -e "${YELLOW}    Registra paquetes con direcciones origen no enrutables (martians)${NC}"
+  echo -e "${RED}    NOTA: Esto puede llenar logs rapidamente en entornos con mucho trafico${NC}"
 
   set_sysctl "net.ipv4.conf.all.log_martians" "1" "net.ipv4.conf.all.log_martians"
   set_sysctl "net.ipv4.conf.default.log_martians" "1" "net.ipv4.conf.default.log_martians"
@@ -301,20 +410,6 @@ disable_ipv6_ra() {
 }
 
 # ==============================================
-# 3.4.1 - DISABLE DCCP
-# ==============================================
-check_dccp() {
-  check_module "dccp" "Datagram Congestion Control Protocol (streaming multimedia)"
-}
-
-# ==============================================
-# 3.4.2 - DISABLE SCTP
-# ==============================================
-check_sctp() {
-  check_module "sctp" "Stream Control Transmission Protocol (telefonia IP)"
-}
-
-# ==============================================
 # MOSTRAR RESUMEN FINAL
 # ==============================================
 show_summary() {
@@ -336,6 +431,14 @@ show_summary() {
   echo -e "  sysctl net.ipv4.conf.all.log_martians"
   echo -e "  sysctl net.ipv4.tcp_syncookies"
   echo -e "  sysctl net.ipv4.conf.all.rp_filter"
+
+  echo -e "\n${YELLOW}MODULOS DESHABILITADOS:${NC}"
+  echo -e "  lsmod | grep -E 'tipc|dccp|sctp|rds|atm'"
+
+  echo -e "\n${GREEN}============================================${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+  echo -e "${GREEN}============================================${NC}"
 }
 
 # ==============================================
@@ -367,7 +470,20 @@ main() {
     make_backup
   fi
 
-  # Ejecutar todas las verificaciones/correcciones
+  # Deshabilitar modulos de red peligrosos (CIS 3.1.x)
+  disable_dccp
+  disable_tipc
+  disable_sctp
+  disable_rds
+
+  # Modulos adicionales no CIS pero recomendados
+  for item in "${MODULES_TO_DISABLE[@]}"; do
+    module="${item%%:*}"
+    desc="${item##*:}"
+    disable_module "$module" "$desc"
+  done
+
+  # Configuraciones sysctl (CIS 3.2.x - 3.3.x)
   disable_send_redirects
   disable_source_route
   disable_secure_redirects
@@ -378,9 +494,7 @@ main() {
   enable_syncookies
   disable_ipv6_ra
 
-  # Verificar modulos
-  check_dccp
-  check_sctp
+  # Verificar conflictos de firewall
   check_firewall_conflicts
 
   show_summary
