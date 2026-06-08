@@ -320,18 +320,18 @@ main() {
     echo -e "${YELLOW}[!] Modo automatico: se aplicaran correcciones sin preguntar${NC}"
     echo -e "${YELLOW}[!] 3 segundos para cancelar (Ctrl+C)...${NC}"
     sleep 3
-  fi
 
-  restrict_core_dumps
-  limit_nproc
-  limit_nofile
-  limit_maxlogins
-  restrict_dmesg
-  restrict_ptrace
-  hide_kernel_addresses
-  protect_filesystem
-  network_hardening
-  memory_security
+    restrict_core_dumps
+    limit_nproc
+    limit_nofile
+    limit_maxlogins
+    restrict_dmesg
+    restrict_ptrace
+    hide_kernel_addresses
+    protect_filesystem
+    network_hardening
+    memory_security
+  fi
 
   echo -e "\n${GREEN}============================================${NC}"
   echo -e "${GREEN}  RESUMEN${NC}"
