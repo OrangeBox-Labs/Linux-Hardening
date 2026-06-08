@@ -415,12 +415,10 @@ EOF
 # REINICIAR AUDITD
 # ==============================================
 restart_auditd() {
-  echo -e "\n${BLUE}[*] Reiniciando auditd...${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    systemctl restart auditd
-    echo -e "${GREEN}[✓] auditd reiniciado${NC}"
-  fi
+  echo -e "\n${RED}[*] Auditd se ejecuta en modo inmutable, no puede ser reiniciado...${NC}"
+  echo -e "${RED}[!] Reinicia tu servidor para aplicar los cambios${NC}"
+  echo -e "${GREEN}[!] Presiona ENTER para continuar.${NC}"
+  read
 }
 
 # ==============================================
