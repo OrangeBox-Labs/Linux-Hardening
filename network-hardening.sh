@@ -24,6 +24,24 @@ SYSCTL_FILE="/etc/sysctl.d/99-network-hardening.conf"
 BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./network-hardening.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./network-hardening.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -42,14 +60,15 @@ make_backup() {
 set_sysctl() {
   local param=$1
   local value=$2
+  local description="${3:-$param}"
   local current=$(sysctl -n "$param" 2>/dev/null)
 
   if [ "$current" = "$value" ]; then
-    echo -e "${GREEN}[✓] $param = $value (ya configurado)${NC}"
+    echo -e "${GREEN}[✓] $description = $value${NC}"
     return 0
   fi
 
-  echo -e "${RED}[!] $param = $current (debe ser $value)${NC}"
+  echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
     if grep -q "^$param" "$SYSCTL_FILE" 2>/dev/null; then
@@ -58,7 +77,7 @@ set_sysctl() {
       echo "$param = $value" >>"$SYSCTL_FILE"
     fi
     sysctl -w "$param=$value" >/dev/null 2>&1
-    echo -e "${GREEN}[✓] $param = $value aplicado${NC}"
+    echo -e "${GREEN}[✓] $description corregido: $value${NC}"
     FIXED=$((FIXED + 1))
   else
     WARNINGS=$((WARNINGS + 1))
@@ -78,7 +97,6 @@ check_module() {
     echo -e "${RED}[!] $module esta CARGADO${NC}"
 
     if [ "$AUTO_FIX" = true ]; then
-      echo -e "${YELLOW}[*] Deshabilitando $module...${NC}"
       rmmod "$module" 2>/dev/null
       echo "install $module /bin/true" >"/etc/modprobe.d/${module}.conf"
       echo -e "${GREEN}[✓] $module deshabilitado${NC}"
@@ -89,11 +107,6 @@ check_module() {
     fi
   else
     echo -e "${GREEN}[✓] $module no esta cargado${NC}"
-
-    # Verificar si esta bloqueado
-    if [ -f "/etc/modprobe.d/${module}.conf" ]; then
-      echo -e "${GREEN}[✓] $module ya estaba bloqueado${NC}"
-    fi
   fi
 }
 
@@ -135,7 +148,6 @@ check_firewall_conflicts() {
   echo -e "  nftables: instalado=$nftables_installed activo=$nftables_active"
   echo -e "  iptables: instalado=$iptables_installed activo=$iptables_active"
 
-  # Contar cuantos estan activos
   local active_count=0
   [ "$firewalld_active" = true ] && active_count=$((active_count + 1))
   [ "$nftables_active" = true ] && active_count=$((active_count + 1))
@@ -143,13 +155,14 @@ check_firewall_conflicts() {
 
   if [ $active_count -gt 1 ]; then
     echo -e "${RED}[!] ADVERTENCIA: Multiples firewalls activos ($active_count)${NC}"
-    echo -e "${YELLOW}    Esto puede causar conflictos. Se recomienda tener solo uno activo.${NC}"
+    echo -e "${YELLOW}    Recomendacion: Tener solo un firewall activo${NC}"
     WARNINGS=$((WARNINGS + 1))
   elif [ $active_count -eq 0 ]; then
-    echo -e "${YELLOW}[!] No hay firewall activo. Considere activar iptables.${NC}"
+    echo -e "${YELLOW}[!] No hay firewall activo${NC}"
+    echo -e "${YELLOW}    Recomendacion: Activar iptables${NC}"
     WARNINGS=$((WARNINGS + 1))
   else
-    echo -e "${GREEN}[✓] Solo un firewall activo, no hay conflicto${NC}"
+    echo -e "${GREEN}[✓] Solo un firewall activo${NC}"
   fi
 }
 
@@ -179,8 +192,8 @@ disable_send_redirects() {
   echo -e "\n${BLUE}[*] CIS 3.2.2 - Deshabilitando envio de redirecciones ICMP${NC}"
   echo -e "${YELLOW}    Previene que el sistema sea usado para ataques MITM${NC}"
 
-  set_sysctl "net.ipv4.conf.all.send_redirects" "0"
-  set_sysctl "net.ipv4.conf.default.send_redirects" "0"
+  set_sysctl "net.ipv4.conf.all.send_redirects" "0" "net.ipv4.conf.all.send_redirects"
+  set_sysctl "net.ipv4.conf.default.send_redirects" "0" "net.ipv4.conf.default.send_redirects"
   flush_routes
 }
 
@@ -191,12 +204,12 @@ disable_source_route() {
   echo -e "\n${BLUE}[*] CIS 3.3.1 - Deshabilitando paquetes con enrutamiento origen${NC}"
   echo -e "${YELLOW}    Previene ataques de spoofing y redireccion de trafico${NC}"
 
-  set_sysctl "net.ipv4.conf.all.accept_source_route" "0"
-  set_sysctl "net.ipv4.conf.default.accept_source_route" "0"
+  set_sysctl "net.ipv4.conf.all.accept_source_route" "0" "net.ipv4.conf.all.accept_source_route"
+  set_sysctl "net.ipv4.conf.default.accept_source_route" "0" "net.ipv4.conf.default.accept_source_route"
 
   if [ -d /proc/sys/net/ipv6 ]; then
-    set_sysctl "net.ipv6.conf.all.accept_source_route" "0"
-    set_sysctl "net.ipv6.conf.default.accept_source_route" "0"
+    set_sysctl "net.ipv6.conf.all.accept_source_route" "0" "net.ipv6.conf.all.accept_source_route"
+    set_sysctl "net.ipv6.conf.default.accept_source_route" "0" "net.ipv6.conf.default.accept_source_route"
   fi
   flush_routes
 }
@@ -208,8 +221,8 @@ disable_secure_redirects() {
   echo -e "\n${BLUE}[*] CIS 3.3.3 - Deshabilitando redirecciones ICMP seguras${NC}"
   echo -e "${YELLOW}    Previene actualizacion de tabla de enrutamiento por gateways comprometidos${NC}"
 
-  set_sysctl "net.ipv4.conf.all.secure_redirects" "0"
-  set_sysctl "net.ipv4.conf.default.secure_redirects" "0"
+  set_sysctl "net.ipv4.conf.all.secure_redirects" "0" "net.ipv4.conf.all.secure_redirects"
+  set_sysctl "net.ipv4.conf.default.secure_redirects" "0" "net.ipv4.conf.default.secure_redirects"
   flush_routes
 }
 
@@ -220,8 +233,8 @@ log_martians() {
   echo -e "\n${BLUE}[*] CIS 3.3.4 - Habilitando logging de paquetes sospechosos${NC}"
   echo -e "${YELLOW}    Registra paquetes con direcciones origen no enrutables (martians)${NC}"
 
-  set_sysctl "net.ipv4.conf.all.log_martians" "1"
-  set_sysctl "net.ipv4.conf.default.log_martians" "1"
+  set_sysctl "net.ipv4.conf.all.log_martians" "1" "net.ipv4.conf.all.log_martians"
+  set_sysctl "net.ipv4.conf.default.log_martians" "1" "net.ipv4.conf.default.log_martians"
   flush_routes
 }
 
@@ -232,7 +245,7 @@ ignore_broadcast_icmp() {
   echo -e "\n${BLUE}[*] CIS 3.3.5 - Ignorando peticiones ICMP broadcast${NC}"
   echo -e "${YELLOW}    Previene ataques Smurf (amplificacion de trafico)${NC}"
 
-  set_sysctl "net.ipv4.icmp_echo_ignore_broadcasts" "1"
+  set_sysctl "net.ipv4.icmp_echo_ignore_broadcasts" "1" "net.ipv4.icmp_echo_ignore_broadcasts"
   flush_routes
 }
 
@@ -243,7 +256,7 @@ ignore_bogus_icmp() {
   echo -e "\n${BLUE}[*] CIS 3.3.6 - Ignorando respuestas ICMP falsas${NC}"
   echo -e "${YELLOW}    Previene llenado de logs con respuestas no conformes a RFC-1122${NC}"
 
-  set_sysctl "net.ipv4.icmp_ignore_bogus_error_responses" "1"
+  set_sysctl "net.ipv4.icmp_ignore_bogus_error_responses" "1" "net.ipv4.icmp_ignore_bogus_error_responses"
   flush_routes
 }
 
@@ -255,8 +268,8 @@ enable_rp_filter() {
   echo -e "${YELLOW}    Previene ataques de spoofing verificando que el paquete venga por la interfaz correcta${NC}"
   echo -e "${RED}    NOTA: Puede causar problemas si se utiliza enrutamiento asimetrico (BGP, OSPF)${NC}"
 
-  set_sysctl "net.ipv4.conf.all.rp_filter" "1"
-  set_sysctl "net.ipv4.conf.default.rp_filter" "1"
+  set_sysctl "net.ipv4.conf.all.rp_filter" "1" "net.ipv4.conf.all.rp_filter"
+  set_sysctl "net.ipv4.conf.default.rp_filter" "1" "net.ipv4.conf.default.rp_filter"
   flush_routes
 }
 
@@ -267,7 +280,7 @@ enable_syncookies() {
   echo -e "\n${BLUE}[*] CIS 3.3.8 - Habilitando SYN Cookies${NC}"
   echo -e "${YELLOW}    Previene ataques de denial of service por inundacion SYN${NC}"
 
-  set_sysctl "net.ipv4.tcp_syncookies" "1"
+  set_sysctl "net.ipv4.tcp_syncookies" "1" "net.ipv4.tcp_syncookies"
   flush_routes
 }
 
@@ -279,8 +292,8 @@ disable_ipv6_ra() {
   echo -e "${YELLOW}    Previene que el sistema acepte rutas maliciosas via RA${NC}"
 
   if [ -d /proc/sys/net/ipv6 ]; then
-    set_sysctl "net.ipv6.conf.all.accept_ra" "0"
-    set_sysctl "net.ipv6.conf.default.accept_ra" "0"
+    set_sysctl "net.ipv6.conf.all.accept_ra" "0" "net.ipv6.conf.all.accept_ra"
+    set_sysctl "net.ipv6.conf.default.accept_ra" "0" "net.ipv6.conf.default.accept_ra"
     flush_routes
   else
     echo -e "${YELLOW}[!] IPv6 no habilitado en este sistema${NC}"
@@ -306,12 +319,15 @@ check_sctp() {
 # ==============================================
 show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  NETWORK HARDENING COMPLETADO${NC}"
+  echo -e "${GREEN}  NETWORK HARDENING${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
-  echo -e "  • Configuraciones aplicadas: ${GREEN}$FIXED${NC}"
+  echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR CONFIGURACIONES:${NC}"
   echo -e "  sysctl net.ipv4.conf.all.send_redirects"
@@ -320,33 +336,6 @@ show_summary() {
   echo -e "  sysctl net.ipv4.conf.all.log_martians"
   echo -e "  sysctl net.ipv4.tcp_syncookies"
   echo -e "  sysctl net.ipv4.conf.all.rp_filter"
-
-  echo -e "\n${YELLOW}PARA VER LOGS DE MARTIANS:${NC}"
-  echo -e "  grep -i 'martian' /var/log/messages"
-}
-
-# ==============================================
-# MOSTRAR INTRO
-# ==============================================
-show_intro() {
-  echo -e "${YELLOW}"
-  echo "Este script aplicara hardening de red segun CIS Benchmark"
-  echo ""
-  echo "LOS CAMBIOS INCLUYEN:"
-  echo "  - Deshabilitar redirecciones ICMP (previene ataques MITM)"
-  echo "  - Deshabilitar enrutamiento origen (previene spoofing)"
-  echo "  - Habilitar SYN Cookies (previene DoS)"
-  echo "  - Habilitar filtrado de ruta inversa (previene spoofing)"
-  echo "  - Deshabilitar protocolos innecesarios (DCCP, SCTP)"
-  echo "  - Loggear paquetes sospechosos"
-  echo ""
-  echo -e "${RED}NOTA: El filtrado de ruta inversa (rp_filter) puede causar problemas"
-  echo -e "      en sistemas con enrutamiento asimetrico (BGP, OSPF).${NC}"
-  echo ""
-  echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
-  echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
 }
 
 # ==============================================
@@ -355,18 +344,30 @@ show_intro() {
 main() {
   show_header
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
-    AUTO_FIX=true
-    make_backup
-    show_intro
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+  # Modo ayuda
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
-  # Aplicar configuraciones de red
+  # Modo verificación (sin --fix)
+  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
+
+  # Modo automático (--fix o -f)
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  fi
+
+  # Ejecutar todas las verificaciones/correcciones
   disable_send_redirects
   disable_source_route
   disable_secure_redirects
@@ -380,11 +381,13 @@ main() {
   # Verificar modulos
   check_dccp
   check_sctp
-
-  # Verificar conflictos de firewall
   check_firewall_conflicts
 
   show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
