@@ -10,7 +10,9 @@ Este script hace un hardening de seguridad del bootloader GRUB y agrega parámet
 ## Autor
 
 Felipe Roman
+
 Web: https://www.orangebox.cl
+
 Email: froman@orangebox.cl
 
 ---
