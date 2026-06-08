@@ -39,6 +39,24 @@ XINETD_SERVICES=(
 )
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./remove-xinetd.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./remove-xinetd.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -88,12 +106,14 @@ remove_xinetd() {
     if [ "$AUTO_FIX" = true ]; then
       echo -e "${YELLOW}[*] Eliminando xinetd...${NC}"
 
-      # Detener servicio
       systemctl stop xinetd 2>/dev/null
       systemctl disable xinetd 2>/dev/null
 
-      # Eliminar paquete
-      yum remove xinetd -y 2>/dev/null || dnf remove xinetd -y 2>/dev/null
+      if command -v dnf &>/dev/null; then
+        dnf remove xinetd -y 2>/dev/null
+      else
+        yum remove xinetd -y 2>/dev/null
+      fi
 
       if ! rpm -q xinetd &>/dev/null; then
         echo -e "${GREEN}[✓] xinetd eliminado correctamente${NC}"
@@ -103,7 +123,7 @@ remove_xinetd() {
         WARNINGS=$((WARNINGS + 1))
       fi
     else
-      echo -e "${YELLOW}    Recomendacion: yum remove xinetd -y${NC}"
+      echo -e "${YELLOW}    Recomendacion: Eliminar xinetd${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   else
@@ -121,10 +141,15 @@ remove_inetd() {
     echo -e "${RED}[!] inetd esta instalado${NC}"
 
     if [ "$AUTO_FIX" = true ]; then
-      yum remove inetd -y 2>/dev/null || dnf remove inetd -y 2>/dev/null
+      if command -v dnf &>/dev/null; then
+        dnf remove inetd -y 2>/dev/null
+      else
+        yum remove inetd -y 2>/dev/null
+      fi
       echo -e "${GREEN}[✓] inetd eliminado${NC}"
       FIXED=$((FIXED + 1))
     else
+      echo -e "${YELLOW}    Recomendacion: Eliminar inetd${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   else
@@ -159,6 +184,7 @@ check_legacy_services() {
         echo -e "${GREEN}[✓] $service detenido y deshabilitado${NC}"
         FIXED=$((FIXED + 1))
       else
+        echo -e "${YELLOW}    Recomendacion: Detener $service${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
     fi
@@ -185,50 +211,13 @@ check_insecure_ports() {
 
     if ss -tlnp 2>/dev/null | grep -q ":$port "; then
       echo -e "${RED}[!] Puerto inseguro abierto: $port ($service)${NC}"
-
-      if [ "$AUTO_FIX" = true ]; then
-        echo -e "${YELLOW}[*] Cerrando puerto $port...${NC}"
-        # Nota: Cerrar el puerto requiere detener el servicio correspondiente
-        WARNINGS=$((WARNINGS + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
+      WARNINGS=$((WARNINGS + 1))
     fi
   done
 }
 
 # ==============================================
-# MOSTRAR ADVERTENCIA
-# ==============================================
-show_warning() {
-  echo -e "${RED}============================================${NC}"
-  echo -e "${RED}  ADVERTENCIA IMPORTANTE${NC}"
-  echo -e "${RED}============================================${NC}"
-  echo -e "${YELLOW}"
-  echo "Este script eliminara xinetd y servicios innecesarios."
-  echo ""
-  echo "SE ELIMINARAN:"
-  echo "  - xinetd (superdaemon)"
-  echo "  - Servicios legacy: telnet, rsh, rlogin, tftp"
-  echo "  - Servicios de xinetd: chargen, daytime, discard, echo, time"
-  echo ""
-  echo "SI NECESITA ALGUNO DE ESTOS SERVICIOS:"
-  echo "  - No ejecute este script"
-  echo "  - O comente la eliminacion especifica en el script"
-  echo ""
-  echo "Backup de configuraciones en: $BACKUP_DIR"
-  echo ""
-  echo -e "${RED}¿Desea continuar? (s/N): ${NC}"
-  read -r confirm
-
-  if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
-    echo -e "${YELLOW}[!] Operacion cancelada por el usuario${NC}"
-    exit 0
-  fi
-}
-
-# ==============================================
-# MOSTRAR INSTRUCCIONES FINALES
+# MOSTRAR RESUMEN FINAL
 # ==============================================
 show_instructions() {
   echo -e "\n${GREEN}============================================${NC}"
@@ -237,18 +226,15 @@ show_instructions() {
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
   echo -e "  rpm -qa | grep xinetd"
   echo -e "  systemctl status xinetd"
   echo -e "  ss -tlnp | grep -E ':(23|513|514|69|79)'"
-
-  echo -e "\n${YELLOW}PARA RESTAURAR XINETD:${NC}"
-  echo -e "  yum install xinetd -y"
-  echo -e "  cp $BACKUP_DIR/xinetd.conf /etc/"
-  echo -e "  cp -r $BACKUP_DIR/xinetd.d/* /etc/xinetd.d/"
-  echo -e "  systemctl start xinetd"
 }
 
 # ==============================================
@@ -258,25 +244,42 @@ main() {
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Hardening - Eliminacion de xinetd${NC}"
   echo -e "${GREEN}  CIS 2.1.1${NC}"
-  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
-    AUTO_FIX=true
-    make_backup
-    show_warning
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+  # Modo ayuda
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
+  # Modo verificación (sin --fix)
+  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
+
+  # Modo automático (--fix o -f)
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  fi
+
+  # Ejecutar verificaciones/correcciones
   remove_xinetd
   remove_inetd
   check_legacy_services
   check_insecure_ports
 
   show_instructions
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
