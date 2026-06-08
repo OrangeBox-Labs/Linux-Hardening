@@ -24,6 +24,24 @@ SUDOERS_D_DIR="/etc/sudoers.d"
 BACKUP_DIR="/root/sudo-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./sudo-hardening.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./sudo-hardening.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -53,7 +71,6 @@ check_sudoers_config() {
   else
     echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
     if [ "$AUTO_FIX" = true ] && [ -n "$fix_line" ]; then
-      # Agregar la configuracion al archivo
       echo "$fix_line" >>"$SUDOERS_FILE"
       echo -e "${GREEN}[✓] Configuracion agregada: $fix_line${NC}"
       FIXED=$((FIXED + 1))
@@ -92,11 +109,15 @@ check_sudo_installed() {
   else
     echo -e "${RED}[!] sudo no instalado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      yum install sudo -y 2>/dev/null || dnf install sudo -y 2>/dev/null
+      if command -v dnf &>/dev/null; then
+        dnf install sudo -y 2>/dev/null
+      else
+        yum install sudo -y 2>/dev/null
+      fi
       echo -e "${GREEN}[✓] sudo instalado${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: yum install sudo -y${NC}"
+      echo -e "${YELLOW}    Recomendacion: Instalar sudo${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -107,7 +128,6 @@ check_sudo_installed() {
 # ==============================================
 check_sudo_pty() {
   echo -e "\n${BLUE}[*] CIS 5.2.2 - Verificando uso de pseudo-terminal (pty) en sudo...${NC}"
-
   check_sudoers_config "Defaults.*use_pty" "sudo usa pseudo-terminal (pty)" "Defaults use_pty"
 }
 
@@ -119,22 +139,23 @@ check_sudo_logfile() {
 
   check_sudoers_config "Defaults.*logfile" "sudo tiene archivo de log configurado" 'Defaults logfile="/var/log/sudo.log"'
 
-  # Verificar que el archivo de log existe
   if grep -q "logfile" "$SUDOERS_FILE" 2>/dev/null; then
     LOGFILE=$(grep "logfile" "$SUDOERS_FILE" | grep -v "^#" | awk -F'"' '{print $2}')
     if [ -n "$LOGFILE" ]; then
       if [ ! -f "$LOGFILE" ]; then
-        echo -e "${YELLOW}[!] Archivo de log $LOGFILE no existe, creando...${NC}"
+        echo -e "${YELLOW}[!] Archivo de log $LOGFILE no existe${NC}"
         if [ "$AUTO_FIX" = true ]; then
           touch "$LOGFILE"
           chmod 600 "$LOGFILE"
           echo -e "${GREEN}[✓] Archivo de log creado: $LOGFILE${NC}"
           FIXED=$((FIXED + 1))
+        else
+          WARNINGS=$((WARNINGS + 1))
         fi
       else
         echo -e "${GREEN}[✓] Archivo de log existe: $LOGFILE${NC}"
       fi
-      # Verificar permisos del archivo de log
+
       CURRENT_PERMS=$(stat -c "%a" "$LOGFILE" 2>/dev/null)
       if [ "$CURRENT_PERMS" != "600" ]; then
         echo -e "${RED}[!] Permisos incorrectos en $LOGFILE: $CURRENT_PERMS (debe ser 600)${NC}"
@@ -156,9 +177,9 @@ check_sudo_logfile() {
 check_additional_configs() {
   echo -e "\n${BLUE}[*] Verificando configuraciones adicionales de seguridad...${NC}"
 
-  # Tiempo de espera para sudo (default 15 minutos es muy largo)
+  # Tiempo de espera para sudo
   if ! grep -q "Defaults.*timestamp_timeout" "$SUDOERS_FILE" 2>/dev/null; then
-    echo -e "${YELLOW}[!] No hay timeout configurado (default 15 minutos)${NC}"
+    echo -e "${RED}[!] timeout de sudo NO CONFIGURADO (default 15 minutos)${NC}"
     if [ "$AUTO_FIX" = true ]; then
       echo 'Defaults timestamp_timeout=5' >>"$SUDOERS_FILE"
       echo -e "${GREEN}[✓] Timeout de sudo reducido a 5 minutos${NC}"
@@ -167,11 +188,13 @@ check_additional_configs() {
       echo -e "${YELLOW}    Recomendacion: Agregar 'Defaults timestamp_timeout=5'${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
+  else
+    echo -e "${GREEN}[✓] Timeout de sudo configurado${NC}"
   fi
 
-  # Evitar que sudo herede variables de entorno peligrosas
+  # env_reset
   if ! grep -q "Defaults.*env_reset" "$SUDOERS_FILE" 2>/dev/null; then
-    echo -e "${YELLOW}[!] env_reset no configurado${NC}"
+    echo -e "${RED}[!] env_reset NO CONFIGURADO${NC}"
     if [ "$AUTO_FIX" = true ]; then
       echo 'Defaults env_reset' >>"$SUDOERS_FILE"
       echo -e "${GREEN}[✓] env_reset configurado${NC}"
@@ -180,31 +203,8 @@ check_additional_configs() {
       echo -e "${YELLOW}    Recomendacion: Agregar 'Defaults env_reset'${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
-  fi
-
-  # Limitar grupos que pueden usar sudo
-  if ! grep -q "^[^#].*ALL=(ALL)" "$SUDOERS_FILE" 2>/dev/null; then
-    echo -e "${YELLOW}[!] Verificar que solo grupos autorizados tengan acceso sudo${NC}"
-  fi
-}
-
-# ==============================================
-# VALIDAR Y APLICAR CAMBIOS
-# ==============================================
-apply_changes() {
-  echo -e "\n${BLUE}[*] Validando sintaxis de sudoers...${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    if visudo -c &>/dev/null; then
-      echo -e "${GREEN}[✓] Configuracion de sudoers valida${NC}"
-    else
-      echo -e "${RED}[!] Error en configuracion de sudoers, restaurando backup${NC}"
-      if [ -f "$BACKUP_DIR/sudoers" ]; then
-        cp "$BACKUP_DIR/sudoers" "$SUDOERS_FILE"
-        echo -e "${YELLOW}[!] Backup restaurado${NC}"
-      fi
-      exit 1
-    fi
+  else
+    echo -e "${GREEN}[✓] env_reset configurado${NC}"
   fi
 }
 
@@ -213,41 +213,20 @@ apply_changes() {
 # ==============================================
 show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  SUDO HARDENING COMPLETADO${NC}"
+  echo -e "${GREEN}  SUDO HARDENING${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR CONFIGURACION:${NC}"
   echo -e "  visudo -c"
   echo -e "  sudo -l"
-  echo -e "  cat /etc/sudoers | grep -E 'use_pty|logfile|timestamp_timeout'"
-
-  echo -e "\n${YELLOW}PARA VER LOGS DE SUDO:${NC}"
-  echo -e "  tail -f /var/log/sudo.log"
-}
-
-# ==============================================
-# MOSTRAR INTRO
-# ==============================================
-show_intro() {
-  echo -e "${YELLOW}"
-  echo "Este script configura hardening de sudo segun CIS Benchmark"
-  echo ""
-  echo "LOS CAMBIOS INCLUYEN:"
-  echo "  - Uso de pseudo-terminal (pty) para evitar ataques de escape"
-  echo "  - Creacion de archivo de log especifico para sudo"
-  echo "  - Reduccion del timeout de autenticacion a 5 minutos"
-  echo "  - Reseteo de variables de entorno"
-  echo ""
-  echo -e "${RED}NOTA: Se creara un backup de /etc/sudoers antes de modificar${NC}"
-  echo ""
-  echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
-  echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
+  echo -e "  grep -E 'use_pty|logfile|timestamp_timeout|env_reset' /etc/sudoers"
 }
 
 # ==============================================
@@ -258,23 +237,41 @@ main() {
   echo -e "${GREEN}  Sudo Hardening - CIS 5.2.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
-    AUTO_FIX=true
-    make_backup
-    show_intro
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+  # Modo ayuda
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
+  # Modo verificación (sin --fix)
+  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
+
+  # Modo automático (--fix o -f)
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  fi
+
+  # Ejecutar verificaciones/correcciones
   check_sudo_installed
   check_sudo_pty
   check_sudo_logfile
   check_additional_configs
-  apply_changes
+  validate_sudoers
+
   show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
