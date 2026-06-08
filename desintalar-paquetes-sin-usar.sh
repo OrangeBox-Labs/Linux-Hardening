@@ -27,27 +27,22 @@ simulate_and_capture_deps() {
   local deps=""
 
   if command -v dnf &>/dev/null; then
-    # Usar tsflags=test para simular sin modificar el sistema
-    # Esto genera un archivo de transaccion JSON en /tmp
-    dnf remove "$package" -y --setopt=tsflags=test 2>&1 >/dev/null
+    # Para dnf, usar --assumeno y parsear la salida completa
+    local output=$(dnf remove "$package" -y --assumeno 2>&1)
 
-    # Buscar el archivo de transaccion generado
-    local tx_file=$(ls -t /tmp/dnf_tx_*.json 2>/dev/null | head -1)
+    # Buscar la seccion "Removing:" o "Removing unused dependencies:"
+    # Formato: "  httpd                                      x86_64"
+    deps=$(echo "$output" | grep -E "^(Removing|Erasing|  [a-z])" | grep -v "^Removing:" | awk '{print $1}' | sort -u)
 
-    if [ -f "$tx_file" ]; then
-      # Extraer nombres de paquetes del JSON
-      deps=$(grep -E '"name":' "$tx_file" | cut -d'"' -f4 | sort -u)
-      rm -f "$tx_file"
-    fi
-
-    # Fallback: parsear la salida del comando directamente
+    # Si no se encontraron, buscar lineas indentadas con dos espacios
     if [ -z "$deps" ]; then
-      deps=$(dnf remove "$package" -y --assumeno 2>&1 | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
+      deps=$(echo "$output" | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
     fi
 
   elif command -v yum &>/dev/null; then
-    # Para yum, usar el metodo original con --assumeno
-    deps=$(yum remove "$package" -y --assumeno 2>&1 | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
+    # Para yum, usar --assumeno y parsear la salida
+    local output=$(yum remove "$package" -y --assumeno 2>&1)
+    deps=$(echo "$output" | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
   fi
 
   echo "$deps"
@@ -130,10 +125,10 @@ ask_and_remove() {
   # Ejecutar eliminacion real
   echo -e "${YELLOW}[*] Eliminando $package...${NC}"
 
-  if command -v yum &>/dev/null; then
-    yum remove "$package" -y
-  elif command -v dnf &>/dev/null; then
+  if command -v dnf &>/dev/null; then
     dnf remove "$package" -y
+  elif command -v yum &>/dev/null; then
+    yum remove "$package" -y
   fi
 
   if ! rpm -q "$package" &>/dev/null; then
@@ -146,7 +141,7 @@ ask_and_remove() {
 }
 
 # ==============================================
-# LISTA DE PAQUETES A VERIFICAR
+# LISTA DE PAQUETES A VERIFICAR (SIN RSYNC)
 # ==============================================
 
 # Paquetes de SELinux (no necesarios si no se usa)
@@ -229,7 +224,7 @@ COMPAT_PACKAGES=(
   "compat-libcap1:Librerias compatibilidad capabilities"
 )
 
-# Otros paquetes innecesarios
+# Otros paquetes innecesarios (SIN RSYNC)
 OTHER_PACKAGES=(
   "telnet:Cliente Telnet (inseguro)"
   "telnet-server:Servidor Telnet (inseguro)"
@@ -237,7 +232,6 @@ OTHER_PACKAGES=(
   "vsftpd:Servidor FTP"
   "tftp:Cliente TFTP"
   "tftp-server:Servidor TFTP"
-  "rsync:Herramienta de sincronizacion (si no se usa)"
   "nfs-utils:Cliente NFS (si no se usa)"
   "nfs-server:Servidor NFS"
   "samba:Cliente SMB/CIFS"
