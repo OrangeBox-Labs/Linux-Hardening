@@ -3,7 +3,7 @@
 # ==============================================
 # Script: auditd-hardening.sh
 # Autor: Felipe Roman
-# Web: www.orangebox.cl
+# Web: https://www.orangebox.cl
 # Email: froman@orangebox.cl
 # Descripcion: Configura auditd segun CIS Benchmark
 #              CIS 4.1.1 - 4.1.18
@@ -47,13 +47,59 @@ show_usage() {
 make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
-    if [ -f "$AUDIT_CONF" ]; then
-      cp "$AUDIT_CONF" "$BACKUP_DIR/"
-    fi
-    if [ -d /etc/audit/rules.d ]; then
-      cp -r /etc/audit/rules.d "$BACKUP_DIR/"
-    fi
+    [ -f "$AUDIT_CONF" ] && cp "$AUDIT_CONF" "$BACKUP_DIR/"
+    [ -d /etc/audit/rules.d ] && cp -r /etc/audit/rules.d "$BACKUP_DIR/"
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  fi
+}
+
+# ==============================================
+# FUNCION GENERICA PARA CONFIGURAR PARAMETROS DE AUDITD.CONF
+# ==============================================
+configure_auditd_param() {
+  local param="$1"
+  local expected="$2"
+  local description="$3"
+
+  # Buscar linea existente (comentada o activa)
+  if grep -q "^[#]*\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
+    # Verificar si esta comentada
+    if grep -q "^#\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
+      echo -e "${YELLOW}[!] $description esta comentado${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        sed -i "s/^#\s*${param}\s*=\s*${expected}/${param} = ${expected}/" "$AUDIT_CONF"
+        echo -e "${GREEN}[✓] $description descomentado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      echo -e "${GREEN}[✓] $description = ${expected}${NC}"
+    fi
+    return 0
+  fi
+
+  # Buscar si existe con otro valor
+  if grep -q "^[#]*\s*${param}\s*=" "$AUDIT_CONF" 2>/dev/null; then
+    echo -e "${RED}[!] $description valor incorrecto${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      sed -i "s/^[#]*\s*${param}\s*=.*/${param} = ${expected}/" "$AUDIT_CONF"
+      echo -e "${GREEN}[✓] $description corregido a ${expected}${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
+
+  # No existe la linea
+  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
+  if [ "$AUTO_FIX" = true ]; then
+    echo "${param} = ${expected}" >>"$AUDIT_CONF"
+    echo -e "${GREEN}[✓] $description configurado como ${expected}${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -120,19 +166,7 @@ check_auditd_enabled() {
 # ==============================================
 check_log_storage() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.3 - Verificando tamaño de logs audit...${NC}"
-
-  if grep -q "^max_log_file = 50" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] max_log_file = 50 MB${NC}"
-  else
-    echo -e "${RED}[!] max_log_file no configurado correctamente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/^max_log_file =.*/max_log_file = 50/' "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] max_log_file = 50 MB configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  configure_auditd_param "max_log_file" "50" "max_log_file"
 }
 
 # ==============================================
@@ -140,19 +174,7 @@ check_log_storage() {
 # ==============================================
 check_log_retention() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.4 - Verificando retencion de logs audit...${NC}"
-
-  if grep -q "^max_log_file_action = keep_logs" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] max_log_file_action = keep_logs${NC}"
-  else
-    echo -e "${RED}[!] Logs pueden eliminarse automaticamente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/^max_log_file_action =.*/max_log_file_action = keep_logs/' "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] max_log_file_action = keep_logs configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  configure_auditd_param "max_log_file_action" "keep_logs" "max_log_file_action"
 }
 
 # ==============================================
@@ -160,45 +182,9 @@ check_log_retention() {
 # ==============================================
 check_full_action() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.5 - Verificando accion cuando logs estan llenos...${NC}"
-
-  if grep -q "^space_left_action = email" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] space_left_action = email${NC}"
-  else
-    echo -e "${RED}[!] space_left_action no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/^space_left_action =.*/space_left_action = email/' "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] space_left_action = email configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  if grep -q "^action_mail_acct = root" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] action_mail_acct = root${NC}"
-  else
-    echo -e "${RED}[!] action_mail_acct no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/^action_mail_acct =.*/action_mail_acct = root/' "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] action_mail_acct = root configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  if grep -q "^admin_space_left_action = halt" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] admin_space_left_action = halt${NC}"
-  else
-    echo -e "${RED}[!] admin_space_left_action no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/^admin_space_left_action =.*/admin_space_left_action = halt/' "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] admin_space_left_action = halt configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  configure_auditd_param "space_left_action" "email" "space_left_action"
+  configure_auditd_param "action_mail_acct" "root" "action_mail_acct"
+  configure_auditd_param "admin_space_left_action" "halt" "admin_space_left_action"
 }
 
 # ==============================================
@@ -294,7 +280,6 @@ EOF
   # Verificar reglas existentes (modo verificacion)
   echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
 
-  # Verificar cada regla
   local rules_checks=(
     "time-change:Eventos de fecha/hora"
     "identity:Eventos de usuario/grupo"
@@ -366,8 +351,8 @@ show_summary() {
   echo -e "  aureport -ts today"
 
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  🌐 https://www.orangebox.cl/blog ${NC}"
-  echo -e "${GREEN}  📺 YouTube: https://www.youtube.com/@OrangeBoxLinux ${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
   echo -e "${GREEN}============================================${NC}"
 }
 
