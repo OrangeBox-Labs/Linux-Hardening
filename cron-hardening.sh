@@ -259,6 +259,7 @@ main() {
 
   # Detectar si el script se ejecutó con --fix
   if [[ ! "$*" =~ --fix ]]; then
+    show_intro
     echo "Modo verificación: use --fix para aplicar cambios"
     exit 0
   fi
@@ -270,7 +271,6 @@ main() {
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
     AUTO_FIX=true
     make_backup
-    show_intro
     echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
   else
     AUTO_FIX=false
