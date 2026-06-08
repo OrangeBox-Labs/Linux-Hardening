@@ -24,6 +24,24 @@ AUDIT_CONF="/etc/audit/auditd.conf"
 BACKUP_DIR="/root/audit-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./auditd-hardening.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./auditd-hardening.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
@@ -40,27 +58,6 @@ make_backup() {
 }
 
 # ==============================================
-# FUNCION PARA AGREGAR REGLA
-# ==============================================
-add_rule() {
-  local rule="$1"
-  local description="$2"
-
-  if grep -q "^$rule" "$AUDIT_RULES" 2>/dev/null; then
-    echo -e "${GREEN}[✓] $description${NC}"
-  else
-    echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo "$rule" >>"$AUDIT_RULES"
-      echo -e "${GREEN}[✓] Regla agregada: $rule${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-}
-
-# ==============================================
 # 4.1.1.1 - ENSURE AUDITD IS INSTALLED
 # ==============================================
 check_auditd_installed() {
@@ -71,10 +68,15 @@ check_auditd_installed() {
   else
     echo -e "${RED}[!] auditd no instalado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      yum install audit audit-libs -y 2>/dev/null || dnf install audit audit-libs -y 2>/dev/null
+      if command -v dnf &>/dev/null; then
+        dnf install audit audit-libs -y 2>/dev/null
+      else
+        yum install audit audit-libs -y 2>/dev/null
+      fi
       echo -e "${GREEN}[✓] auditd instalado${NC}"
       FIXED=$((FIXED + 1))
     else
+      echo -e "${YELLOW}    Recomendacion: Instalar audit audit-libs${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -203,10 +205,11 @@ check_full_action() {
 # AGREGAR TODAS LAS REGLAS DE AUDITORIA
 # ==============================================
 add_audit_rules() {
-  echo -e "\n${BLUE}[*] Agregando reglas de auditoria...${NC}"
+  echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
 
-  # Crear archivo de reglas
-  cat >"$AUDIT_RULES" <<'EOF'
+  # Solo crear archivo si estamos en modo --fix
+  if [ "$AUTO_FIX" = true ]; then
+    cat >"$AUDIT_RULES" <<'EOF'
 # ==============================================
 # Reglas de auditoria - CIS Benchmark
 # Generado automaticamente
@@ -284,129 +287,45 @@ add_audit_rules() {
 # 4.1.2.14 - Configuracion inmutable (proteger reglas)
 -e 2
 EOF
+    echo -e "${GREEN}[✓] Archivo de reglas creado: $AUDIT_RULES${NC}"
+    FIXED=$((FIXED + 1))
+  fi
 
-  echo -e "${GREEN}[✓] Archivo de reglas creado: $AUDIT_RULES${NC}"
-
-  # Verificar cada regla
+  # Verificar reglas existentes (modo verificacion)
   echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
 
-  # Cargar reglas para verificar
-  augenrules --load >/dev/null 2>&1
+  # Verificar cada regla
+  local rules_checks=(
+    "time-change:Eventos de fecha/hora"
+    "identity:Eventos de usuario/grupo"
+    "system-locale:Eventos de red"
+    "MAC-policy:Eventos de MAC/SELinux"
+    "logins:Eventos de login/logout"
+    "session:Eventos de sesion"
+    "perm_mod:Eventos de cambios de permisos"
+    "access:Eventos de acceso fallido"
+    "mounts:Eventos de montaje"
+    "delete:Eventos de eliminacion de archivos"
+    "scope:Eventos de cambios en sudoers"
+    "modules:Eventos de modulos del kernel"
+  )
 
-  # 4.1.2.1 - Fecha y hora
-  if auditctl -l | grep -q "time-change"; then
-    echo -e "${GREEN}[✓] Eventos de fecha/hora - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de fecha/hora - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
+  for check in "${rules_checks[@]}"; do
+    key="${check%%:*}"
+    desc="${check##*:}"
+    if auditctl -l 2>/dev/null | grep -q "$key"; then
+      echo -e "${GREEN}[✓] $desc - OK${NC}"
+    else
+      echo -e "${RED}[!] $desc - NO CONFIGURADO${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  done
 
-  # 4.1.2.2 - Usuario/grupo
-  if auditctl -l | grep -q "identity"; then
-    echo -e "${GREEN}[✓] Eventos de usuario/grupo - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de usuario/grupo - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.3 - Red
-  if auditctl -l | grep -q "system-locale"; then
-    echo -e "${GREEN}[✓] Eventos de red - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de red - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.4 - MAC/SELinux
-  if auditctl -l | grep -q "MAC-policy"; then
-    echo -e "${GREEN}[✓] Eventos de MAC/SELinux - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de MAC/SELinux - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.5 - Login/logout
-  if auditctl -l | grep -q "logins"; then
-    echo -e "${GREEN}[✓] Eventos de login/logout - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de login/logout - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.6 - Sesion
-  if auditctl -l | grep -q "session"; then
-    echo -e "${GREEN}[✓] Eventos de sesion - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de sesion - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.7 - Permisos DAC
-  if auditctl -l | grep -q "perm_mod"; then
-    echo -e "${GREEN}[✓] Eventos de cambios de permisos - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de cambios de permisos - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.8 - Acceso fallido
-  if auditctl -l | grep -q "access"; then
-    echo -e "${GREEN}[✓] Eventos de acceso fallido - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de acceso fallido - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.9 - Montajes
-  if auditctl -l | grep -q "mounts"; then
-    echo -e "${GREEN}[✓] Eventos de montaje - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de montaje - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.10 - Eliminacion de archivos
-  if auditctl -l | grep -q "delete"; then
-    echo -e "${GREEN}[✓] Eventos de eliminacion de archivos - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de eliminacion de archivos - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.11 - Sudoers
-  if auditctl -l | grep -q "scope"; then
-    echo -e "${GREEN}[✓] Eventos de cambios en sudoers - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de cambios en sudoers - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.13 - Modulos del kernel
-  if auditctl -l | grep -q "modules"; then
-    echo -e "${GREEN}[✓] Eventos de modulos del kernel - OK${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    echo -e "${RED}[!] Eventos de modulos del kernel - FAIL${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  # 4.1.2.14 - Configuracion inmutable
-  if auditctl -s | grep -q "enabled 2"; then
+  # Verificar configuracion inmutable
+  if auditctl -s 2>/dev/null | grep -q "enabled 2"; then
     echo -e "${GREEN}[✓] Configuracion inmutable - OK${NC}"
-    FIXED=$((FIXED + 1))
   else
-    echo -e "${RED}[!] Configuracion inmutable - FAIL${NC}"
+    echo -e "${RED}[!] Configuracion inmutable - NO CONFIGURADO${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -415,10 +334,12 @@ EOF
 # REINICIAR AUDITD
 # ==============================================
 restart_auditd() {
-  echo -e "\n${RED}[*] Auditd se ejecuta en modo inmutable, no puede ser reiniciado...${NC}"
-  echo -e "${RED}[!] Reinicia tu servidor para aplicar los cambios${NC}"
-  echo -e "${GREEN}[!] Presiona ENTER para continuar.${NC}"
-  read
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${BLUE}[*] Aplicando cambios...${NC}"
+    augenrules --load >/dev/null 2>&1
+    echo -e "${GREEN}[✓] Reglas cargadas${NC}"
+    echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema para activarse completamente${NC}"
+  fi
 }
 
 # ==============================================
@@ -426,12 +347,15 @@ restart_auditd() {
 # ==============================================
 show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  AUDITD HARDENING COMPLETADO${NC}"
+  echo -e "${GREEN}  AUDITD HARDENING${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VER REGLAS DE AUDITORIA:${NC}"
   echo -e "  auditctl -l"
@@ -440,27 +364,11 @@ show_summary() {
   echo -e "\n${YELLOW}PARA VER LOGS DE AUDITORIA:${NC}"
   echo -e "  ausearch -ts recent"
   echo -e "  aureport -ts today"
-}
 
-# ==============================================
-# MOSTRAR INTRO
-# ==============================================
-show_intro() {
-  echo -e "${YELLOW}"
-  echo "Este script configura auditd segun CIS Benchmark secciones 4.1.1 - 4.1.18"
-  echo ""
-  echo "LOS CAMBIOS INCLUYEN:"
-  echo "  - Configuracion de tamano y retencion de logs"
-  echo "  - Reglas de auditoria para eventos criticos"
-  echo "  - Configuracion inmutable (protege reglas)"
-  echo ""
-  echo -e "${RED}NOTA: La configuracion inmutable (-e 2) requiere reinicio de auditd"
-  echo -e "      y las reglas no podran modificarse hasta reiniciar el sistema.${NC}"
-  echo ""
-  echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
-  echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
+  echo -e "\n${GREEN}============================================${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl/blog ${NC}"
+  echo -e "${GREEN}  📺 YouTube: https://www.youtube.com/@OrangeBoxLinux ${NC}"
+  echo -e "${GREEN}============================================${NC}"
 }
 
 # ==============================================
@@ -471,17 +379,30 @@ main() {
   echo -e "${GREEN}  Auditd Hardening - CIS 4.1.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
-    AUTO_FIX=true
-    make_backup
-    show_intro
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  else
-    AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
+  # Modo ayuda
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
   fi
 
+  # Modo verificación (sin --fix)
+  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
+
+  # Modo automático (--fix o -f)
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  fi
+
+  # Ejecutar verificaciones/correcciones
   check_auditd_installed
   check_auditd_enabled
   check_log_storage
@@ -490,6 +411,10 @@ main() {
   add_audit_rules
   restart_auditd
   show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
