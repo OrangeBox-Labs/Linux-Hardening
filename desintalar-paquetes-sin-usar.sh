@@ -24,22 +24,30 @@ WARNINGS=0
 # ==============================================
 simulate_and_capture_deps() {
   local package="$1"
-  local tx_file=""
   local deps=""
 
-  # Ejecutar remove con --assumeno para generar archivo de transaccion
-  if command -v yum &>/dev/null; then
-    yum remove "$package" -y --assumeno 2>&1 >/dev/null
-    tx_file=$(ls -t /tmp/yum_save_tx.*.yumtx 2>/dev/null | head -1)
-  elif command -v dnf &>/dev/null; then
-    dnf remove "$package" -y --assumeno 2>&1 >/dev/null
-    tx_file=$(ls -t /tmp/dnf_save_tx.*.dnftx 2>/dev/null | head -1)
-  fi
+  if command -v dnf &>/dev/null; then
+    # Usar tsflags=test para simular sin modificar el sistema
+    # Esto genera un archivo de transaccion JSON en /tmp
+    dnf remove "$package" -y --setopt=tsflags=test 2>&1 >/dev/null
 
-  # Parsear el archivo de transaccion
-  if [ -f "$tx_file" ]; then
-    deps=$(grep "^mbr:" "$tx_file" | cut -d',' -f1 | sed 's/^mbr: //' | sort -u)
-    rm -f "$tx_file"
+    # Buscar el archivo de transaccion generado
+    local tx_file=$(ls -t /tmp/dnf_tx_*.json 2>/dev/null | head -1)
+
+    if [ -f "$tx_file" ]; then
+      # Extraer nombres de paquetes del JSON
+      deps=$(grep -E '"name":' "$tx_file" | cut -d'"' -f4 | sort -u)
+      rm -f "$tx_file"
+    fi
+
+    # Fallback: parsear la salida del comando directamente
+    if [ -z "$deps" ]; then
+      deps=$(dnf remove "$package" -y --assumeno 2>&1 | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
+    fi
+
+  elif command -v yum &>/dev/null; then
+    # Para yum, usar el metodo original con --assumeno
+    deps=$(yum remove "$package" -y --assumeno 2>&1 | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
   fi
 
   echo "$deps"
