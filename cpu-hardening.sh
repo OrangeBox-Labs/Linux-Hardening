@@ -267,6 +267,10 @@ main() {
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
   echo -e "${GREEN}============================================${NC}"
 
+  if [ $WARNINGS -gt 0 ]; then
+    echo -e "  • Para corregir ejecuta: ./cpu-hardening.sh --fix"
+  fi
+
   if [ $FIXED -gt 0 ]; then
     echo -e "${YELLOW}[!] Se recomienda reiniciar el sistema para asegurar los cambios${NC}"
   fi
