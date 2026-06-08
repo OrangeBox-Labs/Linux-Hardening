@@ -114,8 +114,8 @@ check_lvm() {
   fi
 }
 
-# ==============================================
-# FUNCION PARA DESHABILITAR MODULO (CORREGIDO CON /bin/false)
+# # ==============================================
+# FUNCION PARA DESHABILITAR MODULO (CORREGIDO)
 # ==============================================
 disable_filesystem_module() {
   local module="$1"
@@ -128,29 +128,17 @@ disable_filesystem_module() {
     return 0
   fi
 
-  # Verificar si ya esta correctamente deshabilitado con /bin/false
+  # Verificar si ya esta correctamente deshabilitado
+  # La condicion correcta es: install $module /bin/false debe existir
   if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
-    if lsmod | grep -q "^$module"; then
-      echo -e "${YELLOW}[!] $module configurado para no cargarse, pero actualmente esta cargado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        rmmod "$module" 2>/dev/null
-        echo -e "${GREEN}[✓] $module descargado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        echo -e "${YELLOW}    Recomendacion: rmmod $module${NC}"
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    else
-      echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
-    fi
+    echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
     return 0
   fi
 
-  # Verificar si existe configuracion con /bin/true (incorrecta)
+  # Si existe configuracion con /bin/true, eliminarla o corregirla
   if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
-    echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true en lugar de /bin/false)${NC}"
+    echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      # Reemplazar la configuracion incorrecta
       for f in /etc/modprobe.d/*.conf; do
         if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
           sed -i 's/^install $module \/bin\/true/install $module \/bin\/false/' "$f"
@@ -158,35 +146,15 @@ disable_filesystem_module() {
           FIXED=$((FIXED + 1))
         fi
       done
-    else
-      echo -e "${YELLOW}    Recomendacion: Cambiar /bin/true a /bin/false${NC}"
-      WARNINGS=$((WARNINGS + 1))
     fi
     return 0
   fi
 
-  # Verificar si existe configuracion comentada
-  if grep -rq "^#\s*install $module" /etc/modprobe.d/ 2>/dev/null; then
-    echo -e "${YELLOW}[!] $module configuracion comentada${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      for f in /etc/modprobe.d/*.conf; do
-        if grep -q "^#\s*install $module" "$f" 2>/dev/null; then
-          sed -i "s/^#\s*install $module/install $module/" "$f"
-          sed -i "s/^#\s*blacklist $module/blacklist $module/" "$f"
-          sed -i 's/install $module \/bin\/true/install $module \/bin\/false/' "$f"
-          echo -e "${GREEN}[✓] $module descomentado y corregido${NC}"
-          FIXED=$((FIXED + 1))
-        fi
-      done
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 0
-  fi
-
-  echo -e "${RED}[!] $module existe - debe deshabilitarse${NC}"
+  # El modulo no esta deshabilitado
+  echo -e "${RED}[!] $module NO esta deshabilitado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
+    # Crear archivo de configuracion
     cat >"$conf_file" <<EOF
 # ==============================================
 # Hardening: Modulo $module deshabilitado
@@ -197,11 +165,6 @@ install $module /bin/false
 blacklist $module
 EOF
     echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
-
-    if lsmod | grep -q "^$module"; then
-      rmmod "$module" 2>/dev/null
-      echo -e "${GREEN}[✓] $module descargado${NC}"
-    fi
     FIXED=$((FIXED + 1))
   else
     echo -e "${YELLOW}    Recomendacion: Crear $conf_file con:${NC}"
