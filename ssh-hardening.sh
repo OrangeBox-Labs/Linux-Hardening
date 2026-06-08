@@ -488,7 +488,7 @@ show_summary() {
   echo -e "  cat $SSHD_CONFIG | grep -E '^(PermitRootLogin|PasswordAuthentication|Port|Protocol)'"
 
   echo -e "\n${YELLOW}PARA VER LOGS DE SSH:${NC}"
-  echo -e "  tail -f /var/log/secure | grep sshd\n"
+  echo -e "  tail -f /var/log/secure | grep sshd"
   echo -e "\n${YELLOW}PARA APLICAR LAS CORRECCIONES EJECUTA:${NC}"
   echo -e "  ./ssh-hardening.sh --fix\n"
 }
@@ -514,8 +514,8 @@ show_intro() {
   echo ""
   echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
   echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
+  echo -e "${GREEN}Iniciando correciones en 3 segundos, presiona Ctrl+C para cancelar...${NC}"
+  sleep 3
 }
 
 # ==============================================
