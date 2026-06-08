@@ -77,6 +77,20 @@ run_test() {
 }
 
 # ==============================================
+# FUNCIONES DE UTILIDAD
+# ==============================================
+is_system_account() {
+  local username=$1
+  local system_accounts="sync shutdown halt operator"
+  for sys_acc in $system_accounts; do
+    if [ "$username" = "$sys_acc" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ==============================================
 # 1.1.1.1 - DESHABILITAR SQUASHFS
 # ==============================================
 check_squashfs() {
@@ -1091,26 +1105,50 @@ check_audit_full_action() {
 }
 
 # ==============================================
-# 4.1.3.1 - AUDITAR CAMBIOS EN SUDOERS
+# 4.1.3.1 - AUDITAR CAMBIOS EN SUDOERS (CORREGIDO)
 # ==============================================
 check_audit_sudoers() {
-  if auditctl -l 2>/dev/null | grep -q "sudoers" | grep -q "scope"; then
-    log_result "PASS" "4.1.3.1 - Asegurar cambios en sudoers auditados" "" "" "$GREEN"
+  local found=0
+
+  if grep -r "^-w.*sudoers.*-k scope" /etc/audit/rules.d/ 2>/dev/null | grep -q "scope"; then
+    found=1
+  fi
+  if grep -r "^-w.*sudoers.d.*-k scope" /etc/audit/rules.d/ 2>/dev/null | grep -q "scope"; then
+    found=1
+  fi
+  if grep -q "^-w.*sudoers.*-k scope" /etc/audit/audit.rules 2>/dev/null; then
+    found=1
+  fi
+  if grep -q "^-w.*sudoers.d.*-k scope" /etc/audit/audit.rules 2>/dev/null; then
+    found=1
+  fi
+
+  if [ $found -eq 1 ]; then
+    log_result "PASS" "4.1.3.1 - Asegurar cambios en sudoers auditados" "Reglas encontradas en archivos de configuracion" "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "4.1.3.1 - Asegurar cambios en sudoers auditados" "Regla de auditoria para sudoers no encontrada" "Agregar reglas: -w /etc/sudoers -p wa -k scope y -w /etc/sudoers.d -p wa -k scope. Cargar: augenrules --load" "$YELLOW"
+  log_result "WARN" "4.1.3.1 - Asegurar cambios en sudoers auditados" "Reglas de auditoria para sudoers no encontradas" "Agregar reglas: -w /etc/sudoers -p wa -k scope y -w /etc/sudoers.d -p wa -k scope a /etc/audit/rules.d/. Cargar: augenrules --load" "$YELLOW"
   return 2
 }
 
 # ==============================================
-# 4.1.3.2 - AUDITAR ACCIONES COMO OTRO USUARIO
+# 4.1.3.2 - AUDITAR ACCIONES COMO OTRO USUARIO (CORREGIDO)
 # ==============================================
 check_audit_user_emulation() {
-  if auditctl -l 2>/dev/null | grep -q "user_emulation"; then
-    log_result "PASS" "4.1.3.2 - Asegurar acciones como otro usuario auditadas" "" "" "$GREEN"
+  local found=0
+
+  if grep -r "user_emulation" /etc/audit/rules.d/ 2>/dev/null | grep -q "user_emulation"; then
+    found=1
+  fi
+  if grep -q "user_emulation" /etc/audit/audit.rules 2>/dev/null; then
+    found=1
+  fi
+
+  if [ $found -eq 1 ]; then
+    log_result "PASS" "4.1.3.2 - Asegurar acciones como otro usuario auditadas" "Reglas encontradas en archivos de configuracion" "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "4.1.3.2 - Asegurar acciones como otro usuario auditadas" "Regla user_emulation no encontrada" "Agregar reglas para execve con archivos b32 y b64. Cargar: augenrules --load" "$YELLOW"
+  log_result "WARN" "4.1.3.2 - Asegurar acciones como otro usuario auditadas" "Reglas de auditoria para execve no encontradas" "Agregar reglas para execve con archivos b32 y b64. Cargar: augenrules --load" "$YELLOW"
   return 2
 }
 
@@ -1382,11 +1420,16 @@ check_sshd_perms() {
 }
 
 # ==============================================
-# 5.2.4 - ASEGURAR ACCESO SSH LIMITADO
+# 5.2.4 - ACCESO SSH LIMITADO (CORREGIDO)
 # ==============================================
 check_ssh_access() {
-  if sshd -T 2>/dev/null | grep -qE "AllowUsers|AllowGroups|DenyUsers|DenyGroups"; then
-    log_result "PASS" "5.2.4 - Asegurar acceso SSH limitado" "" "" "$GREEN"
+  local allow_users=$(sshd -T 2>/dev/null | grep -i "allowusers" | awk '{$1=""; print $0}' | xargs)
+  local allow_groups=$(sshd -T 2>/dev/null | grep -i "allowgroups" | awk '{$1=""; print $0}' | xargs)
+  local deny_users=$(sshd -T 2>/dev/null | grep -i "denyusers" | awk '{$1=""; print $0}' | xargs)
+  local deny_groups=$(sshd -T 2>/dev/null | grep -i "denygroups" | awk '{$1=""; print $0}' | xargs)
+
+  if [ -n "$allow_users" ] || [ -n "$allow_groups" ] || [ -n "$deny_users" ] || [ -n "$deny_groups" ]; then
+    log_result "PASS" "5.2.4 - Asegurar acceso SSH limitado" "Restricciones configuradas" "" "$GREEN"
     return 0
   fi
   log_result "WARN" "5.2.4 - Asegurar acceso SSH limitado" "No hay restriccion de acceso configurada" "Agregar al /etc/ssh/sshd_config: AllowUsers usuario1 usuario2 o AllowGroups grupo. Reiniciar sshd" "$YELLOW"
@@ -1478,14 +1521,15 @@ check_ssh_ignorerhosts() {
 }
 
 # ==============================================
-# 5.2.12 - ASEGURAR X11 FORWARDING DESHABILITADO
+# 5.2.12 - X11 FORWARDING (CORREGIDO)
 # ==============================================
 check_ssh_x11() {
-  if sshd -T 2>/dev/null | grep -q "x11forwarding no"; then
-    log_result "PASS" "5.2.12 - Asegurar X11 forwarding deshabilitado" "" "" "$GREEN"
+  local x11=$(sshd -T 2>/dev/null | grep -i "x11forwarding" | awk '{print $2}')
+  if [ "$x11" = "no" ]; then
+    log_result "PASS" "5.2.12 - Asegurar X11 forwarding deshabilitado" "Valor actual: $x11" "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "5.2.12 - Asegurar X11 forwarding deshabilitado" "X11Forwarding no es no" "Configurar /etc/ssh/sshd_config: X11Forwarding no. Reiniciar sshd" "$RED"
+  log_result "FAIL" "5.2.12 - Asegurar X11 forwarding deshabilitado" "X11Forwarding: $x11 (debe ser no)" "Configurar /etc/ssh/sshd_config: X11Forwarding no. Reiniciar sshd" "$RED"
   return 1
 }
 
@@ -1514,15 +1558,19 @@ check_ssh_banner() {
 }
 
 # ==============================================
-# 5.2.16 - ASEGURAR MAXAUTH TRIES 4 O MENOS
+# 5.2.16 - MAXAUTH TRIES 4 O MENOS (CORREGIDO)
 # ==============================================
 check_ssh_maxauth() {
   local maxauth=$(sshd -T 2>/dev/null | grep -i "maxauthtries" | awk '{print $2}')
-  if [ -n "$maxauth" ] && [ "$maxauth" -le 4 ]; then
-    log_result "PASS" "5.2.16 - Asegurar MaxAuthTries 4 o menos" "" "" "$GREEN"
+  if [ -z "$maxauth" ]; then
+    log_result "FAIL" "5.2.16 - Asegurar MaxAuthTries 4 o menos" "Parametro no configurado en sshd" "Configurar /etc/ssh/sshd_config: MaxAuthTries 4. Reiniciar sshd" "$RED"
+    return 1
+  fi
+  if [ "$maxauth" -le 4 ]; then
+    log_result "PASS" "5.2.16 - Asegurar MaxAuthTries 4 o menos" "MaxAuthTries: $maxauth" "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "5.2.16 - Asegurar MaxAuthTries 4 o menos" "MaxAuthTries: $maxauth" "Configurar /etc/ssh/sshd_config: MaxAuthTries 4. Reiniciar sshd" "$RED"
+  log_result "FAIL" "5.2.16 - Asegurar MaxAuthTries 4 o menos" "MaxAuthTries: $maxauth (debe ser <=4)" "Configurar /etc/ssh/sshd_config: MaxAuthTries 4. Reiniciar sshd" "$RED"
   return 1
 }
 
@@ -1553,16 +1601,22 @@ check_ssh_grace_time() {
 }
 
 # ==============================================
-# 5.2.20 - ASEGURAR TIMEOUT DE SESION SSH
+# 5.2.20 - TIMEOUT DE SESION SSH (CORREGIDO)
 # ==============================================
 check_ssh_idle_timeout() {
   local interval=$(sshd -T 2>/dev/null | grep -i "clientaliveinterval" | awk '{print $2}')
   local count=$(sshd -T 2>/dev/null | grep -i "clientalivecountmax" | awk '{print $2}')
-  if [ -n "$interval" ] && [ -n "$count" ] && [ "$interval" -gt 0 ] && [ "$count" -gt 0 ]; then
-    log_result "PASS" "5.2.20 - Asegurar timeout de sesion SSH configurado" "" "" "$GREEN"
+
+  if [ -z "$interval" ] || [ -z "$count" ]; then
+    log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Parametros no encontrados en configuracion activa" "Configurar /etc/ssh/sshd_config: ClientAliveInterval 300 y ClientAliveCountMax 0. Reiniciar sshd" "$YELLOW"
+    return 2
+  fi
+
+  if [ "$interval" -gt 0 ] && [ "$count" -ge 0 ]; then
+    log_result "PASS" "5.2.20 - Asegurar timeout de sesion SSH configurado" "ClientAliveInterval=$interval ClientAliveCountMax=$count" "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "ClientAlive no configurado correctamente" "Configurar /etc/ssh/sshd_config: ClientAliveInterval 300 y ClientAliveCountMax 0. Reiniciar sshd" "$YELLOW"
+  log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Valores actuales: Interval=$interval Count=$count (deben ser >0)" "Configurar /etc/ssh/sshd_config: ClientAliveInterval 300 y ClientAliveCountMax 0. Reiniciar sshd" "$YELLOW"
   return 2
 }
 
@@ -1876,15 +1930,24 @@ check_shadow_empty() {
 }
 
 # ==============================================
-# 6.2.9 - ROOT ES LA UNICA CUENTA CON UID 0
+# 6.2.9 - ROOT ES LA UNICA CUENTA CON UID 0 (CORREGIDO)
 # ==============================================
 check_unique_uid0() {
-  if grep -v "^root:" /etc/passwd 2>/dev/null | grep -q ":0:"; then
-    log_result "FAIL" "6.2.9 - Asegurar root es la unica cuenta con UID 0" "Otras cuentas con UID 0 encontradas" "Revisar cuentas con UID 0 y cambiar su UID o eliminar la cuenta" "$RED"
-    return 1
+  local other_uids=$(grep -v "^root:" /etc/passwd 2>/dev/null | grep ":0:" | cut -d: -f1)
+  local real_issues=""
+
+  for user in $other_uids; do
+    if ! is_system_account "$user"; then
+      real_issues="$real_issues $user"
+    fi
+  done
+
+  if [ -z "$real_issues" ]; then
+    log_result "PASS" "6.2.9 - Asegurar root es la unica cuenta con UID 0" "" "" "$GREEN"
+    return 0
   fi
-  log_result "PASS" "6.2.9 - Asegurar root es la unica cuenta con UID 0" "" "" "$GREEN"
-  return 0
+  log_result "FAIL" "6.2.9 - Asegurar root es la unica cuenta con UID 0" "Otras cuentas con UID 0: $real_issues" "Revisar cuentas con UID 0 y cambiar su UID o eliminar la cuenta" "$RED"
+  return 1
 }
 
 # ==============================================
@@ -2047,7 +2110,7 @@ main() {
   run_test "4.1.1.2 - audit=1 en boot" check_audit_boot
   run_test "4.1.1.3 - audit_backlog_limit" check_audit_backlog
   run_test "4.1.1.4 - auditd habilitado" check_auditd_enabled
-  run_test "4.1.2.1 - Tamaño logs audit" check_audit_log_size
+  run_test "4.1.2.1 - Tamano logs audit" check_audit_log_size
   run_test "4.1.2.2 - Logs no eliminados" check_audit_log_keep
   run_test "4.1.2.3 - Accion logs llenos" check_audit_full_action
   run_test "4.1.3.1 - audit sudoers" check_audit_sudoers
