@@ -3,10 +3,10 @@
 # ==============================================
 # Script: cron-hardening.sh
 # Autor: Felipe Roman
-# Web: www.orangebox.cl
+# Web: https://www.orangebox.cl
 # Email: froman@orangebox.cl
 # Descripcion: Hardening de cron y at segun CIS Benchmark
-#              CIS 5.1.1 - 5.1.8
+#              CIS 5.1.1 - 5.1.9
 # ==============================================
 
 RED='\033[0;31m'
@@ -128,8 +128,64 @@ check_user_restriction() {
       echo -e "${RED}[!] root no esta en $allow_file${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
-    check_permissions "$allow_file" "600" "root" "root" "Archivo $allow_file"
+    # CIS 5.1.8 y 5.1.9 piden permisos 640
+    check_permissions "$allow_file" "640" "root" "root" "Archivo $allow_file"
   fi
+}
+
+# ==============================================
+# FUNCION ADICIONAL: VERIFICAR PERMISOS DE LOGS DE CRON
+# ==============================================
+check_cron_log_permissions() {
+  echo -e "\n${BLUE}[*] Verificando permisos de logs de cron...${NC}"
+
+  local cron_log="/var/log/cron"
+
+  if [ ! -f "$cron_log" ]; then
+    echo -e "${YELLOW}[!] $cron_log no existe${NC}"
+    return 0
+  fi
+
+  local current_perms=$(stat -c "%a" "$cron_log" 2>/dev/null)
+  local current_owner=$(stat -c "%U" "$cron_log" 2>/dev/null)
+  local current_group=$(stat -c "%G" "$cron_log" 2>/dev/null)
+
+  if [ "$current_perms" = "640" ] && [ "$current_owner" = "root" ] && [ "$current_group" = "root" ]; then
+    echo -e "${GREEN}[✓] $cron_log permisos correctos: 640 root:root${NC}"
+  else
+    echo -e "${RED}[!] $cron_log permisos: $current_perms $current_owner:$current_group (debe ser 640 root:root)${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
+# ==============================================
+# FUNCION ADICIONAL: VERIFICAR TAREAS CRON NO AUTORIZADAS
+# ==============================================
+check_unauthorized_crons() {
+  echo -e "\n${BLUE}[*] Verificando tareas cron del sistema...${NC}"
+  echo -e "${YELLOW}    Esta es una verificacion informativa - no se corregira automaticamente${NC}"
+
+  local system_crons=(
+    "/etc/crontab"
+    "/etc/cron.d"
+    "/etc/cron.hourly"
+    "/etc/cron.daily"
+    "/etc/cron.weekly"
+    "/etc/cron.monthly"
+  )
+
+  for cron_path in "${system_crons[@]}"; do
+    if [ -d "$cron_path" ]; then
+      local files=$(find "$cron_path" -type f 2>/dev/null | wc -l)
+      if [ $files -gt 0 ]; then
+        echo -e "  ${GREEN}→${NC} $cron_path: $files archivos"
+      fi
+    elif [ -f "$cron_path" ]; then
+      echo -e "  ${GREEN}→${NC} $cron_path: existe"
+    fi
+  done
+
+  echo -e "\n${YELLOW}    Recomendacion: Revise manualmente los archivos de cron en busca de tareas no autorizadas${NC}"
 }
 
 # ==============================================
@@ -201,9 +257,9 @@ apply_user_restriction() {
 
   if [ ! -f "$allow_file" ]; then
     echo "root" >"$allow_file"
-    chmod 600 "$allow_file"
+    chmod 640 "$allow_file"
     chown root:root "$allow_file"
-    echo -e "${GREEN}[✓] $allow_file creado con usuario root${NC}"
+    echo -e "${GREEN}[✓] $allow_file creado con usuario root (permisos 640)${NC}"
     FIXED=$((FIXED + 1))
   else
     if ! grep -q "^root$" "$allow_file"; then
@@ -211,7 +267,25 @@ apply_user_restriction() {
       echo -e "${GREEN}[✓] root agregado a $allow_file${NC}"
       FIXED=$((FIXED + 1))
     fi
-    apply_permissions "$allow_file" "600" "root" "root" "Archivo $allow_file"
+    # Asegurar permisos 640
+    apply_permissions "$allow_file" "640" "root" "root" "Archivo $allow_file"
+  fi
+}
+
+# ==============================================
+# FUNCION PARA APLICAR PERMISOS A LOGS DE CRON
+# ==============================================
+apply_cron_log_permissions() {
+  local cron_log="/var/log/cron"
+
+  if [ -f "$cron_log" ]; then
+    local current_perms=$(stat -c "%a" "$cron_log" 2>/dev/null)
+    if [ "$current_perms" != "640" ]; then
+      chmod 640 "$cron_log"
+      chown root:root "$cron_log"
+      echo -e "${GREEN}[✓] $cron_log permisos corregidos a 640${NC}"
+      FIXED=$((FIXED + 1))
+    fi
   fi
 }
 
@@ -241,6 +315,8 @@ main() {
     check_cron_permissions
     check_cron_restriction
     check_at_restriction
+    check_cron_log_permissions
+    check_unauthorized_crons
 
     echo -e "\n${GREEN}============================================${NC}"
     echo -e "${GREEN}  VERIFICACIÓN COMPLETADA${NC}"
@@ -268,6 +344,7 @@ main() {
     apply_cron_permissions
     apply_user_restriction "/etc/cron.allow" "/etc/cron.deny" "cron"
     apply_user_restriction "/etc/at.allow" "/etc/at.deny" "at"
+    apply_cron_log_permissions
 
     # Reiniciar servicio
     systemctl restart crond
@@ -279,6 +356,11 @@ main() {
     echo -e "${GREEN}============================================${NC}"
     echo -e "${YELLOW}Correcciones aplicadas: $FIXED${NC}"
     echo -e "${YELLOW}Backup disponible en: $BACKUP_DIR${NC}"
+
+    echo -e "\n${GREEN}============================================${NC}"
+    echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+    echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+    echo -e "${GREEN}============================================${NC}"
     exit 0
   fi
 }
