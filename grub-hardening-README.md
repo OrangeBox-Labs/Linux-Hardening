@@ -2,8 +2,12 @@
 
 Este script hace un hardening de seguridad del bootloader GRUB y agrega parámetros de seguridad al kernel de Linux. Aquí te explico qué hace cada parte.
 
-** OJO!: Primero apliquen los cambios con --fix y reinicien y prueben, si todo sale bien, pongan password al GRUB, NO ANTES! **
-** OJO!: Estos cambios pueden hacer que el sistema no bootee, es probable que tengan que editar algunos parámetros directo en el GRUB durante el arranque para rescatar la maquina **
+> [!WARNING]
+>  OJO!: Primero apliquen los cambios con --fix y reinicien y prueben, si todo sale bien, pongan password al GRUB, NO ANTES! 
+> [!WARNING]
+> OJO!: Estos cambios pueden hacer que el sistema no bootee, es probable que tengan que editar algunos parámetros directo en el GRUB durante el arranque para rescatar la maquina 
+> [!WARNING]
+> OJO!: Si olvidan la password de GRUB, van a necesitar arrancar la maquina con un disco de rescate (el mismo con el que instalaron esa versión de Linux), y reparar el condoro.
 
 ## Autor
 
