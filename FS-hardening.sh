@@ -45,7 +45,6 @@ show_usage() {
 # DEFINICION DE PUNTOS DE MONTAJE CRITICOS
 # ==============================================
 
-# Puntos de montaje que DEBEN ser particiones separadas
 declare -a MUST_BE_SEPARATED=(
   "/opt"
   "/var"
@@ -55,14 +54,12 @@ declare -a MUST_BE_SEPARATED=(
   "/var/log"
 )
 
-# Puntos de montaje especiales o adicionales
 declare -a ADDITIONAL_MOUNTS=(
   "/var/tmp"
   "/var/log/audit"
   "/var/ossec"
 )
 
-# Opciones requeridas para cada punto de montaje (si existe)
 declare -A MOUNT_REQUIREMENTS=(
   ["/var"]="noexec,nosuid,nodev"
   ["/tmp"]="noexec,nosuid,nodev"
@@ -77,7 +74,6 @@ declare -A MOUNT_REQUIREMENTS=(
   ["/proc"]="hidepid=2"
 )
 
-# Modulos de filesystem a deshabilitar (CIS 1.1.1.x)
 declare -a MODULES_TO_DISABLE=(
   "cramfs"
   "squashfs"
@@ -97,56 +93,83 @@ disable_filesystem_module() {
 
   echo -e "\n${BLUE}[*] Verificando modulo: $module${NC}"
 
-  # Verificar si el modulo existe en el sistema
-  if ! modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
-    # Verificar si ya esta deshabilitado (buscando en todos los archivos .conf)
-    if grep -rq "^install $module /bin/false\|^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
-      echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
-      return 0
-    fi
+  if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
+    echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
+    return 0
+  fi
 
-    # Verificar si existe configuracion comentada
-    if grep -rq "^#\s*install $module" /etc/modprobe.d/ 2>/dev/null; then
-      echo -e "${YELLOW}[!] $module configuracion comentada encontrada${NC}"
+  if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
+    if lsmod | grep -q "^$module"; then
+      echo -e "${YELLOW}[!] $module configurado para no cargarse, pero actualmente esta cargado${NC}"
       if [ "$AUTO_FIX" = true ]; then
-        # Buscar y descomentar la configuracion existente
-        for f in /etc/modprobe.d/*.conf; do
-          if grep -q "^#\s*install $module" "$f" 2>/dev/null; then
-            sed -i "s/^#\s*install $module/install $module/" "$f"
-            sed -i "s/^#\s*blacklist $module/blacklist $module/" "$f"
-            echo -e "${GREEN}[✓] $module configuracion descomentada en $f${NC}"
-            FIXED=$((FIXED + 1))
-          fi
-        done
+        rmmod "$module" 2>/dev/null
+        echo -e "${GREEN}[✓] $module descargado${NC}"
+        FIXED=$((FIXED + 1))
       else
+        echo -e "${YELLOW}    Recomendacion: rmmod $module${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
-      return 0
+    else
+      echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
     fi
+    return 0
+  fi
 
-    echo -e "${RED}[!] $module existe - debe deshabilitarse${NC}"
-
+  if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
+    echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true en lugar de /bin/false)${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      # Crear archivo de configuracion
-      cat >"$conf_file" <<EOF
+      for f in /etc/modprobe.d/*.conf; do
+        if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
+          sed -i 's/^install $module \/bin\/true/install $module \/bin\/false/' "$f"
+          echo -e "${GREEN}[✓] $module corregido a /bin/false en $f${NC}"
+          FIXED=$((FIXED + 1))
+        fi
+      done
+    else
+      echo -e "${YELLOW}    Recomendacion: Cambiar /bin/true a /bin/false${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
+
+  if grep -rq "^#\s*install $module" /etc/modprobe.d/ 2>/dev/null; then
+    echo -e "${YELLOW}[!] $module configuracion comentada${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      for f in /etc/modprobe.d/*.conf; do
+        if grep -q "^#\s*install $module" "$f" 2>/dev/null; then
+          sed -i "s/^#\s*install $module/install $module/" "$f"
+          sed -i "s/^#\s*blacklist $module/blacklist $module/" "$f"
+          sed -i 's/install $module \/bin\/true/install $module \/bin\/false/' "$f"
+          echo -e "${GREEN}[✓] $module descomentado y corregido${NC}"
+          FIXED=$((FIXED + 1))
+        fi
+      done
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
+
+  echo -e "${RED}[!] $module existe - debe deshabilitarse${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    cat >"$conf_file" <<EOF
 # Deshabilitar $module por seguridad (CIS 1.1.1.x)
 install $module /bin/false
 blacklist $module
 EOF
-      echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
+    echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
 
-      # Si el modulo esta cargado, descargarlo
-      if lsmod | grep -q "^$module"; then
-        rmmod "$module" 2>/dev/null
-        echo -e "${GREEN}[✓] $module descargado del kernel${NC}"
-      fi
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: Deshabilitar $module${NC}"
-      WARNINGS=$((WARNINGS + 1))
+    if lsmod | grep -q "^$module"; then
+      rmmod "$module" 2>/dev/null
+      echo -e "${GREEN}[✓] $module descargado${NC}"
     fi
+    FIXED=$((FIXED + 1))
   else
-    echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
+    echo -e "${YELLOW}    Recomendacion: Crear $conf_file con:${NC}"
+    echo -e "      install $module /bin/false"
+    echo -e "      blacklist $module"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -160,12 +183,8 @@ ask_confirmation() {
   echo -e "${YELLOW}¿Desea agregar las opciones '${missing_opts}' a ${mount_point}? (s/n)${NC}"
   read -r answer
   case "$answer" in
-  s | S | si | Si | SI | yes | Yes | YES)
-    return 0
-    ;;
-  *)
-    return 1
-    ;;
+  s | S | si | Si | SI | yes | Yes | YES) return 0 ;;
+  *) return 1 ;;
   esac
 }
 
@@ -192,8 +211,6 @@ check_separated_partitions() {
   echo -e "${BLUE}============================================${NC}"
 
   local missing_separated=()
-  local existing_separated=()
-
   local root_device=$(findmnt -n -o SOURCE / 2>/dev/null | sed 's/\[.*\]//' | xargs)
   local root_device_real=$(readlink -f "$root_device" 2>/dev/null)
 
@@ -211,7 +228,6 @@ check_separated_partitions() {
 
     if [ -n "$mount_device" ] && [ "$mount_device_real" != "$root_device_real" ] && [ "$mount_device" != "$root_device" ]; then
       echo -e "${GREEN}[✓] $mount_point es una particion separada (${mount_device})${NC}"
-      existing_separated+=("$mount_point")
     else
       echo -e "${RED}[✗] $mount_point NO es una particion separada${NC}"
       missing_separated+=("$mount_point")
@@ -225,7 +241,6 @@ check_separated_partitions() {
 
       if [ -n "$mount_device" ] && [ "$mount_device_real" != "$root_device_real" ] && [ "$mount_device" != "$root_device" ]; then
         echo -e "${GREEN}[✓] $mount_point es una particion separada (${mount_device})${NC}"
-        existing_separated+=("$mount_point")
       else
         echo -e "${YELLOW}[!] $mount_point NO es particion separada${NC}"
         missing_separated+=("$mount_point")
@@ -246,24 +261,11 @@ check_separated_partitions() {
       echo -e "\n${BLUE}🛠️  Como el sistema usa LVM, puede crear estas particiones sin reinstalar:${NC}"
       echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
       echo -e "\n${YELLOW}⚠️  NOTA: Realice backup antes de modificar particiones!${NC}"
-      echo -e "${YELLOW}⚠️  Para /var se recomienda hacerlo en modo single user${NC}"
     else
       echo -e "\n${RED}════════════════════════════════════════════════════════════════════${NC}"
       echo -e "${RED} 🚨 RECOMENDACION IMPORTANTE - REINSTALACION NECESARIA 🚨${NC}"
       echo -e "${RED}════════════════════════════════════════════════════════════════════${NC}"
-      echo -e "${RED}El sistema NO usa LVM. Para cumplir con CIS Benchmark,${NC}"
-      echo -e "${RED}es necesario REINSTALAR el sistema con las siguientes particiones separadas:${NC}"
-      echo -e ""
-      echo -e "${GREEN}Particion     | Tamaño minimo | Opciones de montaje${NC}"
-      echo -e "${GREEN}--------------|---------------|----------------------------------------${NC}"
-      echo -e "/boot         | 1GB           | defaults,nodev,nosuid,noexec"
-      echo -e "/home         | 5GB+          | defaults,noexec,nosuid,nodev"
-      echo -e "/tmp          | 2GB           | defaults,noexec,nosuid,nodev"
-      echo -e "/var          | 5GB           | defaults,noexec,nosuid,nodev"
-      echo -e "/var/log      | 2GB           | defaults,noexec,nosuid,nodev"
-      echo -e "/var/log/audit| 1GB           | defaults,noexec,nosuid,nodev"
-      echo -e "/var/tmp      | 1GB           | defaults,noexec,nosuid,nodev"
-      echo -e "/opt          | 2GB           | defaults,nosuid,nodev"
+      echo -e "${RED}El sistema NO usa LVM. Se recomienda reinstalar con particiones separadas.${NC}"
     fi
     WARNINGS=$((WARNINGS + ${#missing_separated[@]}))
   else
@@ -551,9 +553,6 @@ show_summary() {
   echo -e "  lsmod | grep -E 'cramfs|squashfs|udf|freevxfs|jffs2|hfs|hfsplus'"
   echo -e "  grep -r 'install.*/bin/false' /etc/modprobe.d/"
 
-  echo -e "\n${YELLOW}VERIFICAR FSTAB:${NC}"
-  echo -e "  grep -E '(/opt|/var|/tmp|/boot|/home|/var/log|/dev/shm|/proc)' /etc/fstab"
-
   echo -e "\n${GREEN}============================================${NC}"
   echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
   echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
@@ -568,13 +567,11 @@ main() {
   echo -e "${GREEN}  Hardening de Filesystem - CIS Benchmark${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  # Modo ayuda
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
   fi
 
-  # Modo verificación
   if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -583,22 +580,18 @@ main() {
     AUTO_FIX=false
   fi
 
-  # Modo automático
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
   fi
 
-  # Deshabilitar modulos de filesystem
   for module in "${MODULES_TO_DISABLE[@]}"; do
     disable_filesystem_module "$module"
   done
 
-  # Verificar particiones separadas
   check_separated_partitions
 
-  # Verificar opciones de montaje
   for mount_point in /opt /var /tmp /boot /home /var/log /var/tmp /var/ossec; do
     if findmnt -n "$mount_point" &>/dev/null; then
       required_opts="${MOUNT_REQUIREMENTS[$mount_point]}"
@@ -608,11 +601,8 @@ main() {
     fi
   done
 
-  # Configurar puntos especiales
   configure_dev_shm
   configure_proc
-
-  # Otras configuraciones
   apply_sticky_bit
   disable_autofs
 
