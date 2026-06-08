@@ -85,6 +85,36 @@ declare -a MODULES_TO_DISABLE=(
 )
 
 # ==============================================
+# FUNCION PARA PREGUNTAR AL USUARIO
+# ==============================================
+ask_confirmation() {
+  local mount_point="$1"
+  local missing_opts="$2"
+
+  echo -e "${YELLOW}¿Desea agregar las opciones '${missing_opts}' a ${mount_point}? (s/n)${NC}"
+  read -r answer
+  case "$answer" in
+  s | S | si | Si | SI | yes | Yes | YES) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# ==============================================
+# FUNCION PARA VERIFICAR SI USA LVM
+# ==============================================
+check_lvm() {
+  echo -e "\n${BLUE}[*] Verificando si el sistema usa LVM...${NC}"
+
+  if command -v lvm &>/dev/null && pvs &>/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] Sistema usa LVM${NC}"
+    return 0
+  else
+    echo -e "${RED}[!] El sistema NO utiliza LVM${NC}"
+    return 1
+  fi
+}
+
+# ==============================================
 # FUNCION PARA DESHABILITAR MODULO (CORREGIDO)
 # ==============================================
 disable_filesystem_module() {
@@ -170,36 +200,6 @@ EOF
     echo -e "      install $module /bin/false"
     echo -e "      blacklist $module"
     WARNINGS=$((WARNINGS + 1))
-  fi
-}
-
-# ==============================================
-# FUNCION PARA PREGUNTAR AL USUARIO
-# ==============================================
-ask_confirmation() {
-  local mount_point="$1"
-  local missing_opts="$2"
-
-  echo -e "${YELLOW}¿Desea agregar las opciones '${missing_opts}' a ${mount_point}? (s/n)${NC}"
-  read -r answer
-  case "$answer" in
-  s | S | si | Si | SI | yes | Yes | YES) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-# ==============================================
-# FUNCION PARA VERIFICAR SI USA LVM
-# ==============================================
-check_lvm() {
-  echo -e "\n${BLUE}[*] Verificando si el sistema usa LVM...${NC}"
-
-  if command -v lvm &>/dev/null && pvs &>/dev/null 2>&1; then
-    echo -e "${GREEN}[✓] Sistema usa LVM${NC}"
-    return 0
-  else
-    echo -e "${RED}[!] El sistema NO utiliza LVM${NC}"
-    return 1
   fi
 }
 
@@ -486,7 +486,7 @@ configure_dev_shm() {
 }
 
 # ==============================================
-# CONFIGURAR /PROC CON HIDEPID
+# CONFIGURAR /PROC CON HIDEPID (CORREGIDO)
 # ==============================================
 configure_proc() {
   echo -e "\n${BLUE}[*] Configurando /proc con hidepid=2...${NC}"
@@ -498,12 +498,15 @@ configure_proc() {
 
   local current_opts=$(findmnt -n -o OPTIONS /proc 2>/dev/null)
 
-  if [[ "$current_opts" == *"hidepid=2"* ]]; then
+  # Verificar si ya tiene hidepid=2 o hidepid=invisible (son equivalentes)
+  if [[ "$current_opts" == *"hidepid=2"* ]] || [[ "$current_opts" == *"hidepid=invisible"* ]]; then
     echo -e "${GREEN}[✓] /proc ya tiene hidepid=2 configurado${NC}"
     return 0
   fi
 
   echo -e "${RED}[!] /proc no tiene hidepid=2${NC}"
+  echo -e "    Actual: $current_opts"
+  echo -e "    Requerido: hidepid=2"
 
   local apply_fix=false
   if [ "$AUTO_FIX" = true ]; then
@@ -529,7 +532,7 @@ configure_proc() {
       echo -e "${RED}[!] Error al configurar /proc${NC}"
     fi
   else
-    echo -e "${YELLOW}[!] Omitiendo correccion${NC}"
+    echo -e "${YELLOW}[!] Omitiendo correccion para /proc${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
