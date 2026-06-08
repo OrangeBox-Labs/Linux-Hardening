@@ -115,7 +115,7 @@ check_lvm() {
 }
 
 # ==============================================
-# FUNCION PARA DESHABILITAR MODULO (CORREGIDO)
+# FUNCION PARA DESHABILITAR MODULO (CORREGIDO CON /bin/false)
 # ==============================================
 disable_filesystem_module() {
   local module="$1"
@@ -128,6 +128,7 @@ disable_filesystem_module() {
     return 0
   fi
 
+  # Verificar si ya esta correctamente deshabilitado con /bin/false
   if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null; then
     if lsmod | grep -q "^$module"; then
       echo -e "${YELLOW}[!] $module configurado para no cargarse, pero actualmente esta cargado${NC}"
@@ -145,9 +146,11 @@ disable_filesystem_module() {
     return 0
   fi
 
+  # Verificar si existe configuracion con /bin/true (incorrecta)
   if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
     echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true en lugar de /bin/false)${NC}"
     if [ "$AUTO_FIX" = true ]; then
+      # Reemplazar la configuracion incorrecta
       for f in /etc/modprobe.d/*.conf; do
         if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
           sed -i 's/^install $module \/bin\/true/install $module \/bin\/false/' "$f"
@@ -162,6 +165,7 @@ disable_filesystem_module() {
     return 0
   fi
 
+  # Verificar si existe configuracion comentada
   if grep -rq "^#\s*install $module" /etc/modprobe.d/ 2>/dev/null; then
     echo -e "${YELLOW}[!] $module configuracion comentada${NC}"
     if [ "$AUTO_FIX" = true ]; then
@@ -184,7 +188,11 @@ disable_filesystem_module() {
 
   if [ "$AUTO_FIX" = true ]; then
     cat >"$conf_file" <<EOF
-# Deshabilitar $module por seguridad (CIS 1.1.1.x)
+# ==============================================
+# Hardening: Modulo $module deshabilitado
+# Script: FS-hardening.sh
+# Fuente: https://www.orangebox.cl
+# ==============================================
 install $module /bin/false
 blacklist $module
 EOF
@@ -331,11 +339,22 @@ check_mount_options() {
       if grep -q "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab 2>/dev/null; then
         cp /etc/fstab /etc/fstab.backup.$(date +%Y%m%d-%H%M%S)
         local fstab_opts=$(grep "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab | head -1 | awk '{print $4}')
-        local fstab_new_opts="defaults"
+
+        # Determinar si usar defaults o mantener opciones base
+        local base_opts="defaults"
+        if [[ "$fstab_opts" == *"defaults"* ]] || [ -z "$fstab_opts" ]; then
+          base_opts="defaults"
+        else
+          base_opts="$fstab_opts"
+        fi
+
+        local fstab_new_opts="$base_opts"
         for opt in "${required_array[@]}"; do
-          fstab_new_opts="$fstab_new_opts,$opt"
+          if [[ ! "$fstab_new_opts" == *"$opt"* ]]; then
+            fstab_new_opts="$fstab_new_opts,$opt"
+          fi
         done
-        fstab_new_opts=$(echo "$fstab_new_opts" | sed 's/^defaults,defaults/defaults/')
+
         sed -i "s|\(.*[[:space:]]${mount_point}[[:space:]].*\)${fstab_opts}|\1${fstab_new_opts}|" /etc/fstab
         echo -e "${GREEN}[✓] /etc/fstab actualizado${NC}"
       fi
@@ -472,6 +491,9 @@ configure_dev_shm() {
     if [ $? -eq 0 ]; then
       echo -e "${GREEN}[✓] /dev/shm configurado con opciones seguras${NC}"
       if ! grep -q "^[^#].*/dev/shm" /etc/fstab 2>/dev/null; then
+        echo -e "\n# ==============================================" >>/etc/fstab
+        echo "# Hardening: /dev/shm con opciones seguras" >>/etc/fstab
+        echo "# Fuente: https://www.orangebox.cl" >>/etc/fstab
         echo "tmpfs /dev/shm tmpfs defaults,$required_opts 0 0" >>/etc/fstab
         echo -e "${GREEN}[✓] Entrada agregada a /etc/fstab${NC}"
       fi
@@ -486,7 +508,7 @@ configure_dev_shm() {
 }
 
 # ==============================================
-# CONFIGURAR /PROC CON HIDEPID (CORREGIDO)
+# CONFIGURAR /PROC CON HIDEPID
 # ==============================================
 configure_proc() {
   echo -e "\n${BLUE}[*] Configurando /proc con hidepid=2...${NC}"
@@ -498,7 +520,6 @@ configure_proc() {
 
   local current_opts=$(findmnt -n -o OPTIONS /proc 2>/dev/null)
 
-  # Verificar si ya tiene hidepid=2 o hidepid=invisible (son equivalentes)
   if [[ "$current_opts" == *"hidepid=2"* ]] || [[ "$current_opts" == *"hidepid=invisible"* ]]; then
     echo -e "${GREEN}[✓] /proc ya tiene hidepid=2 configurado${NC}"
     return 0
@@ -524,6 +545,9 @@ configure_proc() {
     if [ $? -eq 0 ]; then
       echo -e "${GREEN}[✓] /proc configurado con hidepid=2${NC}"
       if ! grep -q "^[^#].*/proc" /etc/fstab 2>/dev/null; then
+        echo -e "\n# ==============================================" >>/etc/fstab
+        echo "# Hardening: /proc con hidepid=2" >>/etc/fstab
+        echo "# Fuente: https://www.orangebox.cl" >>/etc/fstab
         echo "proc /proc proc defaults,hidepid=2 0 0" >>/etc/fstab
         echo -e "${GREEN}[✓] Entrada agregada a /etc/fstab${NC}"
       fi
@@ -555,6 +579,9 @@ show_summary() {
   echo -e "\n${YELLOW}VERIFICAR MODULOS DESHABILITADOS:${NC}"
   echo -e "  lsmod | grep -E 'cramfs|squashfs|udf|freevxfs|jffs2|hfs|hfsplus'"
   echo -e "  grep -r 'install.*/bin/false' /etc/modprobe.d/"
+
+  echo -e "\n${YELLOW}VERIFICAR FSTAB:${NC}"
+  echo -e "  grep -E '(/opt|/var|/tmp|/boot|/home|/var/log|/dev/shm|/proc)' /etc/fstab"
 
   echo -e "\n${GREEN}============================================${NC}"
   echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
