@@ -57,7 +57,7 @@ make_backup() {
 # ==============================================
 # FUNCION PARA CORREGIR PERMISOS
 # ==============================================
-fix_permissions() {
+check_and_fix_permissions() {
   local file="$1"
   local perms="$2"
   local owner="$3"
@@ -109,7 +109,7 @@ fix_permissions() {
 # ==============================================
 # FUNCION PARA CONFIGURAR RESTRICCION DE USUARIOS
 # ==============================================
-configure_user_restriction() {
+check_and_fix_user_restriction() {
   local allow_file="$1"
   local deny_file="$2"
   local service="$3"
@@ -155,7 +155,7 @@ configure_user_restriction() {
         WARNINGS=$((WARNINGS + 1))
       fi
     fi
-    fix_permissions "$allow_file" "600" "root" "root" "Archivo $allow_file"
+    check_and_fix_permissions "$allow_file" "600" "root" "root" "Archivo $allow_file"
   fi
 }
 
@@ -198,35 +198,34 @@ check_cron_enabled() {
 check_cron_permissions() {
   echo -e "\n${BLUE}[*] Verificando permisos de archivos cron...${NC}"
 
-  fix_permissions "/etc/crontab" "600" "root" "root" "/etc/crontab"
-  fix_permissions "/etc/cron.hourly" "700" "root" "root" "/etc/cron.hourly"
-  fix_permissions "/etc/cron.daily" "700" "root" "root" "/etc/cron.daily"
-  fix_permissions "/etc/cron.weekly" "700" "root" "root" "/etc/cron.weekly"
-  fix_permissions "/etc/cron.monthly" "700" "root" "root" "/etc/cron.monthly"
-  fix_permissions "/etc/cron.d" "700" "root" "root" "/etc/cron.d"
+  check_and_fix_permissions "/etc/crontab" "600" "root" "root" "/etc/crontab"
+  check_and_fix_permissions "/etc/cron.hourly" "700" "root" "root" "/etc/cron.hourly"
+  check_and_fix_permissions "/etc/cron.daily" "700" "root" "root" "/etc/cron.daily"
+  check_and_fix_permissions "/etc/cron.weekly" "700" "root" "root" "/etc/cron.weekly"
+  check_and_fix_permissions "/etc/cron.monthly" "700" "root" "root" "/etc/cron.monthly"
+  check_and_fix_permissions "/etc/cron.d" "700" "root" "root" "/etc/cron.d"
 }
 
 # ==============================================
 # 5.1.8 - ENSURE CRON IS RESTRICTED TO AUTHORIZED USERS
 # ==============================================
 check_cron_restriction() {
-  configure_user_restriction "/etc/cron.allow" "/etc/cron.deny" "cron"
+  check_and_fix_user_restriction "/etc/cron.allow" "/etc/cron.deny" "cron"
 }
 
 # ==============================================
 # 5.1.9 - ENSURE AT IS RESTRICTED TO AUTHORIZED USERS
 # ==============================================
 check_at_restriction() {
-  configure_user_restriction "/etc/at.allow" "/etc/at.deny" "at"
+  check_and_fix_user_restriction "/etc/at.allow" "/etc/at.deny" "at"
 }
 
 # ==============================================
 # REINICIAR SERVICIO
 # ==============================================
 restart_cron() {
-  echo -e "\n${BLUE}[*] Reiniciando servicio cron...${NC}"
-
   if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${BLUE}[*] Reiniciando servicio cron...${NC}"
     systemctl restart crond
     echo -e "${GREEN}[✓] crond reiniciado${NC}"
   fi
@@ -242,7 +241,10 @@ show_summary() {
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR CRON:${NC}"
   echo -e "  systemctl status crond"
@@ -288,6 +290,13 @@ main() {
     show_usage
     echo ""
     echo -e "${YELLOW}Los siguientes problemas fueron detectados:${NC}\n"
+    check_cron_enabled
+    check_cron_permissions
+    check_cron_restriction
+    check_at_restriction
+    # NO se reinicia cron en modo verificación
+    show_summary
+    exit 0
   fi
 
   # Modo automático con --fix o -f
@@ -296,6 +305,13 @@ main() {
     make_backup
     show_intro
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}\n"
+    check_cron_enabled
+    check_cron_permissions
+    check_cron_restriction
+    check_at_restriction
+    restart_cron
+    show_summary
+    exit 0
   fi
 
   # Modo ayuda
@@ -304,19 +320,10 @@ main() {
     exit 0
   fi
 
-  # Si no es --help y no es --fix, y hay argumentos desconocidos, mostrar error
-  if [ $# -gt 0 ] && [ "$1" != "--fix" ] && [ "$1" != "-f" ] && [ "$1" != "--help" ] && [ "$1" != "-h" ]; then
-    echo -e "${RED}[!] Opción desconocida: $1${NC}"
-    show_usage
-    exit 1
-  fi
-
-  check_cron_enabled
-  check_cron_permissions
-  check_cron_restriction
-  check_at_restriction
-  restart_cron
-  show_summary
+  # Opción desconocida
+  echo -e "${RED}[!] Opción desconocida: $1${NC}"
+  show_usage
+  exit 1
 }
 
 if [ "$EUID" -ne 0 ]; then
