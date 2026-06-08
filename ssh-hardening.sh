@@ -475,7 +475,7 @@ restart_ssh() {
 # ==============================================
 show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  SSH HARDENING COMPLETADO${NC}"
+  echo -e "${GREEN}  REPORTE SSH HARDENING COMPLETADO${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
@@ -488,7 +488,9 @@ show_summary() {
   echo -e "  cat $SSHD_CONFIG | grep -E '^(PermitRootLogin|PasswordAuthentication|Port|Protocol)'"
 
   echo -e "\n${YELLOW}PARA VER LOGS DE SSH:${NC}"
-  echo -e "  tail -f /var/log/secure | grep sshd"
+  echo -e "  tail -f /var/log/secure | grep sshd\n"
+  echo -e "\n${YELLOW}PARA APLICAR LAS CORRECCIONES EJECUTA:${NC}"
+  echo -e "  ./ssh-hardening.sh --fix\n"
 }
 
 # ==============================================
