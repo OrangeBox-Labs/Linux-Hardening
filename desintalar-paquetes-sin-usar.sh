@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # ==============================================
-# Script: desintalar-paquetes-sin.usar.sh
+# Script: desintalar-paquetes-sin-usar.sh
 # Autor: Felipe Roman
 # Web: www.orangebox.cl
 # Email: froman@orangebox.cl
-# Descripcion: Elimina paquetes innecesarios para reducir superficie de ataque
+# Descripcion: Elimina paquetes innecesarios de forma interactiva
+#              Muestra las dependencias antes de eliminar
 #              Basado en CIS Benchmark y buenas practicas de hardening
 # ==============================================
 
@@ -17,10 +18,127 @@ NC='\033[0m'
 
 FIXED=0
 WARNINGS=0
-AUTO_FIX=false
 
 # ==============================================
-# LISTA DE PAQUETES A REVISAR Y ELIMINAR
+# FUNCION PARA SIMULAR ELIMINACION Y CAPTURAR DEPENDENCIAS
+# ==============================================
+simulate_and_capture_deps() {
+  local package="$1"
+  local tx_file=""
+  local deps=""
+
+  # Ejecutar remove con --assumeno para generar archivo de transaccion
+  if command -v yum &>/dev/null; then
+    yum remove "$package" -y --assumeno 2>&1 >/dev/null
+    tx_file=$(ls -t /tmp/yum_save_tx.*.yumtx 2>/dev/null | head -1)
+  elif command -v dnf &>/dev/null; then
+    dnf remove "$package" -y --assumeno 2>&1 >/dev/null
+    tx_file=$(ls -t /tmp/dnf_save_tx.*.dnftx 2>/dev/null | head -1)
+  fi
+
+  # Parsear el archivo de transaccion
+  if [ -f "$tx_file" ]; then
+    deps=$(grep "^mbr:" "$tx_file" | cut -d',' -f1 | sed 's/^mbr: //' | sort -u)
+    rm -f "$tx_file"
+  fi
+
+  echo "$deps"
+}
+
+# ==============================================
+# FUNCION PARA MOSTRAR SPINNER
+# ==============================================
+show_spinner() {
+  local pid=$1
+  local msg="$2"
+  local spin='-\|/'
+  local i=0
+  while kill -0 $pid 2>/dev/null; do
+    i=$(((i + 1) % 4))
+    printf "\r${YELLOW}[%c]${NC} %s" "${spin:$i:1}" "$msg"
+    sleep 0.2
+  done
+  printf "\r${GREEN}[✓]${NC} %s${NC}\n" "$msg"
+}
+
+# ==============================================
+# FUNCION PARA PREGUNTAR Y ELIMINAR
+# ==============================================
+ask_and_remove() {
+  local package="$1"
+  local description="$2"
+
+  # Verificar si el paquete esta instalado
+  if ! rpm -q "$package" &>/dev/null; then
+    return 0
+  fi
+
+  local version=$(rpm -q "$package")
+
+  echo -e "\n${YELLOW}========================================${NC}"
+  echo -e "${YELLOW}Paquete: $package${NC}"
+  echo -e "${YELLOW}Version: $version${NC}"
+  echo -e "${YELLOW}Descripcion: $description${NC}"
+  echo -e "${YELLOW}========================================${NC}"
+
+  # Preguntar si quiere eliminar
+  echo -e "\n${YELLOW}¿Desea eliminar $package? (s/N): ${NC}"
+  read -r confirm
+
+  if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
+    echo -e "${YELLOW}[!] $package conservado${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  # Simular eliminacion para capturar dependencias
+  echo -e "${BLUE}[i] Analizando dependencias (puede tomar unos segundos)...${NC}"
+
+  (simulate_and_capture_deps "$package" >/tmp/deps_$$) &
+  show_spinner $! "Consultando dependencias de $package"
+
+  local deps=$(cat /tmp/deps_$$ 2>/dev/null)
+  rm -f /tmp/deps_$$
+
+  if [ -n "$deps" ]; then
+    local dep_count=$(echo "$deps" | wc -l)
+    echo -e "${YELLOW}[!] Se eliminaran $dep_count paquetes en total:${NC}"
+    echo "$deps" | sed 's/^/  - /'
+  else
+    echo -e "${YELLOW}[!] No se detectaron dependencias adicionales${NC}"
+    echo -e "${YELLOW}    Se eliminara solo $package${NC}"
+  fi
+
+  # Preguntar confirmacion final
+  echo -e "\n${RED}¿Confirma la eliminacion de $package y todas sus dependencias? (s/N): ${NC}"
+  read -r confirm_final
+
+  if [[ ! "$confirm_final" =~ ^[Ss]$ ]]; then
+    echo -e "${YELLOW}[!] Eliminacion cancelada, $package conservado${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  # Ejecutar eliminacion real
+  echo -e "${YELLOW}[*] Eliminando $package...${NC}"
+
+  if command -v yum &>/dev/null; then
+    yum remove "$package" -y
+  elif command -v dnf &>/dev/null; then
+    dnf remove "$package" -y
+  fi
+
+  if ! rpm -q "$package" &>/dev/null; then
+    echo -e "${GREEN}[✓] $package eliminado correctamente${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    echo -e "${RED}[!] No se pudo eliminar $package${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
+# ==============================================
+# LISTA DE PAQUETES A VERIFICAR
 # ==============================================
 
 # Paquetes de SELinux (no necesarios si no se usa)
@@ -127,86 +245,40 @@ OTHER_PACKAGES=(
 )
 
 # ==============================================
-# FUNCION PARA ELIMINAR PAQUETES
+# MOSTRAR INTRO
 # ==============================================
-remove_packages() {
-  local package_name="$1"
-  local description="$2"
-
-  if rpm -q "$package_name" &>/dev/null; then
-    local version=$(rpm -q "$package_name")
-    echo -e "${RED}[!] $package_name esta instalado: $version${NC}"
-    echo -e "${YELLOW}    $description${NC}"
-
-    if [ "$AUTO_FIX" = true ]; then
-      echo -e "${YELLOW}[*] Eliminando $package_name...${NC}"
-
-      if command -v dnf &>/dev/null; then
-        dnf remove "$package_name" -y 2>/dev/null
-      else
-        yum remove "$package_name" -y 2>/dev/null
-      fi
-
-      if ! rpm -q "$package_name" &>/dev/null; then
-        echo -e "${GREEN}[✓] $package_name eliminado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        echo -e "${RED}[!] No se pudo eliminar $package_name${NC}"
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    else
-      echo -e "${YELLOW}    Recomendacion: yum remove $package_name -y${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  else
-    echo -e "${GREEN}[✓] $package_name no esta instalado${NC}"
-  fi
-}
-
-# ==============================================
-# MOSTRAR ADVERTENCIA
-# ==============================================
-show_warning() {
-  echo -e "${RED}============================================${NC}"
-  echo -e "${RED}  ADVERTENCIA IMPORTANTE${NC}"
-  echo -e "${RED}============================================${NC}"
+show_intro() {
+  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}  Hardening - Eliminacion de Paquetes${NC}"
+  echo -e "${GREEN}  Basado en CIS Benchmark${NC}"
+  echo -e "${GREEN}============================================${NC}"
   echo -e "${YELLOW}"
-  echo "Este script eliminara paquetes innecesarios del sistema."
+  echo "Este script revisara paquetes innecesarios en el sistema."
   echo ""
-  echo "ANTES DE EJECUTAR:"
-  echo "  1. Asegurese de que NO necesita estos paquetes"
-  echo "  2. Algunos paquetes (como httpd, mysql, postfix)"
-  echo "     pueden ser necesarios para su aplicacion"
-  echo "  3. Revise la lista de paquetes antes de ejecutar con --fix"
+  echo "Para cada paquete encontrado:"
+  echo "  1. Preguntara si desea eliminarlo"
+  echo "  2. Simulara la eliminacion para mostrar dependencias"
+  echo "  3. Mostrara que paquetes se eliminaran"
+  echo "  4. Pedira confirmacion final"
   echo ""
-  echo "SERVICIOS QUE SE ELIMINARAN:"
-  echo "  - X Window (interfaz grafica)"
-  echo "  - Avahi, CUPS, DHCP, Bind (servicios de red)"
-  echo "  - Sendmail, Postfix, Dovecot (servicios de correo)"
-  echo "  - Herramientas de desarrollo (gcc, make, git)"
-  echo "  - Herramientas de depuracion (strace, gdb)"
-  echo "  - Compatibilidad, juegos y otros"
-  echo -e "${RED}============================================${NC}"
-  echo -e "${YELLOW}Pulse Ctrl+C ahora para cancelar, o presione Enter para continuar...${NC}"
+  echo "NO se eliminara Rsync por defecto (se asume que es necesario)"
+  echo ""
+  echo -e "${GREEN}Presione Enter para comenzar...${NC}"
   read -r
 }
 
 # ==============================================
-# MOSTRAR INSTRUCCIONES
+# MOSTRAR RESULTADO FINAL
 # ==============================================
 show_instructions() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  COMPLETADO${NC}"
+  echo -e "${GREEN}  HARDENING COMPLETADO${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Paquetes eliminados: ${GREEN}$FIXED${NC}"
-  echo -e "  • Advertencias: ${YELLOW}$WARNINGS${NC}"
+  echo -e "  • Paquetes conservados: ${YELLOW}$WARNINGS${NC}"
 
-  if [ $FIXED -gt 0 ]; then
-    echo -e "\n${YELLOW}[!] Se recomienda reiniciar el sistema${NC}"
-  fi
-
-  echo -e "\n${YELLOW}Para verificar que paquetes quedaron:${NC}"
+  echo -e "\n${YELLOW}PARA VERIFICAR PAQUETES INSTALADOS:${NC}"
   echo -e "  rpm -qa | grep -E \"(httpd|mysql|postfix|sendmail)\""
 }
 
@@ -214,89 +286,69 @@ show_instructions() {
 # FUNCION PRINCIPAL
 # ==============================================
 main() {
-  echo -e "${GREEN}============================================${NC}"
-  echo -e "${GREEN}  Eliminacion de Paquetes Innecesarios${NC}"
-  echo -e "${GREEN}============================================${NC}"
+  show_intro
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
-    AUTO_FIX=true
-    show_warning
-    echo -e "${YELLOW}[!] Modo automatico: eliminando paquetes...${NC}"
-  else
-    echo -e "${YELLOW}[!] Modo verificacion: no se eliminaran paquetes${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para eliminar${NC}"
-  fi
-
-  # SELinux packages
-  echo -e "\n${BLUE}[*] Verificando paquetes de SELinux...${NC}"
+  echo -e "${BLUE}[*] Verificando paquetes de SELinux...${NC}"
   for pkg in "${SELINUX_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # X Window packages
   echo -e "\n${BLUE}[*] Verificando paquetes de X Window...${NC}"
   for pkg in "${XORG_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Network services
   echo -e "\n${BLUE}[*] Verificando servicios de red...${NC}"
   for pkg in "${NETWORK_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Mail services
   echo -e "\n${BLUE}[*] Verificando servicios de correo...${NC}"
   for pkg in "${MAIL_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Development tools
   echo -e "\n${BLUE}[*] Verificando herramientas de desarrollo...${NC}"
   for pkg in "${DEV_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Debug tools
   echo -e "\n${BLUE}[*] Verificando herramientas de depuracion...${NC}"
   for pkg in "${DEBUG_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Games
   echo -e "\n${BLUE}[*] Verificando paquetes de juegos...${NC}"
   for pkg in "${GAMES_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Compatibility
   echo -e "\n${BLUE}[*] Verificando paquetes de compatibilidad...${NC}"
   for pkg in "${COMPAT_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
-  # Other packages
   echo -e "\n${BLUE}[*] Verificando otros paquetes innecesarios...${NC}"
   for pkg in "${OTHER_PACKAGES[@]}"; do
     name="${pkg%%:*}"
     desc="${pkg##*:}"
-    remove_packages "$name" "$desc"
+    ask_and_remove "$name" "$desc"
   done
 
   show_instructions
