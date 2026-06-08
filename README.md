@@ -60,6 +60,7 @@ Gracias por ser parte de esta comunidad!
 | `ssh-hardening.sh` | Hardening de SSH basado en CIS| [README](ssh-hardening-README.md) |
 | `ssh-hardening-complete.sh` | Hardening de SSH basado en ssh-audit| [README](ssh-hardening-complete-README.md) |
 | `password-hardening.sh` | Políticas de contraseñas | [README](password-hardening-README.md) |
+| `grub-hardening.sh` | Hardening para GRUB | [README](grub-hardening-README.md) |
 | `FS-hardening.sh` | Sistema de archivos | [README](FS-hardening.README.md) |
 | `sudo-hardening.sh` | Hardening de sudo | [README](sudo-hardening-README.md) |
 | `auditd-hardening.sh` | Auditoría del sistema | [README](auditd-hardening-README.md) |
