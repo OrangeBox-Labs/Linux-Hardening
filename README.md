@@ -56,6 +56,7 @@ Gracias por ser parte de esta comunidad!
 
 | Script | Función | README |
 |--------|---------|--------|
+| `cis-benchmark-check.sh` | Prueba de cumplimiento CIS, con mitigaciones| [README](cis-benchmark-check-README.md) |
 | `ssh-hardening.sh` | Hardening de SSH basado en CIS| [README](ssh-hardening-README.md) |
 | `ssh-hardening-complete.sh` | Hardening de SSH basado en ssh-audit| [README](ssh-hardening-complete-README.md) |
 | `password-hardening.sh` | Políticas de contraseñas | [README](password-hardening-README.md) |
