@@ -27,22 +27,24 @@ simulate_and_capture_deps() {
   local deps=""
 
   if command -v dnf &>/dev/null; then
-    # Para dnf, usar --assumeno y parsear la salida completa
+    # Ejecutar la simulacion y capturar la salida
     local output=$(dnf remove "$package" -y --assumeno 2>&1)
 
-    # Buscar la seccion "Removing:" o "Removing unused dependencies:"
-    # Formato: "  httpd                                      x86_64"
-    deps=$(echo "$output" | grep -E "^(Removing|Erasing|  [a-z])" | grep -v "^Removing:" | awk '{print $1}' | sort -u)
+    # Extraer la seccion de dependencias (despues de "Removing unused dependencies:" hasta "Transaction Summary")
+    deps=$(echo "$output" | sed -n '/Removing unused dependencies:/,/Transaction Summary/p' | grep -E "^  [a-z]" | awk '{print $1}')
 
-    # Si no se encontraron, buscar lineas indentadas con dos espacios
+    # Si estamos en español, buscar "Quitando dependencias no usadas:"
     if [ -z "$deps" ]; then
-      deps=$(echo "$output" | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
+      deps=$(echo "$output" | sed -n '/Quitando dependencias no usadas:/,/Resumen de la transacción/p' | grep -E "^  [a-z]" | awk '{print $1}')
     fi
 
   elif command -v yum &>/dev/null; then
-    # Para yum, usar --assumeno y parsear la salida
     local output=$(yum remove "$package" -y --assumeno 2>&1)
-    deps=$(echo "$output" | grep -E "^  [a-z]" | awk '{print $1}' | sort -u)
+    # Para yum, el formato puede ser diferente
+    deps=$(echo "$output" | sed -n '/Removing for dependencies:/,/Transaction Summary/p' | grep -E "^  [a-z]" | awk '{print $1}')
+    if [ -z "$deps" ]; then
+      deps=$(echo "$output" | sed -n '/Quitando por dependencias:/,/Resumen de la transacción/p' | grep -E "^  [a-z]" | awk '{print $1}')
+    fi
   fi
 
   echo "$deps"
@@ -141,7 +143,7 @@ ask_and_remove() {
 }
 
 # ==============================================
-# LISTA DE PAQUETES A VERIFICAR (SIN RSYNC)
+# LISTA DE PAQUETES A VERIFICAR
 # ==============================================
 
 # Paquetes de SELinux (no necesarios si no se usa)
@@ -224,7 +226,7 @@ COMPAT_PACKAGES=(
   "compat-libcap1:Librerias compatibilidad capabilities"
 )
 
-# Otros paquetes innecesarios (SIN RSYNC)
+# Otros paquetes innecesarios
 OTHER_PACKAGES=(
   "telnet:Cliente Telnet (inseguro)"
   "telnet-server:Servidor Telnet (inseguro)"
