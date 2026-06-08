@@ -40,6 +40,9 @@ No solo vivimos de scripts. Tenemos un par de lugares donde seguimos hablando de
 - 🎥 **YouTube**: Subimos videos mostrando ataques y cómo defenderte. guías y recomendaciones.
   → https://www.youtube.com/@OrangeBoxLinux
 
+- 🌐 **WEB**: Nuestra empresa
+  → https://www.orangebox.cl
+
 Si necesitan algo en particular o tienen una idea para mejorar estos scripts, déjennos un comentario en nuestro canal de YouTube. Allí también encontrarán varios videos explicando cómo se hacen algunos ataques y, lo más importante, cómo protegerse de ellos.
 
 
@@ -54,6 +57,7 @@ Gracias por ser parte de esta comunidad!
 | Script | Función | README |
 |--------|---------|--------|
 | `ssh-hardening.sh` | Hardening de SSH | [README](ssh-hardening-README.md) |
+| `ssh-hardening-complete.sh` | Hardening de SSH | [README](ssh-hardening-complete-README.md) |
 | `password-hardening.sh` | Políticas de contraseñas | [README](password-hardening-README.md) |
 | `FS-hardening.sh` | Sistema de archivos | [README](FS-hardening.README.md) |
 | `sudo-hardening.sh` | Hardening de sudo | [README](sudo-hardening-README.md) |
