@@ -250,14 +250,19 @@ show_intro() {
   echo ""
   echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
   echo ""
-  echo -e "${GREEN}Presione Enter para continuar o Ctrl+C para cancelar...${NC}"
-  read -r
 }
 
 # ==============================================
 # FUNCION PRINCIPAL
 # ==============================================
 main() {
+
+  # Detectar si el script se ejecutó con --fix
+  if [[ ! "$*" =~ --fix ]]; then
+    echo "Modo verificación: use --fix para aplicar cambios"
+    exit 0
+  fi
+
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Cron Hardening - CIS 5.1.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
