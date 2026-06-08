@@ -74,16 +74,6 @@ declare -A MOUNT_REQUIREMENTS=(
   ["/proc"]="hidepid=2"
 )
 
-declare -a MODULES_TO_DISABLE=(
-  "cramfs"
-  "squashfs"
-  "udf"
-  "freevxfs"
-  "jffs2"
-  "hfs"
-  "hfsplus"
-)
-
 # ==============================================
 # FUNCION PARA PREGUNTAR AL USUARIO
 # ==============================================
@@ -115,7 +105,7 @@ check_lvm() {
 }
 
 # ==============================================
-# DESHABILITAR SISTEMAS DE ARCHIVOS NO USADOS (CORREGIDO)
+# DESHABILITAR MODULOS DE FILESYSTEM (CORREGIDO)
 # ==============================================
 disable_modules() {
   local modules="cramfs squashfs udf freevxfs jffs2 hfs hfsplus"
@@ -125,29 +115,37 @@ disable_modules() {
   for module in $modules; do
     local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
 
+    echo -e "\n${YELLOW}[*] Verificando modulo: $module${NC}"
+
     # Verificar si el modulo existe en el sistema
     if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
       echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
       continue
     fi
 
-    # Verificar si ya esta correctamente deshabilitado
+    # Verificar si ya esta correctamente deshabilitado con /bin/false
     if grep -q "^install $module /bin/false" "$conf_file" 2>/dev/null; then
-      echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
+      echo -e "${GREEN}[✓] $module ya estaba correctamente deshabilitado${NC}"
       continue
     fi
 
-    # Si existe configuracion incorrecta (con /bin/true), eliminarla
-    if grep -q "^install $module /bin/true" /etc/modprobe.d/*.conf 2>/dev/null; then
+    # Verificar si existe configuracion incorrecta (con /bin/true) en algun archivo
+    if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
       echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
       if [ "$AUTO_FIX" = true ]; then
-        sed -i '/^install '$module' \/bin\/true/d' /etc/modprobe.d/*.conf 2>/dev/null
-        sed -i '/^# Deshabilitar '$module'/d' /etc/modprobe.d/*.conf 2>/dev/null
-        echo -e "${GREEN}[✓] Configuracion incorrecta eliminada${NC}"
+        # Eliminar la configuracion incorrecta de todos los archivos
+        for f in /etc/modprobe.d/*.conf; do
+          if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
+            sed -i '/^install '$module' \/bin\/true/d' "$f"
+            sed -i '/^# Deshabilitar '$module'/d' "$f"
+            echo -e "${GREEN}[✓] Configuracion incorrecta eliminada de $f${NC}"
+          fi
+        done
       fi
     fi
 
-    echo -e "${RED}[!] $module NO esta deshabilitado${NC}"
+    # El modulo no esta deshabilitado o hay que crearlo
+    echo -e "${RED}[!] $module NO esta deshabilitado correctamente${NC}"
 
     if [ "$AUTO_FIX" = true ]; then
       cat >"$conf_file" <<EOF
@@ -304,22 +302,12 @@ check_mount_options() {
       if grep -q "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab 2>/dev/null; then
         cp /etc/fstab /etc/fstab.backup.$(date +%Y%m%d-%H%M%S)
         local fstab_opts=$(grep "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab | head -1 | awk '{print $4}')
-
-        # Determinar si usar defaults o mantener opciones base
-        local base_opts="defaults"
-        if [[ "$fstab_opts" == *"defaults"* ]] || [ -z "$fstab_opts" ]; then
-          base_opts="defaults"
-        else
-          base_opts="$fstab_opts"
-        fi
-
-        local fstab_new_opts="$base_opts"
+        local fstab_new_opts="$fstab_opts"
         for opt in "${required_array[@]}"; do
           if [[ ! "$fstab_new_opts" == *"$opt"* ]]; then
             fstab_new_opts="$fstab_new_opts,$opt"
           fi
         done
-
         sed -i "s|\(.*[[:space:]]${mount_point}[[:space:]].*\)${fstab_opts}|\1${fstab_new_opts}|" /etc/fstab
         echo -e "${GREEN}[✓] /etc/fstab actualizado${NC}"
       fi
@@ -543,7 +531,7 @@ show_summary() {
 
   echo -e "\n${YELLOW}VERIFICAR MODULOS DESHABILITADOS:${NC}"
   echo -e "  lsmod | grep -E 'cramfs|squashfs|udf|freevxfs|jffs2|hfs|hfsplus'"
-  echo -e "  grep -r 'install.*/bin/false' /etc/modprobe.d/"
+  echo -e "  grep -r 'install.*\/bin\/false' /etc/modprobe.d/"
 
   echo -e "\n${YELLOW}VERIFICAR FSTAB:${NC}"
   echo -e "  grep -E '(/opt|/var|/tmp|/boot|/home|/var/log|/dev/shm|/proc)' /etc/fstab"
@@ -581,12 +569,13 @@ main() {
     AUTO_FIX=true
   fi
 
-  for module in "${MODULES_TO_DISABLE[@]}"; do
-    disable_filesystem_module "$module"
-  done
+  # Deshabilitar modulos de filesystem
+  disable_modules
 
+  # Verificar particiones separadas
   check_separated_partitions
 
+  # Verificar opciones de montaje
   for mount_point in /opt /var /tmp /boot /home /var/log /var/tmp /var/ossec; do
     if findmnt -n "$mount_point" &>/dev/null; then
       required_opts="${MOUNT_REQUIREMENTS[$mount_point]}"
@@ -596,8 +585,11 @@ main() {
     fi
   done
 
+  # Configurar puntos especiales
   configure_dev_shm
   configure_proc
+
+  # Otras configuraciones
   apply_sticky_bit
   disable_autofs
 
