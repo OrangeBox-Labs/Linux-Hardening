@@ -57,6 +57,7 @@ Gracias por ser parte de esta comunidad!
 | Script | Función | README |
 |--------|---------|--------|
 | `post-install.sh` | Ejecutar primero, son los primeros pasos después de instalar un Linux| [README](post-install-README.md) |
+| `bash-hardening.sh` | Asegurar la bash, profiles, history, aliases, etc. [README](bash-hardening-README.md) |
 | `cis-benchmark-check.sh` | Prueba de cumplimiento CIS, con mitigaciones| [README](cis-benchmark-check-README.md) |
 | `ssh-hardening.sh` | Hardening de SSH basado en CIS| [README](ssh-hardening-README.md) |
 | `ssh-hardening-complete.sh` | Hardening de SSH basado en ssh-audit| [README](ssh-hardening-complete-README.md) |
