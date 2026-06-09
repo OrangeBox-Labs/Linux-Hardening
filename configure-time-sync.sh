@@ -30,6 +30,24 @@ NTP_SERVERS=(
 )
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./configure-time-sync.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./configure-time-sync.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # CREAR BACKUP
 # ==============================================
 make_backup() {
@@ -51,6 +69,35 @@ make_backup() {
 
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
   fi
+}
+
+# ==============================================
+# MOSTRAR ADVERTENCIA CON CUENTA REGRESIVA
+# ==============================================
+show_warning() {
+  echo -e "${RED}============================================${NC}"
+  echo -e "${RED}  ADVERTENCIA IMPORTANTE${NC}"
+  echo -e "${RED}============================================${NC}"
+  echo -e "${YELLOW}"
+  echo "Este script configurara la sincronizacion de tiempo."
+  echo ""
+  echo "SE CONFIGURARA:"
+  echo "  - Instalacion de chrony o NTP"
+  echo "  - Servidores NTP: time.google.com, pool.ntp.org"
+  echo "  - Sincronizacion automatica"
+  echo ""
+  echo "Backup de configuraciones en: $BACKUP_DIR"
+  echo ""
+  echo -e "${RED}============================================${NC}"
+  echo -e "${YELLOW}El script comenzara en 3 segundos...${NC}"
+  echo -e "${YELLOW}Presione Ctrl+C para cancelar${NC}"
+  echo -e "${RED}============================================${NC}"
+
+  for i in 3 2 1; do
+    echo -ne "${YELLOW}  $i...${NC}\r"
+    sleep 1
+  done
+  echo -e "${GREEN}  Ejecutando...${NC}\n"
 }
 
 # ==============================================
@@ -79,6 +126,9 @@ install_time_sync() {
       yum remove ntp -y 2>/dev/null || dnf remove ntp -y 2>/dev/null
       echo -e "${GREEN}[✓] ntp eliminado${NC}"
       FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}    Recomendacion: Eliminar ntp o chrony${NC}"
+      WARNINGS=$((WARNINGS + 1))
     fi
   elif [ "$chrony_installed" = false ] && [ "$ntp_installed" = false ]; then
     echo -e "${RED}[!] No hay sistema de sincronizacion de tiempo instalado${NC}"
@@ -102,11 +152,11 @@ install_time_sync() {
 
   # Retornar que servicio esta instalado
   if [ "$chrony_installed" = true ]; then
-    return 0 # chrony
+    return 0
   elif [ "$ntp_installed" = true ]; then
-    return 1 # ntp
+    return 1
   else
-    return 2 # ninguno
+    return 2
   fi
 }
 
@@ -152,7 +202,6 @@ configure_chrony() {
   if [ $needs_fix -eq 1 ] && [ "$AUTO_FIX" = true ]; then
     echo -e "${YELLOW}[*] Configurando chrony...${NC}"
 
-    # Configurar chrony.conf
     cat >/etc/chrony.conf <<EOF
 # Servidores NTP configurados por hardening
 server time.google.com iburst
@@ -173,11 +222,9 @@ rtcsync
 EOF
     echo -e "${GREEN}[✓] chrony.conf configurado${NC}"
 
-    # Configurar chronyd
     echo 'OPTIONS="-u chrony"' >/etc/sysconfig/chronyd
     echo -e "${GREEN}[✓] chronyd configurado${NC}"
 
-    # Asegurar permisos
     chown root:root /etc/chrony.conf
     chmod 644 /etc/chrony.conf
     chown root:root /etc/sysconfig/chronyd
@@ -201,7 +248,21 @@ configure_ntp() {
     return
   fi
 
-  if [ "$AUTO_FIX" = true ]; then
+  local needs_fix=0
+
+  if [ -f /etc/ntp.conf ]; then
+    if grep -q "^server" /etc/ntp.conf; then
+      echo -e "${GREEN}[✓] ntp.conf tiene servidores configurados${NC}"
+    else
+      echo -e "${RED}[!] ntp.conf no tiene servidores configurados${NC}"
+      needs_fix=1
+    fi
+  else
+    echo -e "${RED}[!] /etc/ntp.conf no existe${NC}"
+    needs_fix=1
+  fi
+
+  if [ $needs_fix -eq 1 ] && [ "$AUTO_FIX" = true ]; then
     cat >/etc/ntp.conf <<EOF
 # Servidores NTP configurados por hardening
 server time.google.com iburst
@@ -222,12 +283,9 @@ EOF
 
     echo 'OPTIONS="-u ntp:ntp -p /var/run/ntpd.pid"' >/etc/sysconfig/ntpd
 
-    systemctl restart ntpd
-    systemctl enable ntpd
-
     echo -e "${GREEN}[✓] ntp configurado${NC}"
     FIXED=$((FIXED + 1))
-  else
+  elif [ $needs_fix -eq 1 ]; then
     echo -e "${YELLOW}    Recomendacion: Configurar /etc/ntp.conf${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
@@ -240,30 +298,62 @@ start_service() {
   echo -e "\n${BLUE}[*] Iniciando servicio de sincronizacion...${NC}"
 
   if rpm -q chrony &>/dev/null; then
-    if [ "$AUTO_FIX" = true ]; then
-      systemctl enable chronyd
-      systemctl restart chronyd
-      echo -e "${GREEN}[✓] chronyd habilitado e iniciado${NC}"
-      FIXED=$((FIXED + 1))
+    if systemctl is-enabled chronyd &>/dev/null; then
+      echo -e "${GREEN}[✓] chronyd ya esta habilitado${NC}"
     else
-      echo -e "${YELLOW}    Recomendacion: systemctl enable --now chronyd${NC}"
-      WARNINGS=$((WARNINGS + 1))
+      echo -e "${RED}[!] chronyd no esta habilitado${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        systemctl enable chronyd
+        echo -e "${GREEN}[✓] chronyd habilitado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    fi
+
+    if systemctl is-active chronyd &>/dev/null; then
+      echo -e "${GREEN}[✓] chronyd esta corriendo${NC}"
+    else
+      echo -e "${RED}[!] chronyd no esta corriendo${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        systemctl restart chronyd
+        echo -e "${GREEN}[✓] chronyd iniciado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
     fi
   elif rpm -q ntp &>/dev/null; then
-    if [ "$AUTO_FIX" = true ]; then
-      systemctl enable ntpd
-      systemctl restart ntpd
-      echo -e "${GREEN}[✓] ntpd habilitado e iniciado${NC}"
-      FIXED=$((FIXED + 1))
+    if systemctl is-enabled ntpd &>/dev/null; then
+      echo -e "${GREEN}[✓] ntpd ya esta habilitado${NC}"
     else
-      echo -e "${YELLOW}    Recomendacion: systemctl enable --now ntpd${NC}"
-      WARNINGS=$((WARNINGS + 1))
+      echo -e "${RED}[!] ntpd no esta habilitado${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        systemctl enable ntpd
+        echo -e "${GREEN}[✓] ntpd habilitado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    fi
+
+    if systemctl is-active ntpd &>/dev/null; then
+      echo -e "${GREEN}[✓] ntpd esta corriendo${NC}"
+    else
+      echo -e "${RED}[!] ntpd no esta corriendo${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        systemctl restart ntpd
+        echo -e "${GREEN}[✓] ntpd iniciado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
     fi
   fi
 }
 
 # ==============================================
-# FORZAR SINCROINZACION INMEDIATA
+# FORZAR SINCRONIZACION INMEDIATA
 # ==============================================
 force_sync() {
   echo -e "\n${BLUE}[*] Forzando sincronizacion de tiempo...${NC}"
@@ -272,16 +362,14 @@ force_sync() {
     if command -v chronyc &>/dev/null; then
       chronyc makestep 2>/dev/null
       echo -e "${GREEN}[✓] Sincronizacion forzada con chrony${NC}"
-      FIXED=$((FIXED + 1))
     elif command -v ntpdate &>/dev/null; then
       ntpdate -u time.google.com 2>/dev/null
       echo -e "${GREEN}[✓] Sincronizacion forzada con ntpdate${NC}"
-      FIXED=$((FIXED + 1))
     else
       echo -e "${YELLOW}[!] No se encontro herramienta de sincronizacion${NC}"
-      echo -e "${YELLOW}    Instalando ntpdate...${NC}"
+      echo -e "${YELLOW}[*] Instalando ntpdate...${NC}"
       yum install ntpdate -y 2>/dev/null || dnf install ntpdate -y 2>/dev/null
-      ntpdate -u time.google.com
+      ntpdate -u time.google.com 2>/dev/null
       echo -e "${GREEN}[✓] Sincronizacion forzada${NC}"
     fi
   else
@@ -297,55 +385,36 @@ check_status() {
   echo -e "\n${BLUE}[*] Verificando estado de sincronizacion...${NC}"
 
   if command -v chronyc &>/dev/null; then
-    chronyc tracking 2>/dev/null | grep -E "Reference time|Stratum"
-    if [ $? -eq 0 ]; then
+    if chronyc tracking 2>/dev/null | grep -E "Reference time|Stratum" >/dev/null; then
+      chronyc tracking 2>/dev/null | grep -E "Reference time|Stratum"
       echo -e "${GREEN}[✓] chrony sincronizado correctamente${NC}"
+    else
+      echo -e "${YELLOW}[!] chrony no esta sincronizado aun (puede tomar unos minutos)${NC}"
     fi
   elif command -v ntpq &>/dev/null; then
-    ntpq -p 2>/dev/null | head -5
-    if [ $? -eq 0 ]; then
+    if ntpq -p 2>/dev/null | grep -E "^\*" >/dev/null; then
+      ntpq -p 2>/dev/null | head -5
       echo -e "${GREEN}[✓] ntp sincronizado correctamente${NC}"
+    else
+      echo -e "${YELLOW}[!] ntp no esta sincronizado aun (puede tomar unos minutos)${NC}"
     fi
   fi
 }
 
 # ==============================================
-# MOSTRAR ADVERTENCIA
+# MOSTRAR RESUMEN FINAL
 # ==============================================
-show_warning() {
-  echo -e "${RED}============================================${NC}"
-  echo -e "${RED}  ADVERTENCIA IMPORTANTE${NC}"
-  echo -e "${RED}============================================${NC}"
-  echo -e "${YELLOW}"
-  echo "Este script configurara la sincronizacion de tiempo."
-  echo ""
-  echo "SE CONFIGURARA:"
-  echo "  - Instalacion de chrony o NTP"
-  echo "  - Servidores NTP: time.google.com, pool.ntp.org"
-  echo "  - Sincronizacion automatica"
-  echo ""
-  echo "Backup de configuraciones en: $BACKUP_DIR"
-  echo ""
-  echo -e "${RED}¿Desea continuar? (s/N): ${NC}"
-  read -r confirm
-
-  if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
-    echo -e "${YELLOW}[!] Operacion cancelada por el usuario${NC}"
-    exit 0
-  fi
-}
-
-# ==============================================
-# MOSTRAR INSTRUCCIONES FINALES
-# ==============================================
-show_instructions() {
+show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  CONFIGURACION COMPLETADA${NC}"
+  echo -e "${GREEN}  CONFIGURACION DE TIEMPO COMPLETADA${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR ESTADO:${NC}"
   echo -e "  chronyc tracking"
@@ -360,8 +429,15 @@ show_instructions() {
   echo -e "  journalctl -u chronyd -f"
   echo -e "  journalctl -u ntpd -f"
 
-  echo -e "\n${YELLOW}PARA RESTAURAR BACKUP:${NC}"
-  echo -e "  cp $BACKUP_DIR/* /etc/"
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${YELLOW}PARA RESTAURAR BACKUP:${NC}"
+    echo -e "  cp $BACKUP_DIR/* /etc/"
+  fi
+
+  echo -e "\n${GREEN}============================================${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+  echo -e "${GREEN}============================================${NC}"
 }
 
 # ==============================================
@@ -371,17 +447,25 @@ main() {
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Configuracion de Sincronizacion de Tiempo${NC}"
   echo -e "${GREEN}  CIS 2.2.1.1 - 2.2.1.2${NC}"
-  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}============================================${NC}\n"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ] || [ -z "$1" ]; then
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
+  fi
+
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
     make_backup
     show_warning
-    echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
   else
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
     AUTO_FIX=false
-    echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-    echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
   fi
 
   install_time_sync
@@ -397,7 +481,11 @@ main() {
   force_sync
   check_status
 
-  show_instructions
+  show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
