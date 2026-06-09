@@ -9,7 +9,8 @@
 #              Configura historial con fecha/hora, prompt mejorado,
 #              timeout, umask segura, alias útiles, auditoría en syslog
 #              y protecciones adicionales
-# Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
+#              Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
+#              NO requiere paquetes adicionales (usa solo herramientas base)
 # ==============================================
 
 RED='\033[0;31m'
@@ -66,31 +67,6 @@ make_backup() {
 }
 
 # ==============================================
-# VERIFICAR SI FIGLET ESTA INSTALADO
-# ==============================================
-check_figlet() {
-  if ! command -v figlet &>/dev/null; then
-    echo -e "${YELLOW}[!] figlet no esta instalado (opcional para banner)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo -e "${YELLOW}[*] Instalando figlet...${NC}"
-      if command -v dnf &>/dev/null; then
-        dnf install -y figlet 2>/dev/null
-      else
-        yum install -y figlet 2>/dev/null
-      fi
-      if command -v figlet &>/dev/null; then
-        echo -e "${GREEN}[✓] figlet instalado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        echo -e "${YELLOW}[!] No se pudo instalar figlet, banner omitido${NC}"
-      fi
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-}
-
-# ==============================================
 # CONFIGURAR PROFILE.D CON BANNER Y PROMPT
 # ==============================================
 configure_profile() {
@@ -111,19 +87,19 @@ configure_profile() {
 # https://www.orangebox.cl
 # ==============================================
 
-# Banner de OrangeBox (si figlet esta instalado)
-if command -v figlet &>/dev/null; then
-    echo "$(tput setaf 214)$(figlet -f small 'OrangeBox')$(tput sgr0)"
-    echo -e "${GREEN}  Hardening Bash - Configuracion segura${NC}"
-    echo ""
-fi
+# Banner de OrangeBox (ASCII art simple, no requiere figlet)
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║                     ORANGEBOX LABS                       ║"
+echo "║                   Hardening Bash v1.0                    ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
 
 # Mostrar información de la conexión
-echo -e "${YELLOW}=== INFORMACION DE CONEXION ===${NC}"
-echo -e "${GREEN}Hostname completo:${NC} $(hostname -f 2>/dev/null || hostname)"
-echo -e "${GREEN}IP del cliente:${NC} $(who am i | awk '{print $5}' | tr -d '()' || echo 'local')"
-echo -e "${GREEN}Usuario:${NC} $USER"
-echo -e "${GREEN}Fecha/Hora:${NC} $(date '+%Y-%m-%d %H:%M:%S')"
+echo "=== INFORMACION DE CONEXION ==="
+echo "Hostname completo: $(hostname -f 2>/dev/null || hostname)"
+echo "IP del cliente: $(who am i | awk '{print $5}' | tr -d '()' || echo 'local')"
+echo "Usuario: $USER"
+echo "Fecha/Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
 # Prompt personalizado: [HORA] usuario@hostname directorio $
@@ -146,13 +122,6 @@ readonly TMOUT
 
 # Umask segura (archivos nuevos con permisos 750 para directorios, 640 para archivos)
 umask 027
-
-# Alias útiles para seguridad
-alias rm='rm -i'
-alias cp='cp -i'
-alias mv='mv -i'
-alias vi='vim'
-alias sudo='sudo '
 
 # Historial inmutable (evita que el usuario lo desactive)
 readonly HISTFILE
@@ -218,7 +187,7 @@ alias hg='history | grep'
 # Sistema
 alias ps='ps auxf'
 alias ports='ss -tulanp'
-alias myip='curl -s ifconfig.me && echo ""'
+alias myip='curl -s ifconfig.me && echo "" 2>/dev/null || echo "Instalar curl para ver IP publica"'
 
 # Navegación rápida
 alias ..='cd ..'
@@ -425,60 +394,6 @@ EOF
 }
 
 # ==============================================
-# INSTALAR HERRAMIENTAS OPCIONALES
-# ==============================================
-install_optional_tools() {
-  echo -e "\n${BLUE}[*] Verificando herramientas opcionales...${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    # bat - cat con colores y sintaxis
-    if ! command -v bat &>/dev/null; then
-      echo -e "${YELLOW}[*] Intentando instalar bat...${NC}"
-      if command -v dnf &>/dev/null; then
-        dnf install -y bat 2>/dev/null || echo -e "${YELLOW}[!] bat no disponible en repositorios${NC}"
-      else
-        yum install -y bat 2>/dev/null || echo -e "${YELLOW}[!] bat no disponible en repositorios${NC}"
-      fi
-      if command -v bat &>/dev/null; then
-        echo -e "${GREEN}[✓] bat instalado${NC}"
-        echo "alias cat='bat'" >>"$ALIASES_D"
-        FIXED=$((FIXED + 1))
-      fi
-    fi
-
-    # exa - ls mejorado (requiere EPEL)
-    if ! command -v exa &>/dev/null; then
-      echo -e "${YELLOW}[*] Intentando instalar exa...${NC}"
-      if command -v dnf &>/dev/null; then
-        dnf install -y exa 2>/dev/null || echo -e "${YELLOW}[!] exa no disponible en repositorios${NC}"
-      else
-        yum install -y exa 2>/dev/null || echo -e "${YELLOW}[!] exa no disponible en repositorios${NC}"
-      fi
-      if command -v exa &>/dev/null; then
-        echo -e "${GREEN}[✓] exa instalado${NC}"
-        echo "alias ls='exa -l --git'" >>"$ALIASES_D"
-        FIXED=$((FIXED + 1))
-      fi
-    fi
-
-    # duf - df mejorado
-    if ! command -v duf &>/dev/null; then
-      echo -e "${YELLOW}[*] Intentando instalar duf...${NC}"
-      if command -v dnf &>/dev/null; then
-        dnf install -y duf 2>/dev/null || echo -e "${YELLOW}[!] duf no disponible en repositorios${NC}"
-      else
-        yum install -y duf 2>/dev/null || echo -e "${YELLOW}[!] duf no disponible en repositorios${NC}"
-      fi
-      if command -v duf &>/dev/null; then
-        echo -e "${GREEN}[✓] duf instalado${NC}"
-        echo "alias df='duf'" >>"$ALIASES_D"
-        FIXED=$((FIXED + 1))
-      fi
-    fi
-  fi
-}
-
-# ==============================================
 # DESHABILITAR CTRL+ALT+DEL
 # ==============================================
 disable_ctrl_alt_del() {
@@ -604,14 +519,12 @@ main() {
   fi
 
   # Ejecutar configuraciones
-  check_figlet
   configure_profile
   configure_aliases
   configure_syslog_history
   configure_secure_history
   configure_root_bashrc
   configure_skel
-  install_optional_tools
   disable_ctrl_alt_del
 
   show_summary
