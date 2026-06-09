@@ -233,6 +233,7 @@ configure_syslog_history() {
   echo -e "${RED}[!] Envio a syslog NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
+    # Crear el script de logging
     cat >"$HISTORY_SYSLOG" <<'EOF'
 # ==============================================
 # Envio de comandos ejecutados a syslog - OrangeBox Labs
@@ -246,14 +247,24 @@ EOF
     echo -e "${GREEN}[✓] Envio de comandos a syslog configurado${NC}"
     FIXED=$((FIXED + 1))
 
-    # Configurar rsyslog
-    cat >"$RSYSLOG_CONF" <<'EOF'
+    # Configurar rsyslog si existe
+    if command -v rsyslogd >/dev/null 2>&1; then
+      # Crear directorio si no existe
+      mkdir -p /etc/rsyslog.d/
+
+      cat >"$RSYSLOG_CONF" <<'EOF'
 # Logs de comandos bash - OrangeBox Labs
 local1.notice    /var/log/bash_commands.log
 EOF
-    if systemctl restart rsyslog 2>/dev/null; then
-      echo -e "${GREEN}[✓] Rsyslog configurado para recibir comandos${NC}"
-      FIXED=$((FIXED + 1))
+      # Intentar reiniciar rsyslog
+      if systemctl restart rsyslog 2>/dev/null; then
+        echo -e "${GREEN}[✓] Rsyslog configurado para recibir comandos${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${YELLOW}[!] Rsyslog no esta corriendo, los comandos se envian a journald${NC}"
+      fi
+    else
+      echo -e "${YELLOW}[!] Rsyslog no instalado, usando journald (systemd) por defecto${NC}"
     fi
   else
     WARNINGS=$((WARNINGS + 1))
