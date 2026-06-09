@@ -88,10 +88,12 @@ configure_profile() {
 # ==============================================
 
 # Banner de OrangeBox (ASCII art simple, no requiere figlet)
-echo "╔══════════════════════════════════════════════════════════╗"
-echo "║                     ORANGEBOX LABS                       ║"
-echo "║                   Hardening Bash v1.0                    ║"
-echo "╚══════════════════════════════════════════════════════════╝"
+echo "  ___                         ___          "
+echo " / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __"
+echo "| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /"
+echo " \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\"
+echo "                    |___/                  "
+echo "  Hardening Bash - Configuracion segura"
 echo ""
 
 # Mostrar información de la conexión
@@ -116,11 +118,13 @@ export HISTFILE="$HOME/.bash_history"
 shopt -s histappend
 export PROMPT_COMMAND="history -a; $PROMPT_COMMAND"
 
-# Timeout de sesión inactiva (15 minutos)
-export TMOUT=900
-readonly TMOUT
+# Timeout de sesión inactiva (15 minutos) - solo si no está definido
+if [ -z "$TMOUT" ]; then
+    export TMOUT=900
+    readonly TMOUT
+fi
 
-# Umask segura (archivos nuevos con permisos 750 para directorios, 640 para archivos)
+# Umask segura
 umask 027
 
 # Historial inmutable (evita que el usuario lo desactive)
@@ -189,12 +193,11 @@ alias ps='ps auxf'
 alias ports='ss -tulanp'
 alias myip='curl -s ifconfig.me && echo "" 2>/dev/null || echo "Instalar curl para ver IP publica"'
 
-# Navegación rápida
+# Navegación rápida (sin alias para / que es inválido)
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias ~='cd ~'
-alias /='cd /'
 
 # Editores
 alias v='vim'
@@ -333,9 +336,11 @@ readonly HISTFILE
 # Prompt personalizado para root (en rojo)
 export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # "
 
-# Timeout más estricto para root (10 minutos)
-export TMOUT=600
-readonly TMOUT
+# Timeout más estricto para root (10 minutos) - solo si no está definido
+if [ -z "$TMOUT" ]; then
+    export TMOUT=600
+    readonly TMOUT
+fi
 
 # Umask segura
 umask 027
@@ -380,7 +385,12 @@ export HISTSIZE=10000
 export HISTFILESIZE=50000
 export HISTCONTROL=ignoredups:ignorespace
 shopt -s histappend
-export TMOUT=900
+
+if [ -z "$TMOUT" ]; then
+    export TMOUT=900
+    readonly TMOUT
+fi
+
 umask 027
 alias rm='rm -i'
 alias cp='cp -i'
