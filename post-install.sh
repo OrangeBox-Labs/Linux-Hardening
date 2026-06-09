@@ -308,7 +308,7 @@ install_vmware_tools() {
 install_essentials() {
   echo -e "\n${BLUE}[*] Instalando herramientas esenciales...${NC}"
 
-  local tools="vim rsync net-tools"
+  local tools="vim rsync net-tools ncurses bash-completion"
   local extra_tools=""
 
   echo -e "${YELLOW}Herramientas base a instalar: vim, rsync, net-tools${NC}"
