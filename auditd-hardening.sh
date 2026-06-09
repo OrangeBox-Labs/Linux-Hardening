@@ -29,16 +29,16 @@ BACKUP_DIR="/root/audit-backup-$(date +%Y%m%d-%H%M%S)"
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo automatico (aplica las correcciones)"
-  echo "  $0 --check    - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 -c         - Modo verificación (version corta)"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
-  echo "  # Aplicar los cambios directamente"
+  echo "  # Ver qué cambios se aplicarían"
   echo "  ./auditd-hardening.sh"
   echo ""
-  echo "  # Ver qué cambios se aplicarían sin hacerlos"
-  echo "  ./auditd-hardening.sh --check"
+  echo "  # Aplicar los cambios"
+  echo "  ./auditd-hardening.sh --fix"
   echo ""
 }
 
@@ -528,17 +528,17 @@ main() {
     exit 0
   fi
 
-  if [ "$1" = "--check" ] || [ "$1" = "-c" ]; then
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     show_usage
     echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
     AUTO_FIX=false
-  else
-    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    AUTO_FIX=true
-    make_backup
   fi
 
   check_auditd_installed
@@ -551,7 +551,7 @@ main() {
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0${NC}"
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
   fi
 }
 
