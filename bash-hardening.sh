@@ -93,12 +93,11 @@ echo " / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __"
 echo "| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /"
 echo " \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\"
 echo "                    |___/                  "
-echo "  Hardening Bash - Configuracion segura"
+echo
 echo ""
 
 # Mostrar información de la conexión
 echo "=== INFORMACION DE CONEXION ==="
-echo "Hostname completo: $(hostname -f 2>/dev/null || hostname)"
 echo "IP del cliente: $(who am i | awk '{print $5}' | tr -d '()' || echo 'local')"
 echo "Usuario: $USER"
 echo "Fecha/Hora: $(date '+%Y-%m-%d %H:%M:%S')"
