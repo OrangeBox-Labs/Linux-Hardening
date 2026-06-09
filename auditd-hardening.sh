@@ -7,6 +7,7 @@
 # Email: froman@orangebox.cl
 # Descripcion: Configura auditd segun CIS Benchmark
 #              CIS 4.1.1 - 4.1.18
+#              Compatible con RHEL/CentOS/Rocky/AlmaLinux 7,8,9,10
 # ==============================================
 
 RED='\033[0;31m'
@@ -28,17 +29,42 @@ BACKUP_DIR="/root/audit-backup-$(date +%Y%m%d-%H%M%S)"
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
-  echo "  $0 -f         - Modo automático (versión corta)"
+  echo "  $0            - Modo automatico (aplica las correcciones)"
+  echo "  $0 --check    - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 -c         - Modo verificación (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
-  echo "  # Ver qué cambios se aplicarían"
+  echo "  # Aplicar los cambios directamente"
   echo "  ./auditd-hardening.sh"
   echo ""
-  echo "  # Aplicar los cambios"
-  echo "  ./auditd-hardening.sh --fix"
+  echo "  # Ver qué cambios se aplicarían sin hacerlos"
+  echo "  ./auditd-hardening.sh --check"
   echo ""
+}
+
+# ==============================================
+# FUNCION PARA OBTENER VERSION DEL SISTEMA
+# ==============================================
+get_os_version() {
+  if [ -f /etc/redhat-release ]; then
+    VERSION=$(rpm -q --qf "%{VERSION}" $(rpm -q --whatprovides redhat-release) 2>/dev/null | cut -d: -f1 | cut -d. -f1)
+    echo "$VERSION"
+  else
+    echo ""
+  fi
+}
+
+# ==============================================
+# FUNCION PARA OBTENER RUTA DE AUDITCTL
+# ==============================================
+get_auditctl_path() {
+  if command -v auditctl &>/dev/null; then
+    echo "auditctl"
+  elif [ -x /usr/sbin/auditctl ]; then
+    echo "/usr/sbin/auditctl"
+  else
+    echo ""
+  fi
 }
 
 # ==============================================
@@ -65,9 +91,7 @@ configure_auditd_param() {
   local expected="$2"
   local description="$3"
 
-  # Buscar linea existente (comentada o activa)
   if grep -q "^[#]*\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
-    # Verificar si esta comentada
     if grep -q "^#\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
       echo -e "${YELLOW}[!] $description esta comentado${NC}"
       if [ "$AUTO_FIX" = true ]; then
@@ -83,7 +107,6 @@ configure_auditd_param() {
     return 0
   fi
 
-  # Buscar si existe con otro valor
   if grep -q "^[#]*\s*${param}\s*=" "$AUDIT_CONF" 2>/dev/null; then
     echo -e "${RED}[!] $description valor incorrecto${NC}"
     if [ "$AUTO_FIX" = true ]; then
@@ -96,7 +119,6 @@ configure_auditd_param() {
     return 0
   fi
 
-  # No existe la linea
   echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
   if [ "$AUTO_FIX" = true ]; then
     echo "${param} = ${expected}" >>"$AUDIT_CONF"
@@ -113,20 +135,102 @@ configure_auditd_param() {
 check_auditd_installed() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd instalado...${NC}"
 
-  if rpm -q audit &>/dev/null && rpm -q audit-libs &>/dev/null; then
-    echo -e "${GREEN}[✓] auditd y audit-libs instalados${NC}"
+  # Instalar paquete principal audit
+  if rpm -q audit &>/dev/null; then
+    echo -e "${GREEN}[✓] audit instalado${NC}"
   else
-    echo -e "${RED}[!] auditd no instalado${NC}"
+    echo -e "${RED}[!] audit no instalado${NC}"
     if [ "$AUTO_FIX" = true ]; then
       if command -v dnf &>/dev/null; then
-        dnf install audit audit-libs -y 2>/dev/null
+        dnf install audit -y 2>/dev/null
       else
-        yum install audit audit-libs -y 2>/dev/null
+        yum install audit -y 2>/dev/null
       fi
-      echo -e "${GREEN}[✓] auditd instalado${NC}"
+      echo -e "${GREEN}[✓] audit instalado${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: Instalar audit audit-libs${NC}"
+      echo -e "${YELLOW}    Recomendacion: Instalar audit${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  fi
+
+  # Instalar audit-libs (generalmente viene como dependencia, pero por las dudas)
+  if rpm -q audit-libs &>/dev/null; then
+    echo -e "${GREEN}[✓] audit-libs instalado${NC}"
+  else
+    echo -e "${RED}[!] audit-libs no instalado${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      if command -v dnf &>/dev/null; then
+        dnf install audit-libs -y 2>/dev/null
+      else
+        yum install audit-libs -y 2>/dev/null
+      fi
+      echo -e "${GREEN}[✓] audit-libs instalado${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}    Recomendacion: Instalar audit-libs${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  fi
+
+  # Verificar e instalar auditctl (nombre del paquete varia segun version)
+  if command -v auditctl &>/dev/null || [ -x /usr/sbin/auditctl ]; then
+    echo -e "${GREEN}[✓] auditctl disponible${NC}"
+  else
+    echo -e "${RED}[!] auditctl no disponible${NC}"
+
+    if [ "$AUTO_FIX" = true ]; then
+      echo -e "${YELLOW}[*] Instalando auditctl...${NC}"
+
+      OS_VERSION=$(get_os_version)
+      INSTALLED=false
+
+      # Para RHEL 7, 8, 9 (audit-tools)
+      if [ -n "$OS_VERSION" ] && [ "$OS_VERSION" -le 9 ] 2>/dev/null; then
+        if command -v dnf &>/dev/null; then
+          dnf install audit-tools -y 2>/dev/null && INSTALLED=true
+        else
+          yum install audit-tools -y 2>/dev/null && INSTALLED=true
+        fi
+      fi
+
+      # Para RHEL 10 (audit-rules)
+      if [ "$INSTALLED" = false ] && [ -n "$OS_VERSION" ] && [ "$OS_VERSION" -ge 10 ] 2>/dev/null; then
+        if command -v dnf &>/dev/null; then
+          dnf install audit-rules -y 2>/dev/null && INSTALLED=true
+        else
+          yum install audit-rules -y 2>/dev/null && INSTALLED=true
+        fi
+      fi
+
+      # Fallback: intentar con audit-tools (para sistemas sin version detectada)
+      if [ "$INSTALLED" = false ]; then
+        if command -v dnf &>/dev/null; then
+          dnf install audit-tools -y 2>/dev/null && INSTALLED=true
+        else
+          yum install audit-tools -y 2>/dev/null && INSTALLED=true
+        fi
+      fi
+
+      # Segundo fallback: audit-rules
+      if [ "$INSTALLED" = false ]; then
+        if command -v dnf &>/dev/null; then
+          dnf install audit-rules -y 2>/dev/null && INSTALLED=true
+        else
+          yum install audit-rules -y 2>/dev/null && INSTALLED=true
+        fi
+      fi
+
+      if [ "$INSTALLED" = true ]; then
+        echo -e "${GREEN}[✓] auditctl instalado correctamente${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${RED}[!] No se pudo instalar auditctl automaticamente${NC}"
+        echo -e "${YELLOW}    Instalacion manual: dnf install audit-tools o audit-rules${NC}"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      echo -e "${YELLOW}    Recomendacion: Instalar audit-tools (RHEL 7-9) o audit-rules (RHEL 10)${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -143,7 +247,7 @@ check_auditd_enabled() {
   else
     echo -e "${RED}[!] auditd no habilitado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl enable auditd
+      systemctl enable auditd 2>/dev/null
       echo -e "${GREEN}[✓] auditd habilitado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -156,7 +260,7 @@ check_auditd_enabled() {
   else
     echo -e "${RED}[!] auditd no corriendo${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl start auditd
+      systemctl start auditd 2>/dev/null
       echo -e "${GREEN}[✓] auditd iniciado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -197,7 +301,7 @@ check_full_action() {
 add_audit_rules() {
   echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
 
-  # Crear el directorio si no existe (necesario para modo fix)
+  # Crear directorio si no existe
   if [ ! -d /etc/audit/rules.d ]; then
     if [ "$AUTO_FIX" = true ]; then
       mkdir -p /etc/audit/rules.d
@@ -296,7 +400,7 @@ EOF
     fi
   fi
 
-  # Verificar reglas existentes (esto SIEMPRE debe ejecutarse)
+  # Verificar reglas existentes
   echo -e "\n${BLUE}[*] Verificando reglas cargadas en memoria...${NC}"
 
   local rules_checks=(
@@ -314,10 +418,12 @@ EOF
     "modules:Eventos de modulos del kernel"
   )
 
+  AUDITCTL=$(get_auditctl_path)
+
   for check in "${rules_checks[@]}"; do
     key="${check%%:*}"
     desc="${check##*:}"
-    if auditctl -l 2>/dev/null | grep -q "$key"; then
+    if [ -n "$AUDITCTL" ] && $AUDITCTL -l 2>/dev/null | grep -q "$key"; then
       echo -e "${GREEN}[✓] $desc - OK${NC}"
     else
       echo -e "${RED}[!] $desc - NO CONFIGURADO${NC}"
@@ -328,47 +434,55 @@ EOF
   done
 
   # Verificar configuracion inmutable
-  if auditctl -s 2>/dev/null | grep -q "enabled 2"; then
-    echo -e "${GREEN}[✓] Configuracion inmutable - OK${NC}"
-  else
-    echo -e "${RED}[!] Configuracion inmutable - NO CONFIGURADO${NC}"
-    if [ "$AUTO_FIX" = false ]; then
-      WARNINGS=$((WARNINGS + 1))
+  if [ -n "$AUDITCTL" ]; then
+    if $AUDITCTL -s 2>/dev/null | grep -q "enabled 2"; then
+      echo -e "${GREEN}[✓] Configuracion inmutable - OK${NC}"
+    else
+      echo -e "${RED}[!] Configuracion inmutable - NO CONFIGURADO${NC}"
+      if [ "$AUTO_FIX" = false ]; then
+        WARNINGS=$((WARNINGS + 1))
+      fi
     fi
   fi
 }
 
 # ==============================================
-# REINICIAR AUDITD
+# REINICIAR AUDITD Y CARGAR REGLAS
 # ==============================================
 restart_auditd() {
   if [ "$AUTO_FIX" = true ]; then
     echo -e "\n${BLUE}[*] Aplicando cambios...${NC}"
 
-    # Asegurar que el directorio existe antes de cargar reglas
     if [ ! -d /etc/audit/rules.d ]; then
       mkdir -p /etc/audit/rules.d
       echo -e "${GREEN}[✓] Directorio /etc/audit/rules.d creado${NC}"
     fi
 
-    # Cargar reglas
-    if augenrules --load 2>/dev/null; then
-      echo -e "${GREEN}[✓] Reglas cargadas correctamente${NC}"
-    else
-      echo -e "${YELLOW}[!] augenrules fallo, intentando carga directa...${NC}"
-      # Fallback: cargar directamente el archivo
-      if [ -f "$AUDIT_RULES" ]; then
-        auditctl -R "$AUDIT_RULES" 2>/dev/null
-        echo -e "${GREEN}[✓] Reglas cargadas desde archivo directo${NC}"
+    AUDITCTL=$(get_auditctl_path)
+
+    # Cargar reglas con auditctl -R
+    if [ -n "$AUDITCTL" ] && [ -f "$AUDIT_RULES" ]; then
+      $AUDITCTL -R "$AUDIT_RULES" 2>/dev/null
+      if [ $? -eq 0 ]; then
+        echo -e "${GREEN}[✓] Reglas cargadas correctamente${NC}"
       else
-        echo -e "${RED}[!] No se encontraron reglas para cargar${NC}"
+        echo -e "${YELLOW}[!] Error al cargar reglas, se cargaran al reiniciar auditd${NC}"
       fi
     fi
 
-    # Reiniciar auditd para aplicar configuracion
+    # Usar augenrules si existe
+    if command -v augenrules &>/dev/null; then
+      augenrules --load 2>/dev/null
+      echo -e "${GREEN}[✓] Reglas cargadas con augenrules${NC}"
+    elif [ -x /usr/sbin/augenrules ]; then
+      /usr/sbin/augenrules --load 2>/dev/null
+      echo -e "${GREEN}[✓] Reglas cargadas con augenrules${NC}"
+    fi
+
+    # Reiniciar auditd
     systemctl restart auditd 2>/dev/null
     echo -e "${GREEN}[✓] Auditd reiniciado${NC}"
-    echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema para activarse completamente${NC}"
+    echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema${NC}"
   fi
 }
 
@@ -389,7 +503,7 @@ show_summary() {
 
   echo -e "\n${YELLOW}PARA VER REGLAS DE AUDITORIA:${NC}"
   echo -e "  auditctl -l"
-  echo -e "  augenrules --load"
+  echo -e "  /usr/sbin/auditctl -l"
 
   echo -e "\n${YELLOW}PARA VER LOGS DE AUDITORIA:${NC}"
   echo -e "  ausearch -ts recent"
@@ -409,30 +523,24 @@ main() {
   echo -e "${GREEN}  Auditd Hardening - CIS 4.1.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  # Modo ayuda
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
   fi
 
-  # Modo verificación (sin --fix)
-  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+  if [ "$1" = "--check" ] || [ "$1" = "-c" ]; then
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     show_usage
     echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
     AUTO_FIX=false
-  fi
-
-  # Modo automático (--fix o -f)
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+  else
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
     make_backup
   fi
 
-  # Ejecutar verificaciones/correcciones
   check_auditd_installed
   check_auditd_enabled
   check_log_storage
@@ -443,7 +551,7 @@ main() {
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0${NC}"
   fi
 }
 
