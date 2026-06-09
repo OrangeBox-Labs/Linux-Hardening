@@ -217,6 +217,8 @@ EOF
   else
     WARNINGS=$((WARNINGS + 1))
   fi
+
+  show_reboot_warning
 }
 
 # ==============================================
@@ -576,7 +578,6 @@ main() {
   # Ejecutar configuraciones
   configure_profile
   configure_aliases
-  show_reboot_warning
   configure_syslog_history
   configure_secure_history
   configure_root_bashrc
