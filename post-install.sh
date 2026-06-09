@@ -311,21 +311,21 @@ install_essentials() {
   local tools="vim rsync net-tools"
   local extra_tools=""
 
-  echo -e "${YELLOW}Herramientas base a instalar: vim, rsync, net-tools${NC}\n"
+  echo -e "${YELLOW}Herramientas base a instalar: vim, rsync, net-tools${NC}"
 
-  if ask_yes_no "¿Quieres instalar GIT también? (requisito para clonar el repo de scripts de hardening)"; then
+  if ask_yes_no "¿Quieres instalar GIT? (requisito para clonar el repo de scripts de hardening)"; then
     extra_tools="$extra_tools git"
     echo -e "${GREEN}[✓] Instalando tambien: git${NC}"
   fi
 
-  if ask_yes_no "¿Quieres además instalar herramientas de red y diagnóstico (tcpdump, nmap, nmap-ncat, iftop, iptraf-ng, dig, traceroute, whois, arping)?"; then
+  if ask_yes_no "¿Quieres instalar herramientas de red y diagnóstico (tcpdump, nmap, nmap-ncat, iftop, iptraf-ng, dig, traceroute, whois, arping)?"; then
     extra_tools="$extra_tools tcpdump iputils nmap nmap-ncat iftop iptraf-ng bind-utils traceroute whois"
     echo -e "${GREEN}[✓] Instalando tambien: tcpdump, arping, nmap, nmap-ncat, iftop, iptraf-ng, dig, traceroute, whois${NC}"
   fi
 
-  if ask_yes_no "¿Quieres instalar herramientas de monitoreo (htop, btop, iotop, sysstat, ncdu, glances, nethogs)?"; then
-    extra_tools="$extra_tools htop btop iotop sysstat ncdu glances nethogs"
-    echo -e "${GREEN}[✓] Instalando tambien: htop, btop, iotop, sysstat, ncdu, glances, nethogs${NC}"
+  if ask_yes_no "¿Quieres instalar herramientas de monitoreo (htop, btop, iotop, sysstat, ncdu, nethogs)?"; then
+    extra_tools="$extra_tools htop btop iotop sysstat ncdu nethogs"
+    echo -e "${GREEN}[✓] Instalando tambien: htop, btop, iotop, sysstat, ncdu, nethogs${NC}"
   fi
 
   local all_tools="$tools $extra_tools"
