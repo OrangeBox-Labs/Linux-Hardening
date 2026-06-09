@@ -408,8 +408,21 @@ EOF
 disable_ctrl_alt_del() {
   echo -e "\n${BLUE}[*] Deshabilitando Ctrl+Alt+Del...${NC}"
 
-  if [ -f /usr/lib/systemd/system/ctrl-alt-del.target ]; then
-    if systemctl is-enabled ctrl-alt-del.target 2>/dev/null | grep -q "masked"; then
+  # Posibles ubicaciones del target
+  CTRL_ALT_DEL_TARGET="/usr/lib/systemd/system/ctrl-alt-del.target"
+  CTRL_ALT_DEL_TARGET_ALT="/etc/systemd/system/ctrl-alt-del.target"
+  CTRL_ALT_DEL_SOCKET="/usr/lib/systemd/system/ctrl-alt-del.socket"
+
+  TARGET_EXISTS=false
+
+  if [ -f "$CTRL_ALT_DEL_TARGET" ] || [ -f "$CTRL_ALT_DEL_TARGET_ALT" ] || [ -f "$CTRL_ALT_DEL_SOCKET" ]; then
+    TARGET_EXISTS=true
+  fi
+
+  if [ "$TARGET_EXISTS" = true ]; then
+    # Verificar si ya está masked
+    if systemctl is-enabled ctrl-alt-del.target 2>/dev/null | grep -q "masked" ||
+      systemctl status ctrl-alt-del.target 2>/dev/null | grep -q "masked"; then
       echo -e "${GREEN}[✓] Ctrl+Alt+Del ya esta deshabilitado${NC}"
       return 0
     fi
@@ -417,7 +430,9 @@ disable_ctrl_alt_del() {
     echo -e "${RED}[!] Ctrl+Alt+Del NO esta deshabilitado${NC}"
 
     if [ "$AUTO_FIX" = true ]; then
-      systemctl mask ctrl-alt-del.target
+      systemctl mask ctrl-alt-del.target 2>/dev/null ||
+        systemctl mask ctrl-alt-del.socket 2>/dev/null ||
+        ln -sf /dev/null /etc/systemd/system/ctrl-alt-del.target 2>/dev/null
       echo -e "${GREEN}[✓] Ctrl+Alt+Del deshabilitado${NC}"
       FIXED=$((FIXED + 1))
     else
