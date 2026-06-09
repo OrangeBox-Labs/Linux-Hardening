@@ -371,6 +371,25 @@ EOF
 }
 
 # ==============================================
+# MOSTRAR ADVERTENCIA DE COMANDOS BLOQUEADOS
+# ==============================================
+show_reboot_warning() {
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${YELLOW}⚠️  NOTA IMPORTANTE - COMANDOS MODIFICADOS ⚠️${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}Los siguientes comandos han sido bloqueados por seguridad:${NC}"
+    echo -e "  • ${RED}reboot${NC}     → Muestra: ${GREEN}Use shutdown -r now to reboot${NC}"
+    echo -e "  • ${RED}poweroff${NC}   → Muestra: ${GREEN}Use shutdown -h now to poweroff${NC}"
+    echo -e "  • ${RED}halt${NC}       → Muestra: ${GREEN}Use shutdown -h now to halt${NC}"
+    echo -e ""
+    echo -e "${YELLOW}Para reiniciar o apagar el sistema, use:${NC}"
+    echo -e "  ${GREEN}shutdown -r now${NC}  # Reiniciar inmediatamente"
+    echo -e "  ${GREEN}shutdown -h now${NC}  # Apagar inmediatamente"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+  fi
+}
+
+# ==============================================
 # CONFIGURAR /etc/skel PARA NUEVOS USUARIOS
 # ==============================================
 configure_skel() {
@@ -557,6 +576,7 @@ main() {
   # Ejecutar configuraciones
   configure_profile
   configure_aliases
+  show_reboot_warning
   configure_syslog_history
   configure_secure_history
   configure_root_bashrc
