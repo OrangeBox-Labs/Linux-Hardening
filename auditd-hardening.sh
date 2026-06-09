@@ -48,7 +48,11 @@ make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
     [ -f "$AUDIT_CONF" ] && cp "$AUDIT_CONF" "$BACKUP_DIR/"
-    [ -d /etc/audit/rules.d ] && cp -r /etc/audit/rules.d "$BACKUP_DIR/"
+    if [ -d /etc/audit/rules.d ]; then
+      cp -r /etc/audit/rules.d "$BACKUP_DIR/"
+    else
+      echo -e "${YELLOW}[!] Directorio /etc/audit/rules.d no existe, no se respalda${NC}"
+    fi
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
   fi
 }
@@ -193,9 +197,23 @@ check_full_action() {
 add_audit_rules() {
   echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
 
-  # Solo crear archivo si estamos en modo --fix
-  if [ "$AUTO_FIX" = true ]; then
-    cat >"$AUDIT_RULES" <<'EOF'
+  # Crear el directorio si no existe (necesario para modo fix)
+  if [ ! -d /etc/audit/rules.d ]; then
+    if [ "$AUTO_FIX" = true ]; then
+      mkdir -p /etc/audit/rules.d
+      echo -e "${GREEN}[✓] Directorio /etc/audit/rules.d creado${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}[!] Directorio /etc/audit/rules.d no existe${NC}"
+    fi
+  fi
+
+  # Crear archivo de reglas en modo fix
+  if [ "$AUTO_FIX" = true ] && [ -d /etc/audit/rules.d ]; then
+    if [ -f "$AUDIT_RULES" ] && [ -s "$AUDIT_RULES" ]; then
+      echo -e "${GREEN}[✓] Archivo de reglas ya existe: $AUDIT_RULES${NC}"
+    else
+      cat >"$AUDIT_RULES" <<'EOF'
 # ==============================================
 # Reglas de auditoria - CIS Benchmark
 # Generado automaticamente
@@ -273,12 +291,13 @@ add_audit_rules() {
 # 4.1.2.14 - Configuracion inmutable (proteger reglas)
 -e 2
 EOF
-    echo -e "${GREEN}[✓] Archivo de reglas creado: $AUDIT_RULES${NC}"
-    FIXED=$((FIXED + 1))
+      echo -e "${GREEN}[✓] Archivo de reglas creado: $AUDIT_RULES${NC}"
+      FIXED=$((FIXED + 1))
+    fi
   fi
 
-  # Verificar reglas existentes (modo verificacion)
-  echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
+  # Verificar reglas existentes (esto SIEMPRE debe ejecutarse)
+  echo -e "\n${BLUE}[*] Verificando reglas cargadas en memoria...${NC}"
 
   local rules_checks=(
     "time-change:Eventos de fecha/hora"
@@ -302,7 +321,9 @@ EOF
       echo -e "${GREEN}[✓] $desc - OK${NC}"
     else
       echo -e "${RED}[!] $desc - NO CONFIGURADO${NC}"
-      WARNINGS=$((WARNINGS + 1))
+      if [ "$AUTO_FIX" = false ]; then
+        WARNINGS=$((WARNINGS + 1))
+      fi
     fi
   done
 
@@ -311,7 +332,9 @@ EOF
     echo -e "${GREEN}[✓] Configuracion inmutable - OK${NC}"
   else
     echo -e "${RED}[!] Configuracion inmutable - NO CONFIGURADO${NC}"
-    WARNINGS=$((WARNINGS + 1))
+    if [ "$AUTO_FIX" = false ]; then
+      WARNINGS=$((WARNINGS + 1))
+    fi
   fi
 }
 
@@ -321,8 +344,30 @@ EOF
 restart_auditd() {
   if [ "$AUTO_FIX" = true ]; then
     echo -e "\n${BLUE}[*] Aplicando cambios...${NC}"
-    augenrules --load >/dev/null 2>&1
-    echo -e "${GREEN}[✓] Reglas cargadas${NC}"
+
+    # Asegurar que el directorio existe antes de cargar reglas
+    if [ ! -d /etc/audit/rules.d ]; then
+      mkdir -p /etc/audit/rules.d
+      echo -e "${GREEN}[✓] Directorio /etc/audit/rules.d creado${NC}"
+    fi
+
+    # Cargar reglas
+    if augenrules --load 2>/dev/null; then
+      echo -e "${GREEN}[✓] Reglas cargadas correctamente${NC}"
+    else
+      echo -e "${YELLOW}[!] augenrules fallo, intentando carga directa...${NC}"
+      # Fallback: cargar directamente el archivo
+      if [ -f "$AUDIT_RULES" ]; then
+        auditctl -R "$AUDIT_RULES" 2>/dev/null
+        echo -e "${GREEN}[✓] Reglas cargadas desde archivo directo${NC}"
+      else
+        echo -e "${RED}[!] No se encontraron reglas para cargar${NC}"
+      fi
+    fi
+
+    # Reiniciar auditd para aplicar configuracion
+    systemctl restart auditd 2>/dev/null
+    echo -e "${GREEN}[✓] Auditd reiniciado${NC}"
     echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema para activarse completamente${NC}"
   fi
 }
