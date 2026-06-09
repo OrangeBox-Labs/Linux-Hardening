@@ -272,12 +272,26 @@ disable_ipv6() {
 # DETECTAR SI ES VMWARE
 # ==============================================
 is_vmware() {
-  if dmidecode -s system-manufacturer 2>/dev/null | grep -qi "vmware"; then
+  # Metodo 1: Revisar product_name en sysfs
+  if [ -f /sys/class/dmi/id/product_name ] && grep -qi "vmware" /sys/class/dmi/id/product_name 2>/dev/null; then
     return 0
   fi
-  if lspci 2>/dev/null | grep -qi "vmware"; then
+
+  # Metodo 2: Revisar dmesg en busca de vmware
+  if dmesg 2>/dev/null | grep -qi "vmware"; then
     return 0
   fi
+
+  # Metodo 3: Fallback con dmidecode (si esta disponible)
+  if command -v dmidecode >/dev/null 2>&1 && dmidecode -s system-manufacturer 2>/dev/null | grep -qi "vmware"; then
+    return 0
+  fi
+
+  # Metodo 4: Fallback con lspci (si esta disponible)
+  if command -v lspci >/dev/null 2>&1 && lspci 2>/dev/null | grep -qi "vmware"; then
+    return 0
+  fi
+
   return 1
 }
 
