@@ -21,23 +21,24 @@ NC='\033[0m'
 
 FIXED=0
 WARNINGS=0
-AUTO_FIX=false
+AUTO_FIX=true
+CHECK_MODE=false
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
-  echo "  $0 -f         - Modo automático (versión corta)"
+  echo "  $0            - Modo automatico (aplica las correcciones)"
+  echo "  $0 --check    - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 -c         - Modo verificación (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
-  echo "  # Ver qué cambios se aplicarían"
+  echo "  # Aplicar los cambios directamente"
   echo "  ./FS-hardening.sh"
   echo ""
-  echo "  # Aplicar los cambios"
-  echo "  ./FS-hardening.sh --fix"
+  echo "  # Ver qué cambios se aplicarían sin hacerlos"
+  echo "  ./FS-hardening.sh --check"
   echo ""
 }
 
@@ -75,21 +76,6 @@ declare -A MOUNT_REQUIREMENTS=(
 )
 
 # ==============================================
-# FUNCION PARA PREGUNTAR AL USUARIO
-# ==============================================
-ask_confirmation() {
-  local mount_point="$1"
-  local missing_opts="$2"
-
-  echo -e "${YELLOW}¿Desea agregar las opciones '${missing_opts}' a ${mount_point}? (s/n)${NC}"
-  read -r answer
-  case "$answer" in
-  s | S | si | Si | SI | yes | Yes | YES) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-# ==============================================
 # FUNCION PARA VERIFICAR SI USA LVM
 # ==============================================
 check_lvm() {
@@ -105,7 +91,7 @@ check_lvm() {
 }
 
 # ==============================================
-# DESHABILITAR MODULOS DE FILESYSTEM (CORREGIDO)
+# DESHABILITAR MODULOS DE FILESYSTEM
 # ==============================================
 disable_modules() {
   local modules="cramfs squashfs udf freevxfs jffs2 hfs hfsplus"
@@ -132,7 +118,7 @@ disable_modules() {
     # Verificar si existe configuracion incorrecta (con /bin/true) en algun archivo
     if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
       echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
-      if [ "$AUTO_FIX" = true ]; then
+      if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
         # Eliminar la configuracion incorrecta de todos los archivos
         for f in /etc/modprobe.d/*.conf; do
           if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
@@ -147,7 +133,7 @@ disable_modules() {
     # El modulo no esta deshabilitado o hay que crearlo
     echo -e "${RED}[!] $module NO esta deshabilitado correctamente${NC}"
 
-    if [ "$AUTO_FIX" = true ]; then
+    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
       cat >"$conf_file" <<EOF
 # ==============================================
 # Hardening: Modulo $module deshabilitado
@@ -278,16 +264,7 @@ check_mount_options() {
   echo -e "    Opciones actuales: ${current_opts}"
   echo -e "    Opciones requeridas: ${required_opts}"
 
-  local apply_fix=false
-  if [ "$AUTO_FIX" = true ]; then
-    apply_fix=true
-  else
-    if ask_confirmation "$mount_point" "$missing_opts"; then
-      apply_fix=true
-    fi
-  fi
-
-  if [ "$apply_fix" = true ]; then
+  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
     local new_opts="$current_opts"
     for opt in "${required_array[@]}"; do
       if [[ ! "$new_opts" == *"$opt"* ]]; then
@@ -316,7 +293,7 @@ check_mount_options() {
       echo -e "${RED}[!] Error al remontar ${mount_point}${NC}"
     fi
   else
-    echo -e "${YELLOW}[!] Omitiendo correccion${NC}"
+    echo -e "${YELLOW}[!] Se requiere aplicar: mount -o remount,${new_opts} ${mount_point}${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -336,23 +313,12 @@ apply_sticky_bit() {
 
   echo -e "${RED}[!] Directorios sin sticky bit encontrados${NC}"
 
-  local apply_fix=false
-  if [ "$AUTO_FIX" = true ]; then
-    apply_fix=true
-  else
-    echo -e "${YELLOW}¿Desea aplicar sticky bit? (s/n)${NC}"
-    read -r answer
-    case "$answer" in
-    s | S | si | Si | SI | yes | Yes | YES) apply_fix=true ;;
-    esac
-  fi
-
-  if [ "$apply_fix" = true ]; then
+  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
     echo "$sticky_issues" | xargs chmod a+t 2>/dev/null
     echo -e "${GREEN}[✓] Sticky bit aplicado${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}[!] Omitiendo sticky bit${NC}"
+    echo -e "${YELLOW}[!] Se requiere aplicar: chmod a+t a los directorios listados${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -384,24 +350,13 @@ disable_autofs() {
   fi
 
   if [ $need_fix -eq 1 ]; then
-    local apply_fix=false
-    if [ "$AUTO_FIX" = true ]; then
-      apply_fix=true
-    else
-      echo -e "${YELLOW}¿Desea deshabilitar autofs? (s/n)${NC}"
-      read -r answer
-      case "$answer" in
-      s | S | si | Si | SI | yes | Yes | YES) apply_fix=true ;;
-      esac
-    fi
-
-    if [ "$apply_fix" = true ]; then
+    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
       systemctl stop autofs 2>/dev/null
       systemctl disable autofs 2>/dev/null
       echo -e "${GREEN}[✓] autofs deshabilitado${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}[!] Omitiendo deshabilitacion${NC}"
+      echo -e "${YELLOW}[!] Se requiere: systemctl stop autofs && systemctl disable autofs${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -415,7 +370,9 @@ configure_dev_shm() {
 
   if ! findmnt -n /dev/shm &>/dev/null; then
     echo -e "${YELLOW}[!] /dev/shm no esta montado, creando...${NC}"
-    mount -t tmpfs tmpfs /dev/shm 2>/dev/null
+    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
+      mount -t tmpfs tmpfs /dev/shm 2>/dev/null
+    fi
   fi
 
   local current_opts=$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null)
@@ -428,18 +385,7 @@ configure_dev_shm() {
 
   echo -e "${RED}[!] /dev/shm falta opciones de seguridad${NC}"
 
-  local apply_fix=false
-  if [ "$AUTO_FIX" = true ]; then
-    apply_fix=true
-  else
-    echo -e "${YELLOW}¿Desea aplicar opciones seguras a /dev/shm? (s/n)${NC}"
-    read -r answer
-    case "$answer" in
-    s | S | si | Si | SI | yes | Yes | YES) apply_fix=true ;;
-    esac
-  fi
-
-  if [ "$apply_fix" = true ]; then
+  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
     mount -o remount,"$required_opts" /dev/shm 2>/dev/null
     if [ $? -eq 0 ]; then
       echo -e "${GREEN}[✓] /dev/shm configurado con opciones seguras${NC}"
@@ -455,7 +401,7 @@ configure_dev_shm() {
       echo -e "${RED}[!] Error al configurar /dev/shm${NC}"
     fi
   else
-    echo -e "${YELLOW}[!] Omitiendo correccion${NC}"
+    echo -e "${YELLOW}[!] Se requiere: mount -o remount,${required_opts} /dev/shm${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -482,18 +428,7 @@ configure_proc() {
   echo -e "    Actual: $current_opts"
   echo -e "    Requerido: hidepid=2"
 
-  local apply_fix=false
-  if [ "$AUTO_FIX" = true ]; then
-    apply_fix=true
-  else
-    echo -e "${YELLOW}¿Desea aplicar hidepid=2 a /proc? (s/n)${NC}"
-    read -r answer
-    case "$answer" in
-    s | S | si | Si | SI | yes | Yes | YES) apply_fix=true ;;
-    esac
-  fi
-
-  if [ "$apply_fix" = true ]; then
+  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
     mount -o remount,hidepid=2 /proc 2>/dev/null
     if [ $? -eq 0 ]; then
       echo -e "${GREEN}[✓] /proc configurado con hidepid=2${NC}"
@@ -509,7 +444,7 @@ configure_proc() {
       echo -e "${RED}[!] Error al configurar /proc${NC}"
     fi
   else
-    echo -e "${YELLOW}[!] Omitiendo correccion para /proc${NC}"
+    echo -e "${YELLOW}[!] Se requiere: mount -o remount,hidepid=2 /proc${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -555,24 +490,22 @@ main() {
     exit 0
   fi
 
-  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+  if [ "$1" = "--check" ] || [ "$1" = "-c" ]; then
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    show_usage
-    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    CHECK_MODE=true
     AUTO_FIX=false
-  fi
-
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+  else
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    CHECK_MODE=false
     AUTO_FIX=true
   fi
 
   # Deshabilitar modulos de filesystem
   disable_modules
 
-  # Verificar particiones separadas
+  # Verificar particiones separadas (solo muestra, no puede corregirse automaticamente)
   check_separated_partitions
 
   # Verificar opciones de montaje
@@ -595,8 +528,8 @@ main() {
 
   show_summary
 
-  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  if [ "$CHECK_MODE" = true ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0${NC}"
   fi
 }
 
