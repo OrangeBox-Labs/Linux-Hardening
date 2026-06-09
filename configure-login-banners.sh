@@ -22,10 +22,22 @@ AUTO_FIX=false
 BACKUP_DIR="/root/banners-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
-# BANNER PREDETERMINADO
+# ASCII DE ORANGEBOX
+# ==============================================
+ORANGEBOX_ASCII="
+  ___                         ___          
+ / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
+| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /
+ \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
+                    |___/                  
+"
+
+# ==============================================
+# BANNER PREDETERMINADO CON ORANGEBOX
 # ==============================================
 BANNER_TEXT="
 *******************************************************************************
+$ORANGEBOX_ASCII
                          SISTEMA DE ACCESO CONTROLADO
                         Hardening por: www.orangebox.cl
 *******************************************************************************
@@ -54,6 +66,24 @@ Este sistema utiliza:
 "
 
 # ==============================================
+# FUNCION PARA MOSTRAR USO
+# ==============================================
+show_usage() {
+  echo -e "${GREEN}USO:${NC}"
+  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 -f         - Modo automático (versión corta)"
+  echo ""
+  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo "  # Ver qué cambios se aplicarían"
+  echo "  ./configure-login-banners.sh"
+  echo ""
+  echo "  # Aplicar los cambios"
+  echo "  ./configure-login-banners.sh --fix"
+  echo ""
+}
+
+# ==============================================
 # FUNCION PARA HACER BACKUP Y CONFIGURAR ARCHIVO
 # ==============================================
 configure_banner_file() {
@@ -63,12 +93,12 @@ configure_banner_file() {
   echo -e "\n${BLUE}[*] Configurando $description: $file${NC}"
 
   if [ -f "$file" ]; then
-    if [ ! -f "${BACKUP_DIR}/$(basename $file).bak" ]; then
+    if [ ! -f "${BACKUP_DIR}/$(basename $file).bak" ] && [ "$AUTO_FIX" = true ]; then
       cp "$file" "${BACKUP_DIR}/$(basename $file).bak"
       echo -e "${GREEN}[✓] Backup creado: ${BACKUP_DIR}/$(basename $file).bak${NC}"
     fi
     if [ "$AUTO_FIX" = true ]; then
-      echo -e "${YELLOW}[!] $file existia, se ha respaldado y sera reemplazado${NC}"
+      echo -e "${YELLOW}[!] $file existia, ha sido respaldado${NC}"
     fi
   fi
 
@@ -77,13 +107,17 @@ configure_banner_file() {
     echo -e "${GREEN}[✓] Banner configurado en $file${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}[!] Se requiere configurar $file${NC}"
-    WARNINGS=$((WARNINGS + 1))
+    if [ -f "$file" ]; then
+      echo -e "${GREEN}[✓] $file existe (verificar contenido manualmente)${NC}"
+    else
+      echo -e "${RED}[!] $file no existe - Se requiere configurar${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
   fi
 }
 
 # ==============================================
-# FUNCION PARA CONFIGURAR PERMISOS
+# FUNCION PARA VERIFICAR Y CONFIGURAR PERMISOS
 # ==============================================
 configure_permissions() {
   local file="$1"
@@ -91,7 +125,7 @@ configure_permissions() {
   local owner="$3"
   local group="$4"
 
-  echo -e "\n${BLUE}[*] Configurando permisos de $file${NC}"
+  echo -e "\n${BLUE}[*] Verificando permisos de $file${NC}"
 
   local needs_fix=0
 
@@ -121,7 +155,7 @@ configure_permissions() {
       echo -e "${GREEN}[✓] Grupo correcto: $current_group${NC}"
     fi
   else
-    echo -e "${YELLOW}[!] $file no existe, se creara${NC}"
+    echo -e "${YELLOW}[!] $file no existe${NC}"
     needs_fix=1
   fi
 
@@ -132,7 +166,7 @@ configure_permissions() {
       echo -e "${GREEN}[✓] Permisos y propietario corregidos en $file${NC}"
       FIXED=$((FIXED + 1))
     fi
-  elif [ $needs_fix -eq 1 ]; then
+  elif [ $needs_fix -eq 1 ] && [ "$AUTO_FIX" = false ]; then
     echo -e "${YELLOW}    Recomendacion: chmod $perms $file && chown $owner:$group $file${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
@@ -179,39 +213,44 @@ configure_issue_net() {
 # CONFIGURAR SSH BANNER (opcional)
 # ==============================================
 configure_ssh_banner() {
-  echo -e "\n${BLUE}[*] Configurando banner en SSH...${NC}"
+  echo -e "\n${BLUE}[*] Verificando banner en SSH...${NC}"
 
-  if [ -f /etc/ssh/sshd_config ]; then
-    if grep -q "^Banner" /etc/ssh/sshd_config; then
-      current_banner=$(grep "^Banner" /etc/ssh/sshd_config | awk '{print $2}')
-      if [ "$current_banner" = "/etc/issue.net" ]; then
-        echo -e "${GREEN}[✓] Banner ya configurado en SSH${NC}"
-      else
-        echo -e "${YELLOW}[!] Banner apunta a $current_banner, no a /etc/issue.net${NC}"
-        if [ "$AUTO_FIX" = true ]; then
-          sed -i 's|^Banner.*|Banner /etc/issue.net|' /etc/ssh/sshd_config
-          systemctl restart sshd
-          echo -e "${GREEN}[✓] Banner corregido en SSH${NC}"
-          FIXED=$((FIXED + 1))
-        fi
-      fi
+  if [ ! -f /etc/ssh/sshd_config ]; then
+    echo -e "${YELLOW}[!] /etc/ssh/sshd_config no existe${NC}"
+    return 1
+  fi
+
+  if grep -q "^Banner" /etc/ssh/sshd_config; then
+    current_banner=$(grep "^Banner" /etc/ssh/sshd_config | awk '{print $2}')
+    if [ "$current_banner" = "/etc/issue.net" ]; then
+      echo -e "${GREEN}[✓] Banner ya configurado en SSH apuntando a /etc/issue.net${NC}"
     else
-      echo -e "${YELLOW}[!] Banner no configurado en SSH${NC}"
+      echo -e "${RED}[!] Banner apunta a $current_banner, deberia ser /etc/issue.net${NC}"
       if [ "$AUTO_FIX" = true ]; then
-        echo "Banner /etc/issue.net" >>/etc/ssh/sshd_config
-        systemctl restart sshd
-        echo -e "${GREEN}[✓] Banner configurado en SSH${NC}"
+        sed -i 's|^Banner.*|Banner /etc/issue.net|' /etc/ssh/sshd_config
+        systemctl restart sshd 2>/dev/null
+        echo -e "${GREEN}[✓] Banner corregido en SSH${NC}"
         FIXED=$((FIXED + 1))
       else
-        echo -e "${YELLOW}    Recomendacion: Agregar 'Banner /etc/issue.net' a /etc/ssh/sshd_config${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
+    fi
+  else
+    echo -e "${RED}[!] Banner no configurado en SSH${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      echo "Banner /etc/issue.net" >>/etc/ssh/sshd_config
+      systemctl restart sshd 2>/dev/null
+      echo -e "${GREEN}[✓] Banner configurado en SSH${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}    Recomendacion: Agregar 'Banner /etc/issue.net' a /etc/ssh/sshd_config${NC}"
+      WARNINGS=$((WARNINGS + 1))
     fi
   fi
 }
 
 # ==============================================
-# MOSTRAR ADVERTENCIA
+# MOSTRAR ADVERTENCIA (solo en modo fix)
 # ==============================================
 show_warning() {
   echo -e "${RED}============================================${NC}"
@@ -223,6 +262,7 @@ show_warning() {
   echo "Los banners se mostraran a los usuarios al iniciar sesion."
   echo ""
   echo "El banner incluye:"
+  echo "  - Logo de OrangeBox"
   echo "  - Aviso de acceso controlado"
   echo "  - Hardening realizado por www.orangebox.cl"
   echo "  - Advertencia sobre monitoreo y reporte"
@@ -236,16 +276,19 @@ show_warning() {
 }
 
 # ==============================================
-# MOSTRAR INSTRUCCIONES
+# MOSTRAR RESUMEN FINAL
 # ==============================================
-show_instructions() {
+show_summary() {
   echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  CONFIGURACION COMPLETADA${NC}"
+  echo -e "${GREEN}  CONFIGURACION DE BANNERS COMPLETADA${NC}"
   echo -e "${GREEN}============================================${NC}"
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  fi
 
   echo -e "\n${YELLOW}ARCHIVOS CONFIGURADOS:${NC}"
   echo -e "  /etc/motd - Mensaje del dia (se muestra despues del login)"
@@ -259,10 +302,17 @@ show_instructions() {
   echo -e "  stat /etc/motd /etc/issue /etc/issue.net"
   echo -e "  grep Banner /etc/ssh/sshd_config"
 
-  echo -e "\n${YELLOW}PARA RESTAURAR BACKUP:${NC}"
-  echo -e "  cp $BACKUP_DIR/motd.bak /etc/motd"
-  echo -e "  cp $BACKUP_DIR/issue.bak /etc/issue"
-  echo -e "  cp $BACKUP_DIR/issue.net.bak /etc/issue.net"
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${YELLOW}PARA RESTAURAR BACKUP:${NC}"
+    echo -e "  cp $BACKUP_DIR/motd.bak /etc/motd"
+    echo -e "  cp $BACKUP_DIR/issue.bak /etc/issue"
+    echo -e "  cp $BACKUP_DIR/issue.net.bak /etc/issue.net"
+  fi
+
+  echo -e "\n${GREEN}============================================${NC}"
+  echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
+  echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
+  echo -e "${GREEN}============================================${NC}"
 }
 
 # ==============================================
@@ -272,24 +322,37 @@ main() {
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Configuracion de Banners de Login${NC}"
   echo -e "${GREEN}  CIS 1.7.1 - 1.7.7${NC}"
-  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}============================================${NC}\n"
 
-  #if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
-  AUTO_FIX=true
-  show_warning
-  create_backup_dir
-  echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
-  #else
-  echo -e "${YELLOW}[!] Modo verificacion: no se aplicaran cambios${NC}"
-  echo -e "${YELLOW}[!] Ejecute con --fix para aplicar${NC}"
-  #fi
+  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_usage
+    exit 0
+  fi
+
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    show_warning
+    create_backup_dir
+  else
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    show_usage
+    echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
+    AUTO_FIX=false
+  fi
 
   configure_motd
   configure_issue
   configure_issue_net
   configure_ssh_banner
 
-  show_instructions
+  show_summary
+
+  if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+  fi
 }
 
 if [ "$EUID" -ne 0 ]; then
