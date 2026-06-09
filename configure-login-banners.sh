@@ -271,8 +271,8 @@ show_warning() {
   echo "  $BACKUP_DIR"
   echo ""
   echo -e "${RED}============================================${NC}"
-  echo -e "${YELLOW}Pulse Ctrl+C ahora para cancelar, o presione Enter para continuar...${NC}"
-  read -r
+  echo -e "${YELLOW}Aplicando cambios en 3 segundos... Pulse Ctrl+C ahora para cancelar.${NC}"
+  sleep 3
 }
 
 # ==============================================
