@@ -408,31 +408,32 @@ EOF
 disable_ctrl_alt_del() {
   echo -e "\n${BLUE}[*] Deshabilitando Ctrl+Alt+Del...${NC}"
 
-  # Posibles ubicaciones del target
+  CTRL_ALT_DEL_SYMLINK="/etc/systemd/system/ctrl-alt-del.target"
   CTRL_ALT_DEL_TARGET="/usr/lib/systemd/system/ctrl-alt-del.target"
-  CTRL_ALT_DEL_TARGET_ALT="/etc/systemd/system/ctrl-alt-del.target"
-  CTRL_ALT_DEL_SOCKET="/usr/lib/systemd/system/ctrl-alt-del.socket"
 
-  TARGET_EXISTS=false
-
-  if [ -f "$CTRL_ALT_DEL_TARGET" ] || [ -f "$CTRL_ALT_DEL_TARGET_ALT" ] || [ -f "$CTRL_ALT_DEL_SOCKET" ]; then
-    TARGET_EXISTS=true
+  # Verificar si ya está deshabilitado
+  if [ -L "$CTRL_ALT_DEL_SYMLINK" ] &&
+    readlink "$CTRL_ALT_DEL_SYMLINK" 2>/dev/null | grep -q "dev/null"; then
+    echo -e "${GREEN}[✓] Ctrl+Alt+Del ya esta deshabilitado${NC}"
+    return 0
   fi
 
-  if [ "$TARGET_EXISTS" = true ]; then
-    # Verificar si ya está masked
-    if systemctl is-enabled ctrl-alt-del.target 2>/dev/null | grep -q "masked" ||
-      systemctl status ctrl-alt-del.target 2>/dev/null | grep -q "masked"; then
-      echo -e "${GREEN}[✓] Ctrl+Alt+Del ya esta deshabilitado${NC}"
-      return 0
-    fi
-
+  # Verificar si el target existe
+  if [ -f "$CTRL_ALT_DEL_TARGET" ] || [ -L "$CTRL_ALT_DEL_SYMLINK" ]; then
     echo -e "${RED}[!] Ctrl+Alt+Del NO esta deshabilitado${NC}"
 
     if [ "$AUTO_FIX" = true ]; then
-      systemctl mask ctrl-alt-del.target 2>/dev/null ||
-        systemctl mask ctrl-alt-del.socket 2>/dev/null ||
-        ln -sf /dev/null /etc/systemd/system/ctrl-alt-del.target 2>/dev/null
+      # Metodo 1: symlink a /dev/null (estandar)
+      ln -sf /dev/null "$CTRL_ALT_DEL_SYMLINK" 2>/dev/null
+
+      # Metodo 2: si el metodo 1 falla, usar systemctl mask --force
+      if [ $? -ne 0 ]; then
+        systemctl mask --force ctrl-alt-del.target 2>/dev/null
+      fi
+
+      # Recargar systemd para aplicar cambios
+      systemctl daemon-reload 2>/dev/null
+
       echo -e "${GREEN}[✓] Ctrl+Alt+Del deshabilitado${NC}"
       FIXED=$((FIXED + 1))
     else
