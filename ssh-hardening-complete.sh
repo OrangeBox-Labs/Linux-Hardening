@@ -24,13 +24,64 @@ SSH_MODULI="/etc/ssh/moduli"
 BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
-# FUNCION PARA VERIFICAR ssh-audit
+# FUNCION PARA VERIFICAR E INSTALAR ssh-audit
 # ==============================================
 check_ssh_audit() {
   if ! command -v ssh-audit &>/dev/null; then
     echo -e "${RED}[!] ssh-audit no esta instalado${NC}"
-    echo -e "${YELLOW}    Instalacion: dnf install epel-release -y && dnf install ssh-audit -y${NC}"
-    exit 1
+    echo -e "${YELLOW}[*] Intentando instalar ssh-audit...${NC}"
+
+    INSTALL_SUCCESS=false
+
+    # Intentar con dnf (RHEL 8,9,10, Fedora)
+    if command -v dnf &>/dev/null; then
+      # Verificar si epel-release esta instalado
+      if ! rpm -q epel-release &>/dev/null; then
+        echo -e "${YELLOW}[*] Instalando epel-release...${NC}"
+        dnf install epel-release -y 2>/dev/null
+      fi
+
+      dnf install ssh-audit -y 2>/dev/null
+      if [ $? -eq 0 ]; then
+        INSTALL_SUCCESS=true
+      fi
+    fi
+
+    # Intentar con yum (RHEL 7)
+    if [ "$INSTALL_SUCCESS" = false ] && command -v yum &>/dev/null; then
+      if ! rpm -q epel-release &>/dev/null; then
+        echo -e "${YELLOW}[*] Instalando epel-release...${NC}"
+        yum install epel-release -y 2>/dev/null
+      fi
+
+      yum install ssh-audit -y 2>/dev/null
+      if [ $? -eq 0 ]; then
+        INSTALL_SUCCESS=true
+      fi
+    fi
+
+    # Intentar con apt (Debian/Ubuntu)
+    if [ "$INSTALL_SUCCESS" = false ] && command -v apt &>/dev/null; then
+      apt update 2>/dev/null
+      apt install ssh-audit -y 2>/dev/null
+      if [ $? -eq 0 ]; then
+        INSTALL_SUCCESS=true
+      fi
+    fi
+
+    # Verificar si la instalacion fue exitosa
+    if [ "$INSTALL_SUCCESS" = true ] && command -v ssh-audit &>/dev/null; then
+      echo -e "${GREEN}[✓] ssh-audit instalado correctamente${NC}"
+    else
+      echo -e "${RED}[!] No se pudo instalar ssh-audit automaticamente${NC}"
+      echo -e "${YELLOW}    Instalacion manual:${NC}"
+      echo -e "      RHEL/CentOS/Rocky/Alma: dnf install epel-release -y && dnf install ssh-audit -y"
+      echo -e "      Debian/Ubuntu: apt install ssh-audit -y"
+      echo -e "      Desde fuente: pip install ssh-audit"
+      exit 1
+    fi
+  else
+    echo -e "${GREEN}[✓] ssh-audit esta instalado${NC}"
   fi
 }
 
