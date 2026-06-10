@@ -6,7 +6,7 @@
 # Web: www.orangebox.cl
 # Email: froman@orangebox.cl
 # Descripcion: Hardening completo de SSH basado en ssh-audit
-#              Compatible con RHEL/CentOS/Rocky/AlmaLinux 7,8,9
+#              Compatible con RHEL/CentOS/Rocky/AlmaLinux 7,8,9,10
 # ==============================================
 
 RED='\033[0;31m'
@@ -112,11 +112,12 @@ detect_distro() {
   fi
 
   case "$distro_version" in
-  7 | 8 | 9)
+  7 | 8 | 9 | 10)
     rhel_version="$distro_version"
     ;;
   *)
     echo -e "${RED}[!] Version no soportada: $distro_version${NC}"
+    echo -e "${YELLOW}    Versiones soportadas: 7, 8, 9, 10${NC}"
     exit 1
     ;;
   esac
@@ -148,15 +149,12 @@ show_usage() {
 show_ssh_audit_analysis() {
   echo -e "\n${BLUE}[*] Analisis actual de ssh-audit:${NC}\n"
 
-  # Ejecutar ssh-audit y eliminar colores ANSI
   local audit_output=$(ssh-audit localhost 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
 
-  # Mostrar seccion de key exchange algorithms
   echo -e "${YELLOW}=== KEY EXCHANGE ALGORITHMS ===${NC}"
   local in_section=""
 
   while IFS= read -r line; do
-    # Detectar secciones
     if echo "$line" | grep -q "^# key exchange algorithms"; then
       in_section="kex"
       continue
@@ -184,7 +182,6 @@ show_ssh_audit_analysis() {
       continue
     fi
 
-    # Procesar lineas dentro de cada seccion
     if [ -n "$in_section" ] && echo "$line" | grep -q "^("; then
       if echo "$line" | grep -q "\[fail\]"; then
         echo -e "  ${RED}❌ FAIL:${NC} $line"
@@ -198,7 +195,6 @@ show_ssh_audit_analysis() {
     fi
   done <<<"$audit_output"
 
-  # Mostrar recomendaciones
   echo -e "\n${YELLOW}=== RECOMENDACIONES ===${NC}"
   local recs=$(echo "$audit_output" | grep -E "\(rec\)")
 
@@ -468,6 +464,64 @@ EOF
 }
 
 # ==============================================
+# FUNCIONES PARA RHEL 10
+# ==============================================
+apply_hardening_rhel10() {
+  echo -e "\n${BLUE}[*] Aplicando hardening para RHEL/Rocky/AlmaLinux 10...${NC}"
+
+  rm -f /etc/ssh/ssh_host_*
+  ssh-keygen -t rsa -b 4096 -f /etc/ssh/ssh_host_rsa_key -N ""
+  ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
+  echo -e "${GREEN}[✓] Regeneradas claves RSA (4096) y ED25519${NC}"
+
+  echo -e "\nHostKey /etc/ssh/ssh_host_ed25519_key\nHostKey /etc/ssh/ssh_host_rsa_key" >>"$SSHD_CONFIG"
+  echo -e "${GREEN}[✓] Habilitadas claves ED25519 y RSA${NC}"
+
+  if [ -f "$SSH_MODULI" ]; then
+    awk '$5 >= 3071' "$SSH_MODULI" >/etc/ssh/moduli.safe
+    mv -f /etc/ssh/moduli.safe /etc/ssh/moduli
+    echo -e "${GREEN}[✓] Eliminados moduli DH < 3071 bits${NC}"
+  fi
+
+  cat <<'EOF' >/etc/crypto-policies/back-ends/opensshserver.config
+# Restrict key exchange, cipher, and MAC algorithms, as per sshaudit.com
+# Configuracion para RHEL 10
+KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-gcm@openssh.com,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
+CASignatureAlgorithms ssh-ed25519,rsa-sha2-512,rsa-sha2-256
+PubkeyAcceptedAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512,rsa-sha2-256
+EOF
+  echo -e "${GREEN}[✓] Configuradas politicas criptograficas para RHEL 10${NC}"
+
+  cat <<'EOF' >>"$SSHD_CONFIG"
+
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+GSSAPIAuthentication no
+X11Forwarding no
+AllowTcpForwarding no
+PermitUserEnvironment no
+ClientAliveInterval 300
+ClientAliveCountMax 0
+MaxAuthTries 4
+MaxSessions 10
+LoginGraceTime 60
+LogLevel VERBOSE
+UsePAM yes
+Compression no
+PrintLastLog yes
+IgnoreRhosts yes
+StrictModes yes
+EOF
+
+  echo -e "${GREEN}[✓] Configuracion adicional agregada${NC}"
+}
+
+# ==============================================
 # FUNCION PARA CONFIGURAR THROTTLING
 # ==============================================
 configure_throttling() {
@@ -515,13 +569,11 @@ main() {
   check_ssh_audit
   detect_distro
 
-  # Modo ayuda
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
   fi
 
-  # Modo verificación
   if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -534,7 +586,6 @@ main() {
     exit 0
   fi
 
-  # Modo automático
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -554,6 +605,12 @@ main() {
       ;;
     9)
       apply_hardening_rhel9
+      FIXED=$((FIXED + 8))
+      configure_throttling
+      FIXED=$((FIXED + 1))
+      ;;
+    10)
+      apply_hardening_rhel10
       FIXED=$((FIXED + 8))
       configure_throttling
       FIXED=$((FIXED + 1))
