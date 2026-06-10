@@ -25,15 +25,36 @@ Con logs remotos se puede:
 
 Sin logs remotos, si un atacante borra los logs locales, no quedara registro de su actividad.
 
-## Configuracion de logs remotos
+## Opción --remote: Configuración de envío de logs remoto
 
-El script puede configurar automaticamente el envio de logs a un servidor remoto.
-Durante la ejecucion, preguntara:
+El script permite configurar el envío de logs a un servidor centralizado de logs separadamente del hardening base.
 
-1. ¿Desea configurar envio a logs remotos? (s/N)
-2. IP o hostname del servidor de logs (ej: 192.168.1.100)
-3. Puerto (default: 514)
-4. Protocolo (TCP o UDP, default: UDP)
+### Sintaxis
+
+| Comando | Descripción |
+|---------|-------------|
+| `./rsyslog-hardening.sh --remote <IP>` | Envío por UDP al puerto 514 (default) |
+| `./rsyslog-hardening.sh --remote <IP> <PORT>` | Envío por UDP con puerto personalizado |
+| `./rsyslog-hardening.sh --remote <IP> tcp` | Envío por TCP al puerto 514 |
+| `./rsyslog-hardening.sh --remote <IP> <PORT> tcp` | Envío por TCP con puerto personalizado |
+
+### Ejemplos
+
+# Configurar envío a servidor remoto por UDP
+```
+./rsyslog-hardening.sh --remote 192.168.1.100
+```
+
+# Configurar envío a servidor remoto por TCP con puerto 5514
+```
+./rsyslog-hardening.sh --remote 192.168.1.100 5514 tcp
+```
+
+# Primero aplicar hardening base, luego configurar remoto
+```
+./rsyslog-hardening.sh --fix && ./rsyslog-hardening.sh --remote 10.0.0.1
+```
+
 
 ### Formatos de envio
 
