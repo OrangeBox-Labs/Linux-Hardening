@@ -18,6 +18,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+REMOTE_CONFIG=false
 
 RSYSLOG_CONF="/etc/rsyslog.conf"
 RSYSLOG_D_DIR="/etc/rsyslog.d"
@@ -29,16 +30,28 @@ BACKUP_DIR="/root/rsyslog-backup-$(date +%Y%m%d-%H%M%S)"
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
-  echo "  $0 -f         - Modo automático (versión corta)"
+  echo "  $0                     - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0 --fix               - Modo automático (aplica las correcciones)"
+  echo "  $0 -f                  - Modo automático (versión corta)"
+  echo "  $0 --remote <IP>       - Configura envio de logs a servidor remoto"
+  echo "  $0 --remote <IP> <PORT> - Configura envio con puerto personalizado"
+  echo "  $0 --remote <IP> tcp   - Configura envio por TCP (default UDP)"
   echo ""
-  echo -e "${GREEN}EJEMPLO:${NC}"
+  echo -e "${GREEN}EJEMPLOS:${NC}"
   echo "  # Ver qué cambios se aplicarían"
   echo "  ./rsyslog-hardening.sh"
   echo ""
-  echo "  # Aplicar los cambios"
+  echo "  # Aplicar todas las correcciones"
   echo "  ./rsyslog-hardening.sh --fix"
+  echo ""
+  echo "  # Configurar envio a servidor remoto por UDP"
+  echo "  ./rsyslog-hardening.sh --remote 192.168.1.100"
+  echo ""
+  echo "  # Configurar envio a servidor remoto por TCP con puerto personalizado"
+  echo "  ./rsyslog-hardening.sh --remote 192.168.1.100 5514 tcp"
+  echo ""
+  echo "  # Primero aplicar hardening y luego configurar remoto"
+  echo "  ./rsyslog-hardening.sh --fix && ./rsyslog-hardening.sh --remote 192.168.1.100"
   echo ""
 }
 
@@ -63,9 +76,7 @@ configure_journald_param() {
   local expected="$2"
   local description="$3"
 
-  # Buscar linea existente (comentada o activa)
   if grep -q "^[#]*\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
-    # Verificar si esta comentada
     if grep -q "^#\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
       echo -e "${YELLOW}[!] $description esta comentado${NC}"
       if [ "$AUTO_FIX" = true ]; then
@@ -81,7 +92,6 @@ configure_journald_param() {
     return 0
   fi
 
-  # Buscar si existe con otro valor
   if grep -q "^[#]*\s*${param}=" "$JOURNALD_CONF" 2>/dev/null; then
     echo -e "${RED}[!] $description tiene valor incorrecto${NC}"
     if [ "$AUTO_FIX" = true ]; then
@@ -94,7 +104,6 @@ configure_journald_param() {
     return 0
   fi
 
-  # No existe la linea
   echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
   if [ "$AUTO_FIX" = true ]; then
     echo "${param}=${expected}" >>"$JOURNALD_CONF"
@@ -103,6 +112,56 @@ configure_journald_param() {
   else
     WARNINGS=$((WARNINGS + 1))
   fi
+}
+
+# ==============================================
+# FUNCION PARA CONFIGURAR REMOTE LOGGING
+# ==============================================
+configure_remote_logging() {
+  local remote_host="$1"
+  local remote_port="${2:-514}"
+  local remote_proto="${3:-udp}"
+
+  echo -e "\n${BLUE}[*] Configurando envio de logs a servidor remoto...${NC}"
+
+  if [[ "$remote_proto" =~ ^[Tt][Cc][Pp]$ ]]; then
+    remote_config="*.* @@$remote_host:$remote_port"
+    proto_display="TCP"
+  else
+    remote_config="*.* @$remote_host:$remote_port"
+    proto_display="UDP"
+  fi
+
+  # Verificar si ya existe configuracion remota
+  if grep -q "^[^#].*@.*" "$RSYSLOG_CONF" 2>/dev/null; then
+    echo -e "${YELLOW}[!] Ya existe configuracion remota en /etc/rsyslog.conf${NC}"
+    echo -e "${YELLOW}    Se agregara igualmente (puede haber duplicados)${NC}"
+  fi
+
+  # Backup antes de modificar
+  if [ ! -f "${BACKUP_DIR}/rsyslog.conf.bak" ]; then
+    cp "$RSYSLOG_CONF" "${BACKUP_DIR}/rsyslog.conf.bak"
+    echo -e "${GREEN}[✓] Backup creado: ${BACKUP_DIR}/rsyslog.conf.bak${NC}"
+  fi
+
+  # Agregar configuracion remota
+  echo "" >>"$RSYSLOG_CONF"
+  echo "# ==============================================" >>"$RSYSLOG_CONF"
+  echo "# Envio de logs a servidor remoto (CIS 4.2.1.4)" >>"$RSYSLOG_CONF"
+  echo "# Configurado: $(date)" >>"$RSYSLOG_CONF"
+  echo "# Destino: $remote_host:$remote_port ($proto_display)" >>"$RSYSLOG_CONF"
+  echo "$remote_config" >>"$RSYSLOG_CONF"
+  echo "# ==============================================" >>"$RSYSLOG_CONF"
+
+  echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port ($proto_display)${NC}"
+
+  # Reiniciar rsyslog
+  systemctl restart rsyslog 2>/dev/null
+  echo -e "${GREEN}[✓] Rsyslog reiniciado${NC}"
+
+  echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
+  echo -e "  tail -f /var/log/messages | grep -i syslog"
+  echo -e "  tcpdump -n port $remote_port"
 }
 
 # ==============================================
@@ -169,7 +228,6 @@ check_rsyslog_enabled() {
 check_file_permissions() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.3 - Verificando permisos de archivos de log...${NC}"
 
-  # $FileCreateMode
   if grep -q "^\$FileCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
     if grep -q "^\$FileCreateMode 0640" "$RSYSLOG_CONF" 2>/dev/null; then
       echo -e "${GREEN}[✓] FileCreateMode 0640${NC}"
@@ -194,7 +252,6 @@ check_file_permissions() {
     fi
   fi
 
-  # $DirCreateMode
   if grep -q "^\$DirCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
     if grep -q "^\$DirCreateMode 0750" "$RSYSLOG_CONF" 2>/dev/null; then
       echo -e "${GREEN}[✓] DirCreateMode 0750${NC}"
@@ -219,7 +276,6 @@ check_file_permissions() {
     fi
   fi
 
-  # $Umask
   if grep -q "^\$Umask" "$RSYSLOG_CONF" 2>/dev/null; then
     if grep -q "^\$Umask 0027" "$RSYSLOG_CONF" 2>/dev/null; then
       echo -e "${GREEN}[✓] Umask 0027${NC}"
@@ -239,7 +295,7 @@ check_file_permissions() {
 }
 
 # ==============================================
-# 4.2.1.4 - ENSURE RSYSLOG CONFIGURED TO SEND LOGS TO REMOTE HOST
+# 4.2.1.4 - VERIFICAR ENVIO A REMOTO (sin configurar)
 # ==============================================
 check_remote_logging() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.4 - Verificando envio de logs a host remoto...${NC}"
@@ -248,48 +304,9 @@ check_remote_logging() {
     echo -e "${GREEN}[✓] Logs ya se envian a host remoto${NC}"
     local remote_dest=$(grep "^[^#].*@.*" "$RSYSLOG_CONF" | head -1)
     echo -e "    Destino: $remote_dest"
-    return 0
-  fi
-
-  echo -e "${YELLOW}[!] No se detecta envio a host remoto${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "\n${YELLOW}¿Desea configurar envio de logs a un servidor remoto? (s/N): ${NC}"
-    read -r configure_remote
-
-    if [[ "$configure_remote" =~ ^[Ss]$ ]]; then
-      echo -e "${YELLOW}Ingrese la IP o hostname del servidor de logs remoto:${NC}"
-      read -r remote_host
-
-      if [ -n "$remote_host" ]; then
-        echo -e "\n${YELLOW}¿Que puerto desea usar? (default: 514): ${NC}"
-        read -r remote_port
-        [ -z "$remote_port" ] && remote_port="514"
-
-        echo -e "\n${YELLOW}¿Usar TCP o UDP? (tcp/udp default: udp): ${NC}"
-        read -r remote_proto
-
-        if [[ "$remote_proto" =~ ^[Tt][Cc][Pp]$ ]]; then
-          remote_config="*.* @@$remote_host:$remote_port"
-        else
-          remote_config="*.* @$remote_host:$remote_port"
-        fi
-
-        echo "" >>"$RSYSLOG_CONF"
-        echo "# Envio de logs a servidor remoto (CIS 4.2.1.4)" >>"$RSYSLOG_CONF"
-        echo "$remote_config" >>"$RSYSLOG_CONF"
-
-        echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        echo -e "${RED}[!] No se ingreso destino remoto${NC}"
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    else
-      echo -e "${YELLOW}[!] Configuracion remota omitida${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
   else
+    echo -e "${YELLOW}[!] No se detecta envio a host remoto${NC}"
+    echo -e "${YELLOW}    Para configurar, ejecute: $0 --remote <IP>${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -310,7 +327,7 @@ check_remote_accept() {
 }
 
 # ==============================================
-# CONFIGURAR JOURNALD (usando funcion generica)
+# CONFIGURAR JOURNALD
 # ==============================================
 configure_journald() {
   echo -e "\n${BLUE}[*] Configurando journald...${NC}"
@@ -323,7 +340,6 @@ configure_journald() {
   echo -e "\n${YELLOW}[*] 4.2.2.3 - Verificando almacenamiento persistente...${NC}"
   configure_journald_param "Storage" "persistent" "Storage"
 
-  # Crear directorio para journal persistente si es necesario
   if [ "$AUTO_FIX" = true ] && [ ! -d /var/log/journal ]; then
     mkdir -p /var/log/journal
     systemctl restart systemd-journald
@@ -398,6 +414,9 @@ show_summary() {
   echo -e "  systemctl status rsyslog"
   echo -e "  systemctl status systemd-journald"
 
+  echo -e "\n${YELLOW}PARA CONFIGURAR ENVIO REMOTO:${NC}"
+  echo -e "  $0 --remote <IP_HOST>"
+
   echo -e "\n${GREEN}============================================${NC}"
   echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
   echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
@@ -408,18 +427,32 @@ show_summary() {
 # FUNCION PRINCIPAL
 # ==============================================
 main() {
+  # Procesar opcion --remote primero (no requiere AUTO_FIX)
+  if [ "$1" = "--remote" ]; then
+    if [ -z "$2" ]; then
+      echo -e "${RED}[!] Error: Debe especificar IP del servidor remoto${NC}"
+      show_usage
+      exit 1
+    fi
+    configure_remote_logging "$2" "$3" "$4"
+    exit 0
+  fi
+
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Rsyslog Hardening - CIS 4.2.x${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  # Modo ayuda
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
   fi
 
-  # Modo verificación
-  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    AUTO_FIX=true
+    make_backup
+  else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     show_usage
@@ -427,15 +460,6 @@ main() {
     AUTO_FIX=false
   fi
 
-  # Modo automático
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
-    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    AUTO_FIX=true
-    make_backup
-  fi
-
-  # Ejecutar verificaciones
   check_rsyslog_installed
   check_rsyslog_enabled
   check_file_permissions
