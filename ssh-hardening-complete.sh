@@ -7,6 +7,7 @@
 # Email: froman@orangebox.cl
 # Descripcion: Hardening completo de SSH basado en ssh-audit
 #              Compatible con RHEL/CentOS/Rocky/AlmaLinux 7,8,9,10
+#              Respeta estructura de includes en RHEL 8+
 # ==============================================
 
 RED='\033[0;31m'
@@ -20,6 +21,8 @@ WARNINGS=0
 AUTO_FIX=false
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
+SSHD_CONFIG_D="/etc/ssh/sshd_config.d"
+HARDENING_CONF="$SSHD_CONFIG_D/99-hardening.conf"
 SSH_MODULI="/etc/ssh/moduli"
 BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
 
@@ -33,34 +36,28 @@ check_ssh_audit() {
 
     INSTALL_SUCCESS=false
 
-    # Intentar con dnf (RHEL 8,9,10, Fedora)
     if command -v dnf &>/dev/null; then
-      # Verificar si epel-release esta instalado
       if ! rpm -q epel-release &>/dev/null; then
         echo -e "${YELLOW}[*] Instalando epel-release...${NC}"
         dnf install epel-release -y 2>/dev/null
       fi
-
       dnf install ssh-audit -y 2>/dev/null
       if [ $? -eq 0 ]; then
         INSTALL_SUCCESS=true
       fi
     fi
 
-    # Intentar con yum (RHEL 7)
     if [ "$INSTALL_SUCCESS" = false ] && command -v yum &>/dev/null; then
       if ! rpm -q epel-release &>/dev/null; then
         echo -e "${YELLOW}[*] Instalando epel-release...${NC}"
         yum install epel-release -y 2>/dev/null
       fi
-
       yum install ssh-audit -y 2>/dev/null
       if [ $? -eq 0 ]; then
         INSTALL_SUCCESS=true
       fi
     fi
 
-    # Intentar con apt (Debian/Ubuntu)
     if [ "$INSTALL_SUCCESS" = false ] && command -v apt &>/dev/null; then
       apt update 2>/dev/null
       apt install ssh-audit -y 2>/dev/null
@@ -69,15 +66,11 @@ check_ssh_audit() {
       fi
     fi
 
-    # Verificar si la instalacion fue exitosa
     if [ "$INSTALL_SUCCESS" = true ] && command -v ssh-audit &>/dev/null; then
       echo -e "${GREEN}[✓] ssh-audit instalado correctamente${NC}"
     else
       echo -e "${RED}[!] No se pudo instalar ssh-audit automaticamente${NC}"
-      echo -e "${YELLOW}    Instalacion manual:${NC}"
-      echo -e "      RHEL/CentOS/Rocky/Alma: dnf install epel-release -y && dnf install ssh-audit -y"
-      echo -e "      Debian/Ubuntu: apt install ssh-audit -y"
-      echo -e "      Desde fuente: pip install ssh-audit"
+      echo -e "${YELLOW}    Instalacion manual: dnf install epel-release -y && dnf install ssh-audit -y${NC}"
       exit 1
     fi
   else
@@ -221,19 +214,19 @@ show_current_config() {
   echo -e "\n${BLUE}[*] Configuracion actual de SSH:${NC}\n"
 
   echo -e "${YELLOW}KexAlgorithms:${NC}"
-  grep -i "^KexAlgorithms" "$SSHD_CONFIG" 2>/dev/null || echo "  (no configurado - usando defaults del sistema)"
+  grep -ih "^KexAlgorithms" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
 
   echo -e "\n${YELLOW}Ciphers:${NC}"
-  grep -i "^Ciphers" "$SSHD_CONFIG" 2>/dev/null || echo "  (no configurado - usando defaults del sistema)"
+  grep -ih "^Ciphers" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
 
   echo -e "\n${YELLOW}MACs:${NC}"
-  grep -i "^MACs" "$SSHD_CONFIG" 2>/dev/null || echo "  (no configurado - usando defaults del sistema)"
+  grep -ih "^MACs" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
 
   echo -e "\n${YELLOW}HostKeyAlgorithms:${NC}"
-  grep -i "^HostKeyAlgorithms" "$SSHD_CONFIG" 2>/dev/null || echo "  (no configurado - usando defaults del sistema)"
+  grep -ih "^HostKeyAlgorithms" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
 
   echo -e "\n${YELLOW}PermitRootLogin:${NC}"
-  grep -i "^PermitRootLogin" "$SSHD_CONFIG" 2>/dev/null || echo "  (no configurado - usando defaults del sistema)"
+  grep -ih "^PermitRootLogin" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
 }
 
 # ==============================================
@@ -258,11 +251,12 @@ show_will_apply() {
   echo -e "     - HostKeyAlgorithms: ED25519, RSA-SHA2-512/256"
 
   echo -e "\n  ${GREEN}4.${NC} Hardening adicional:"
-  echo -e "     - Deshabilitado: PermitRootLogin, X11Forwarding, TCP forwarding"
+  echo -e "     - Deshabilitado: X11Forwarding, TCP forwarding"
   echo -e "     - Timeout: 5 minutos de inactividad (ClientAliveInterval 300)"
   echo -e "     - MaxAuthTries: 4 intentos"
   echo -e "     - LoginGraceTime: 60 segundos"
   echo -e "     - LogLevel: VERBOSE"
+  echo -e "     - NOTA: PermitRootLogin NO se modifica (se respeta configuracion existente)"
 
   if [ "$rhel_version" -ge 8 ]; then
     echo -e "\n  ${GREEN}5.${NC} Throttling de conexiones (firewalld):"
@@ -279,12 +273,60 @@ make_backup() {
     mkdir -p "$BACKUP_DIR"
     [ -f "$SSHD_CONFIG" ] && cp -p "$SSHD_CONFIG" "$BACKUP_DIR/"
     [ -f "$SSH_MODULI" ] && cp -p "$SSH_MODULI" "$BACKUP_DIR/"
+    if [ -d "$SSHD_CONFIG_D" ]; then
+      cp -r "$SSHD_CONFIG_D" "$BACKUP_DIR/"
+    fi
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
   fi
 }
 
 # ==============================================
-# FUNCIONES PARA RHEL 7
+# FUNCION PARA CREAR ARCHIVO DE HARDENING EN SSHD_CONFIG_D
+# ==============================================
+create_hardening_conf() {
+  echo -e "\n${BLUE}[*] Creando archivo de hardening en $HARDENING_CONF...${NC}"
+
+  mkdir -p "$SSHD_CONFIG_D"
+
+  cat >"$HARDENING_CONF" <<'EOF'
+# ==============================================
+# Hardening SSH - Configuracion segura
+# Generado por ssh-hardening-complete.sh
+# Basado en recomendaciones de ssh-audit.com
+# ==============================================
+
+# Algoritmos seguros
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
+
+# Hardening adicional
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+GSSAPIAuthentication no
+X11Forwarding no
+AllowTcpForwarding no
+PermitUserEnvironment no
+ClientAliveInterval 300
+ClientAliveCountMax 0
+MaxAuthTries 4
+MaxSessions 10
+LoginGraceTime 60
+LogLevel VERBOSE
+UsePAM yes
+Compression no
+PrintLastLog yes
+IgnoreRhosts yes
+StrictModes yes
+EOF
+
+  echo -e "${GREEN}[✓] Archivo de hardening creado: $HARDENING_CONF${NC}"
+}
+
+# ==============================================
+# FUNCION PARA RHEL 7
 # ==============================================
 apply_hardening_rhel7() {
   echo -e "\n${BLUE}[*] Aplicando hardening para RHEL/CentOS 7...${NC}"
@@ -311,43 +353,14 @@ EOF
   fi
 
   sed -i 's/^HostKey \/etc\/ssh\/ssh_host_\(rsa\|dsa\|ecdsa\)_key$/#HostKey \/etc\/ssh\/ssh_host_\1_key/g' "$SSHD_CONFIG"
-  echo -e "${GREEN}[✓] Deshabilitadas claves RSA, DSA, ECDSA${NC}"
 
-  cat <<'EOF' >>"$SSHD_CONFIG"
+  create_hardening_conf
 
-# ==============================================
-# Hardening SSH - sshaudit.com
-# ==============================================
-HostKey /etc/ssh/ssh_host_ed25519_key
-KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group18-sha512,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
-MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,umac-128-etm@openssh.com
-PasswordAuthentication no
-PermitEmptyPasswords no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-GSSAPIAuthentication no
-X11Forwarding no
-AllowTcpForwarding no
-PermitUserEnvironment no
-ClientAliveInterval 300
-ClientAliveCountMax 0
-MaxAuthTries 4
-MaxSessions 10
-LoginGraceTime 60
-LogLevel VERBOSE
-UsePAM yes
-Compression no
-PrintLastLog yes
-IgnoreRhosts yes
-StrictModes yes
-EOF
-
-  echo -e "${GREEN}[✓] Configuracion SSH segura agregada${NC}"
+  echo -e "${GREEN}[✓] Configuracion SSH segura aplicada${NC}"
 }
 
 # ==============================================
-# FUNCIONES PARA RHEL 8
+# FUNCION PARA RHEL 8
 # ==============================================
 apply_hardening_rhel8() {
   echo -e "\n${BLUE}[*] Aplicando hardening para RHEL/CentOS 8...${NC}"
@@ -366,7 +379,8 @@ apply_hardening_rhel8() {
   fi
 
   sed -i 's/^HostKey \/etc\/ssh\/ssh_host_ecdsa_key$/#HostKey \/etc\/ssh\/ssh_host_ecdsa_key/g' "$SSHD_CONFIG"
-  echo -e "${GREEN}[✓] Deshabilitada clave ECDSA${NC}"
+
+  create_hardening_conf
 
   cp /etc/crypto-policies/back-ends/opensshserver.config /etc/crypto-policies/back-ends/opensshserver.config.orig 2>/dev/null
 
@@ -375,36 +389,11 @@ CRYPTO_POLICY='-oCiphers=chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,ae
 EOF
   echo -e "${GREEN}[✓] Configuradas politicas criptograficas${NC}"
 
-  cat <<'EOF' >>"$SSHD_CONFIG"
-
-HostKey /etc/ssh/ssh_host_ed25519_key
-HostKey /etc/ssh/ssh_host_rsa_key
-PasswordAuthentication no
-PermitEmptyPasswords no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-GSSAPIAuthentication no
-X11Forwarding no
-AllowTcpForwarding no
-PermitUserEnvironment no
-ClientAliveInterval 300
-ClientAliveCountMax 0
-MaxAuthTries 4
-MaxSessions 10
-LoginGraceTime 60
-LogLevel VERBOSE
-UsePAM yes
-Compression no
-PrintLastLog yes
-IgnoreRhosts yes
-StrictModes yes
-EOF
-
-  echo -e "${GREEN}[✓] Configuracion adicional agregada${NC}"
+  echo -e "${GREEN}[✓] Configuracion SSH segura aplicada${NC}"
 }
 
 # ==============================================
-# FUNCIONES PARA RHEL 9
+# FUNCION PARA RHEL 9
 # ==============================================
 apply_hardening_rhel9() {
   echo -e "\n${BLUE}[*] Aplicando hardening para RHEL/Rocky/AlmaLinux 9...${NC}"
@@ -414,14 +403,13 @@ apply_hardening_rhel9() {
   ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
   echo -e "${GREEN}[✓] Regeneradas claves RSA (4096) y ED25519${NC}"
 
-  echo -e "\nHostKey /etc/ssh/ssh_host_ed25519_key\nHostKey /etc/ssh/ssh_host_rsa_key" >>"$SSHD_CONFIG"
-  echo -e "${GREEN}[✓] Habilitadas claves ED25519 y RSA${NC}"
-
   if [ -f "$SSH_MODULI" ]; then
     awk '$5 >= 3071' "$SSH_MODULI" >/etc/ssh/moduli.safe
     mv -f /etc/ssh/moduli.safe /etc/ssh/moduli
     echo -e "${GREEN}[✓] Eliminados moduli DH < 3071 bits${NC}"
   fi
+
+  create_hardening_conf
 
   cat <<'EOF' >/etc/crypto-policies/back-ends/opensshserver.config
 # Restrict key exchange, cipher, and MAC algorithms, as per sshaudit.com
@@ -437,34 +425,11 @@ PubkeyAcceptedAlgorithms sk-ssh-ed25519-cert-v01@openssh.com,ssh-ed25519-cert-v0
 EOF
   echo -e "${GREEN}[✓] Configuradas politicas criptograficas avanzadas${NC}"
 
-  cat <<'EOF' >>"$SSHD_CONFIG"
-
-PasswordAuthentication no
-PermitEmptyPasswords no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-GSSAPIAuthentication no
-X11Forwarding no
-AllowTcpForwarding no
-PermitUserEnvironment no
-ClientAliveInterval 300
-ClientAliveCountMax 0
-MaxAuthTries 4
-MaxSessions 10
-LoginGraceTime 60
-LogLevel VERBOSE
-UsePAM yes
-Compression no
-PrintLastLog yes
-IgnoreRhosts yes
-StrictModes yes
-EOF
-
-  echo -e "${GREEN}[✓] Configuracion adicional agregada${NC}"
+  echo -e "${GREEN}[✓] Configuracion SSH segura aplicada${NC}"
 }
 
 # ==============================================
-# FUNCIONES PARA RHEL 10
+# FUNCION PARA RHEL 10
 # ==============================================
 apply_hardening_rhel10() {
   echo -e "\n${BLUE}[*] Aplicando hardening para RHEL/Rocky/AlmaLinux 10...${NC}"
@@ -474,14 +439,13 @@ apply_hardening_rhel10() {
   ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
   echo -e "${GREEN}[✓] Regeneradas claves RSA (4096) y ED25519${NC}"
 
-  echo -e "\nHostKey /etc/ssh/ssh_host_ed25519_key\nHostKey /etc/ssh/ssh_host_rsa_key" >>"$SSHD_CONFIG"
-  echo -e "${GREEN}[✓] Habilitadas claves ED25519 y RSA${NC}"
-
   if [ -f "$SSH_MODULI" ]; then
     awk '$5 >= 3071' "$SSH_MODULI" >/etc/ssh/moduli.safe
     mv -f /etc/ssh/moduli.safe /etc/ssh/moduli
     echo -e "${GREEN}[✓] Eliminados moduli DH < 3071 bits${NC}"
   fi
+
+  create_hardening_conf
 
   cat <<'EOF' >/etc/crypto-policies/back-ends/opensshserver.config
 # Restrict key exchange, cipher, and MAC algorithms, as per sshaudit.com
@@ -495,30 +459,7 @@ PubkeyAcceptedAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519,rsa-sha2-5
 EOF
   echo -e "${GREEN}[✓] Configuradas politicas criptograficas para RHEL 10${NC}"
 
-  cat <<'EOF' >>"$SSHD_CONFIG"
-
-PasswordAuthentication no
-PermitEmptyPasswords no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-GSSAPIAuthentication no
-X11Forwarding no
-AllowTcpForwarding no
-PermitUserEnvironment no
-ClientAliveInterval 300
-ClientAliveCountMax 0
-MaxAuthTries 4
-MaxSessions 10
-LoginGraceTime 60
-LogLevel VERBOSE
-UsePAM yes
-Compression no
-PrintLastLog yes
-IgnoreRhosts yes
-StrictModes yes
-EOF
-
-  echo -e "${GREEN}[✓] Configuracion adicional agregada${NC}"
+  echo -e "${GREEN}[✓] Configuracion SSH segura aplicada${NC}"
 }
 
 # ==============================================
@@ -599,7 +540,7 @@ main() {
       ;;
     8)
       apply_hardening_rhel8
-      FIXED=$((FIXED + 7))
+      FIXED=$((FIXED + 8))
       configure_throttling
       FIXED=$((FIXED + 1))
       ;;
@@ -628,6 +569,10 @@ main() {
       sshd -t
       if [ -f "$BACKUP_DIR/sshd_config" ]; then
         cp "$BACKUP_DIR/sshd_config" "$SSHD_CONFIG"
+        if [ -d "$BACKUP_DIR/sshd_config.d" ]; then
+          rm -rf "$SSHD_CONFIG_D"
+          cp -r "$BACKUP_DIR/sshd_config.d" "$SSHD_CONFIG_D"
+        fi
         systemctl restart sshd 2>/dev/null || service sshd restart 2>/dev/null
         echo -e "${YELLOW}[!] Backup restaurado${NC}"
       fi
