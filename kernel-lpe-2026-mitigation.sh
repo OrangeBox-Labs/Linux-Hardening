@@ -157,8 +157,7 @@ detect_os() {
   # La deteccion es informativa; el script no instala ni compila kernels.
   # --------------------------------------------------------------------------
   local major
-  major="$(printf '%s
-' "$version" | cut -d. -f1)"
+  major="$(printf '%s\n' "$version" | cut -d. -f1)"
 
   if [[ "$id" == "centos" || "$id" == "centos-stream" ]]; then
     case "$major" in
