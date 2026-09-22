@@ -117,7 +117,18 @@ detect_os() {
     version="$VERSION_ID"
   elif [[ -r /etc/redhat-release ]]; then
     pretty="$(cat /etc/redhat-release)"
-    id="rhel-family"
+    # CentOS 6 no suele disponer de /etc/os-release. Detectamos la familia
+    # legacy directamente desde /etc/redhat-release para no perder el estado EOL.
+    if grep -qi '^CentOS' /etc/redhat-release; then
+      id="centos"
+      version="$(sed -n 's/.*[Rr]elease[[:space:]]\+\([0-9][0-9.]*\).*/\1/p' /etc/redhat-release | head -n1)"
+    elif grep -qi 'CloudLinux' /etc/redhat-release; then
+      id="cloudlinux"
+      version="$(sed -n 's/.*[Rr]elease[[:space:]]\+\([0-9][0-9.]*\).*/\1/p' /etc/redhat-release | head -n1)"
+    else
+      id="rhel-family"
+      version="$(sed -n 's/.*[Rr]elease[[:space:]]\+\([0-9][0-9.]*\).*/\1/p' /etc/redhat-release | head -n1)"
+    fi
   fi
 
   echo "OS      : $pretty"
