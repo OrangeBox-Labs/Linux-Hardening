@@ -46,6 +46,11 @@ ERRORS=0
 NEEDS_REBOOT=false
 VENDOR_PATCHED=false
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+OS_EOL=false
+OS_EOL_REASON=""
+OPENVPN_DETECTED=false
+OPENVPN_DETECTION_METHODS=""
+TUN_BLOCK_SKIPPED=false
 
 CVES="CVE-2026-80844 CVE-2026-81000 CVE-2026-68121 CVE-2026-74469"
 MODULES="ah6 pppoe sctp sctp_diag"
@@ -129,6 +134,102 @@ detect_os() {
       warn "Distribucion no reconocida como Enterprise Linux."
       ;;
   esac
+
+  # --------------------------------------------------------------------------
+  # Plataformas EOL:
+  #   CentOS Linux 6  -> EOL 2020-11-30
+  #   CentOS Linux 7  -> EOL 2024-06-30
+  #   CentOS Linux 8  -> EOL 2021-12-31
+  #   CentOS Stream 8 -> EOL 2024-05-31
+  #
+  # Estos hosts no deben depender de futuros kernels corregidos por CentOS.
+  # La deteccion es informativa; el script no instala ni compila kernels.
+  # --------------------------------------------------------------------------
+  local major
+  major="$(printf '%s
+' "$version" | cut -d. -f1)"
+
+  if [[ "$id" == "centos" || "$id" == "centos-stream" ]]; then
+    case "$major" in
+      6)
+        OS_EOL=true
+        OS_EOL_REASON="CentOS 6"
+        warn "CentOS 6 esta fuera de soporte; no recibe nuevas actualizaciones."
+        ;;
+      7)
+        OS_EOL=true
+        OS_EOL_REASON="CentOS 7"
+        warn "CentOS 7 esta fuera de soporte; no recibe nuevas actualizaciones."
+        ;;
+      8)
+        OS_EOL=true
+        if [[ "$pretty" == *"Stream"* || "$id" == "centos-stream" ]]; then
+          OS_EOL_REASON="CentOS Stream 8"
+          warn "CentOS Stream 8 esta fuera de soporte; no recibe nuevas actualizaciones."
+        else
+          OS_EOL_REASON="CentOS Linux 8"
+          warn "CentOS Linux 8 esta fuera de soporte; no recibe nuevas actualizaciones."
+        fi
+        ;;
+    esac
+  fi
+}
+
+add_openvpn_detection() {
+  local method="$1"
+
+  if [[ -z "$OPENVPN_DETECTION_METHODS" ]]; then
+    OPENVPN_DETECTION_METHODS="$method"
+  else
+    OPENVPN_DETECTION_METHODS="$OPENVPN_DETECTION_METHODS, $method"
+  fi
+}
+
+detect_openvpn() {
+  info "Verificando si OpenVPN esta activo..."
+
+  local detected=false
+
+  # No se usa systemctl: CentOS 6/7 pueden usar SysV init y este script debe
+  # funcionar tambien en hosts legacy sin systemd.
+  if command -v pgrep >/dev/null 2>&1; then
+    if pgrep -x openvpn >/dev/null 2>&1; then
+      detected=true
+      add_openvpn_detection "proceso openvpn"
+    fi
+  fi
+
+  # Fallback para sistemas donde pgrep no esta disponible o usa una vista
+  # distinta de procesos.
+  if ps axww 2>/dev/null | grep -E '[[:space:]/]openvpn([[:space:]]|$)' | grep -v '[[]openvpn[]]' >/dev/null 2>&1; then
+    detected=true
+    add_openvpn_detection "ps/proceso"
+  fi
+
+  # netstat -p muestra PID/programa en sockets activos. Esto permite detectar
+  # tanto servidores como clientes OpenVPN sin asumir systemd.
+  if command -v netstat >/dev/null 2>&1; then
+    if netstat -anp 2>/dev/null | grep -E '[0-9]+/openvpn([[:space:]]|$)' >/dev/null 2>&1; then
+      detected=true
+      add_openvpn_detection "netstat/socket openvpn"
+    fi
+  fi
+
+  # ss es el fallback moderno cuando netstat no existe.
+  if command -v ss >/dev/null 2>&1; then
+    if ss -anp 2>/dev/null | grep -E 'openvpn' >/dev/null 2>&1; then
+      detected=true
+      add_openvpn_detection "ss/socket openvpn"
+    fi
+  fi
+
+  OPENVPN_DETECTED="$detected"
+
+  if "$OPENVPN_DETECTED"; then
+    ok "OpenVPN detectado ($OPENVPN_DETECTION_METHODS). El modulo tun/tap quedara protegido contra bloqueos automaticos."
+  else
+    ok "OpenVPN no detectado por proceso ni sockets."
+  fi
 }
 
 running_kernel_pkg() {
@@ -189,7 +290,13 @@ check_userns() {
   v="$(current_userns)"
 
   if [[ -z "$v" ]]; then
-    warn "user.max_user_namespaces no existe en este kernel."
+    # CentOS 6 usa kernel 2.6.x y no dispone de user namespaces modernos.
+    # No forzamos un sysctl que el kernel no conoce.
+    if [[ "$(uname -r)" == 2.6.* ]]; then
+      ok "Este kernel 2.6.x no expone user.max_user_namespaces; el mecanismo de user namespaces requerido por estas vias de explotacion no esta disponible."
+    else
+      warn "user.max_user_namespaces no esta disponible en este kernel; no se puede verificar ni aplicar esta mitigacion mediante sysctl."
+    fi
     return 2
   fi
 
@@ -214,7 +321,15 @@ apply_userns() {
   current="$(current_userns)"
 
   if [[ -z "$current" ]]; then
-    error "No es posible aplicar user.max_user_namespaces=0."
+    if [[ "$(uname -r)" == 2.6.* ]]; then
+      # En kernels 2.6.x antiguos (p.ej. CentOS 6) no existe el control
+      # user.max_user_namespaces porque el soporte de user namespaces no esta
+      # presente como en kernels modernos. No escribimos un sysctl inexistente.
+      ok "No se aplica user.max_user_namespaces: el kernel 2.6.x no expone user namespaces modernos."
+      return 0
+    fi
+
+    error "No es posible aplicar user.max_user_namespaces=0 en este kernel."
     return 1
   fi
 
@@ -336,7 +451,9 @@ audit_modules() {
     check_module "$m"
   done
 
-  if "$BLOCK_TUN" || "$STRICT"; then
+  if "$OPENVPN_DETECTED"; then
+    warn "tun/tap: OpenVPN esta activo; NO se recomienda bloquear este modulo."
+  elif "$BLOCK_TUN" || "$STRICT"; then
     check_module tun
   else
     warn "tun/tap queda en auditoria. Usa --block-tun si no es requerido."
@@ -353,7 +470,12 @@ apply_modules() {
   done
 
   if "$BLOCK_TUN" || "$STRICT"; then
-    block_module tun || true
+    if "$OPENVPN_DETECTED"; then
+      TUN_BLOCK_SKIPPED=true
+      warn "Se solicito bloquear tun/tap, pero OpenVPN fue detectado. Se omite el bloqueo para no interrumpir la VPN."
+    else
+      block_module tun || true
+    fi
   fi
 }
 
@@ -363,6 +485,11 @@ summary() {
   echo " OrangeBox - Kernel LPE Quartet Mitigation 2026"
   echo "============================================================"
   echo "Kernel            : $(uname -r)"
+  echo "Plataforma EOL    : $OS_EOL"
+  [[ "$OS_EOL" == "true" && -n "$OS_EOL_REASON" ]] && echo "Motivo EOL        : $OS_EOL_REASON"
+  echo "OpenVPN detectado : $OPENVPN_DETECTED"
+  [[ "$OPENVPN_DETECTED" == "true" ]] && echo "Metodo(s)         : $OPENVPN_DETECTION_METHODS"
+  [[ "$TUN_BLOCK_SKIPPED" == "true" ]] && echo "Bloqueo tun       : OMITIDO por OpenVPN activo"
   echo "Cambios aplicados : $CHANGES"
   echo "Advertencias      : $WARNINGS"
   echo "Errores           : $ERRORS"
@@ -400,6 +527,9 @@ main() {
   echo
 
   detect_os
+  echo
+
+  detect_openvpn
   echo
 
   info "CVE cubiertos:"
