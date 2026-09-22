@@ -44,6 +44,7 @@ WARNINGS=0
 CHANGES=0
 ERRORS=0
 NEEDS_REBOOT=false
+VENDOR_PATCHED=false
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
 CVES="CVE-2026-80844 CVE-2026-81000 CVE-2026-68121 CVE-2026-74469"
@@ -171,6 +172,7 @@ check_vendor_fix_status() {
   done
 
   if [[ $found -eq 4 ]]; then
+    VENDOR_PATCHED=true
     ok "Los cuatro CVE aparecen en el changelog del kernel en ejecucion."
     return 0
   fi
