@@ -21,17 +21,26 @@ El script revisa el changelog del paquete RPM correspondiente al kernel en ejecu
 
 Si el changelog no permite verificar el estado, el script trata el estado como desconocido y aplica la mitigacion conservadora cuando se usa --fix.
 
-## CentOS Stream 8 y AlmaLinux 8
+## Plataformas legacy sin parches del proyecto CentOS
 
-### CentOS Stream 8
+El script identifica explicitamente las versiones antiguas de CentOS que ya no reciben nuevas actualizaciones del proyecto:
 
-CentOS Stream 8 alcanzo EOL el 31 de mayo de 2024 y no recibe actualizaciones de seguridad. Por lo tanto no debe esperarse un nuevo kernel de CentOS Stream 8 que incorpore estas correcciones. citeturn281334search0turn281334search5
+| Plataforma | EOL |
+|---|---:|
+| CentOS Linux 6 | 2020-11-30 |
+| CentOS Linux 7 | 2024-06-30 |
+| CentOS Linux 8 | 2021-12-31 |
+| CentOS Stream 8 | 2024-05-31 |
+
+En estos sistemas el script marca la plataforma como **EOL** y no espera futuras correcciones de kernel desde CentOS. El estado del kernel se sigue comprobando mediante el changelog RPM, porque el script no puede asumir que un kernel concreto sea vulnerable solamente por su nombre de paquete.
 
 ### AlmaLinux 8
 
-AlmaLinux 8 mantiene soporte de seguridad hasta 2029. Por lo tanto no corresponde asumir que AlmaLinux 8 quedara sin parche solamente por ser EL8; debe verificarse el kernel distribuido por AlmaLinux cuando el fix sea publicado. citeturn281334search1turn281334search14
+AlmaLinux 8 **no** se considera EOL en esta politica. El script sigue tratando el estado del kernel del vendor de forma independiente y no aplica la etiqueta EOL por el solo hecho de ser EL8.
 
-El script esta pensado justamente para este escenario: si el kernel del vendor todavia no contiene los cuatro fixes, aplica mitigacion y permite retirar esa mitigacion posteriormente cuando el kernel ya este corregido.
+Fuentes de ciclo de vida: CentOS Project. urlCentOS Linux EOLhttps://www.centos.org/centos-linux-eol/ urlComparacion de CentOS Linux y CentOS Streamhttps://www.centos.org/cl-vs-cs/
+
+El script esta pensado para este escenario: si el kernel del vendor todavia no contiene los cuatro fixes, aplica la mitigacion cuando se usa `--fix`.
 
 ## Mitigaciones
 
@@ -55,6 +64,7 @@ La segunda medida cubre DirtyAH6, TUNderflow y PPPoEject, pero no cubre DiagSpil
 ## Politica del script
 
 El modo conservador bloquea:
+
 
 ~~~
 ah6
@@ -110,13 +120,38 @@ Bloquear los cinco modulos:
 ./kernel-lpe-2026-mitigation.sh --strict
 ~~~
 
+## Deteccion de OpenVPN y proteccion de TUN/TAP
+
+El script **no usa systemctl** para decidir si OpenVPN esta activo, porque debe funcionar tambien en CentOS 6 y otros hosts legacy sin systemd.
+
+La deteccion se realiza por varias vias, en este orden:
+
+1. Proceso `openvpn` mediante `pgrep`.
+2. Fallback mediante `ps`.
+3. Sockets activos donde `netstat -anp` identifique el proceso `openvpn`.
+4. Fallback mediante `ss -anp`.
+
+Si OpenVPN es detectado, el script considera que `tun` es un recurso en uso y **no lo bloquea automaticamente**, incluso cuando se ejecuta `--fix --block-tun` o `--strict`. La ejecucion queda registrada explicitamente en el resumen.
+
+Esto evita romper servidores VPN por accidente.
+
 ## Importante sobre modulos ya cargados
 
 El script no descarga modulos automaticamente.
 
 Si ah6, pppoe, sctp, sctp_diag o tun ya estan cargados, el script escribe igualmente el bloqueo persistente y marca que es necesario reiniciar para que el bloqueo sea efectivo.
 
+**Excepcion de seguridad:** si OpenVPN esta activo y se solicito bloquear `tun`, el bloqueo de `tun` se omite.
+
 Si un modulo aparece como builtin, modprobe.d no puede deshabilitarlo. En ese caso la correccion requiere un kernel que contenga el fix del vendor.
+
+## Kernels legacy 2.6.x
+
+CentOS 6 normalmente utiliza kernels 2.6.x. Esos kernels no exponen el control moderno `user.max_user_namespaces`.
+
+En ese caso el script **no intenta escribir un sysctl inexistente**. Reporta que esa mitigacion no es aplicable por esa via y continua con la auditoria/bloqueo de los modulos que correspondan.
+
+Esto es importante para soportar hosts CentOS 6 sin que `--fix` termine por error simplemente porque no existe el parametro sysctl.
 
 ## Archivos modificados
 
