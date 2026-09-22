@@ -85,11 +85,17 @@ tun queda fuera del modo conservador porque es habitual en VPN, OpenVPN/WireGuar
 ./kernel-lpe-2026-mitigation.sh --fix --block-tun
 ~~~
 
+Si OpenVPN esta activo, el script detecta el proceso/socket y omite el bloqueo de `tun` aunque se solicite esta opcion.
+
+
 O bien:
 
 ~~~
 ./kernel-lpe-2026-mitigation.sh --strict
 ~~~
+
+`--strict` tambien respeta la proteccion contra interrupcion de OpenVPN: si OpenVPN esta activo, `tun` no se bloquea.
+
 
 que bloquea los cinco modulos.
 
