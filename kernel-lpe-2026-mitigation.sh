@@ -86,8 +86,8 @@ Uso:
 Opciones:
   --check       Solo audita. No modifica el sistema.
   --fix         Aplica mitigacion conservadora.
-  --block-tun   Con --fix, bloquea tambien TUN/TAP.
-  --strict      Equivale a --fix --block-tun.
+  --block-tun   Con --fix, solicita bloquear TUN/TAP; se omite si OpenVPN esta activo.
+  --strict      Equivale a --fix --block-tun; tambien respeta la proteccion de OpenVPN.
   --help        Muestra esta ayuda.
 
 Mitigacion conservadora:
@@ -211,7 +211,7 @@ detect_openvpn() {
 
   # Fallback para sistemas donde pgrep no esta disponible o usa una vista
   # distinta de procesos.
-  if ps axww 2>/dev/null | grep -E '[[:space:]/]openvpn([[:space:]]|$)' | grep -v '[[]openvpn[]]' >/dev/null 2>&1; then
+  if ps axww 2>/dev/null | grep -E '[[:space:]/]openvpn([[:space:]]|$)' >/dev/null 2>&1; then
     detected=true
     add_openvpn_detection "ps/proceso"
   fi
