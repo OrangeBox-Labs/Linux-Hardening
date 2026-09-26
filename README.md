@@ -1,125 +1,109 @@
-# Linux Hardening Scripts
+# OrangeBox · Linux Hardening
 
-**Diseñado y desarrollado por Felipe Román**  
-**Web: [www.orangebox.cl](https://www.orangebox.cl)**
+> Scripts Bash de hardening y seguridad para servidores Linux Enterprise basados en CIS Benchmarks.
 
-Scripts de hardening para servidores Linux basados en estándares de cyberseguridad CIS Benchmarks.
+[![OrangeBox IT Services](https://img.shields.io/badge/OrangeBox-IT%20Services-ff6a00?style=for-the-badge)](https://www.orangebox.cl/)
+[![Bash](https://img.shields.io/badge/Bash-tooling-121011?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![CIS](https://img.shields.io/badge/CIS-security-0073c6?style=for-the-badge)](https://www.cisecurity.org/)
 
-## ¡Bienvenido a los scripts de hardening de OrangeBox Labs!
+## Hardening de Linux con Bash y CIS Benchmarks
 
-Hola a todos,
+Colección de scripts de **Linux hardening** desarrollados por **OrangeBox IT Services** para asegurar servidores Linux Enterprise de forma reproducible, transparente y auditable.
 
-Les comparto una colección de scripts para hacer hardening de seguridad en sus servidores Linux. Están pensados para que sean:
+El proyecto cubre áreas como **SSH, sudo, PAM, passwords, auditd, SELinux, kernel, filesystem, GRUB, red, cron, rsyslog, servicios, AIDE, sincronización horaria y mitigaciones de seguridad**.
 
-- Fáciles de usar: Todos siguen el mismo formato y están escritos en Bash.
-- 100% transparentes: Pueden ver el código, modificarlo y adaptarlo a sus necesidades. 
-- En constante evolución: Vamos a seguir subiendo más scripts, así que pasen de vez en cuando a mirar.
+La idea es simple: código visible, comportamiento explícito y herramientas que un administrador Linux pueda revisar antes de aplicarlas.
 
-"Tiramos toda la carne a la parrilla" ¡No guardamos secretos!, creemos que la seguridad se construye entre todos, con código abierto y sin vueltas.
+## Filosofía
 
-## Requisito previo (no es opcional)
+**Infraestructura antes que magia.**
 
-Los scripts de hardening asumen que tu Linux está instalado **como Dios manda**. Si no, pueden fallar o no proteger del todo.
+Los scripts:
 
-Te dejo este video donde instalamos un servidor Linux seguro paso a paso. **Haz esto primero**.
+- están escritos principalmente en Bash
+- muestran exactamente qué cambios realizan
+- separan verificación de aplicación cuando corresponde
+- evitan dependencias innecesarias
+- están pensados para administradores Linux
 
-[![Instalación de Linux segura - Video obligatorio](https://img.youtube.com/vi/utOnUELYFC0/hqdefault.jpg)](https://youtu.be/utOnUELYFC0)
+## Requisito previo
 
-*Haz clic en la imagen para ver el video*
+El hardening debe aplicarse sobre un sistema Linux correctamente instalado y configurado.
 
-Después de verlo y aplicarlo, recién ahí ejecuta los scripts.
+Para una instalación segura de Linux puedes revisar nuestros materiales:
 
+- Blog: https://www.orangebox.cl/blog/
+- YouTube: https://www.youtube.com/@OrangeBoxLinux
+- Web: https://www.orangebox.cl/
 
-### ¿Dónde encontrar más?
+## Scripts
 
-No solo vivimos de scripts. Tenemos un par de lugares donde seguimos hablando de seguridad y servidores:
+| Script | Área |
+|---|---|
+| `post-install.sh` | Preparación inicial del servidor |
+| `bash-hardening.sh` | Bash, profiles e historial |
+| `cis-benchmark-check.sh` | Verificación CIS |
+| `ssh-hardening.sh` | Hardening de SSH |
+| `ssh-hardening-complete.sh` | Hardening avanzado de SSH |
+| `password-hardening.sh` | Políticas de contraseñas |
+| `grub-hardening.sh` | GRUB |
+| `FS-hardening.sh` | Sistema de archivos |
+| `sudo-hardening.sh` | sudo |
+| `auditd-hardening.sh` | Auditoría |
+| `selinux-secure-setup.sh` | SELinux |
+| `kernel-hardening.sh` | Kernel |
+| `network-hardening.sh` | Red |
+| `cron-hardening.sh` | cron |
+| `rsyslog-hardening.sh` | Logs |
+| `aide-install.sh` | Integridad |
+| `audit-listening-services.sh` | Servicios escuchando |
+| `generate-iptables-rules.sh` | Firewall |
+| `configure-time-sync.sh` | Sincronización horaria |
 
-- 📝 **El blog**: Acá escribimos con más detalle sobre hardening, Zero Trust, instalaciones seguras y todo acerca de Infraestructura y servidores.
-  → https://www.orangebox.cl/blog/
+## Uso básico
 
-- 🎥 **YouTube**: Subimos videos mostrando ataques y cómo defenderte. guías y recomendaciones.
-  → https://www.youtube.com/@OrangeBoxLinux
+Clonar:
 
-- 🌐 **WEB**: Nuestra empresa!
-  → https://www.orangebox.cl
-
-Si necesitan algo en particular o tienen una idea para mejorar estos scripts, déjennos un comentario en nuestro canal de YouTube. Allí también encontrarán varios videos explicando cómo se hacen algunos ataques y, lo más importante, cómo protegerse de ellos.
-
-
-Gracias por ser parte de esta comunidad! 
-
-— Felipe Román
-  www.orangebox.cl
-
-
-## Scripts Disponibles
-
-| Script | Función | README |
-|--------|---------|--------|
-| `post-install.sh` | Ejecutar primero, son los primeros pasos después de instalar un Linux| [README](post-install-README.md) |
-| `bash-hardening.sh` | Asegurar la bash, profiles, history, aliases, etc.| [README](bash-hardening-README.md) |
-| `cis-benchmark-check.sh` | Prueba de cumplimiento CIS, con mitigaciones| [README](cis-benchmark-check-README.md) |
-| `ssh-hardening.sh` | Hardening de SSH basado en CIS| [README](ssh-hardening-README.md) |
-| `ssh-hardening-complete.sh` | Hardening de SSH basado en ssh-audit| [README](ssh-hardening-complete-README.md) |
-| `password-hardening.sh` | Políticas de contraseñas | [README](password-hardening-README.md) |
-| `grub-hardening.sh` | Hardening para GRUB | [README](grub-hardening-README.md) |
-| `FS-hardening.sh` | Sistema de archivos | [README](FS-hardening.README.md) |
-| `sudo-hardening.sh` | Hardening de sudo | [README](sudo-hardening-README.md) |
-| `auditd-hardening.sh` | Auditoría del sistema | [README](auditd-hardening-README.md) |
-| `selinux-secure-setup.sh` | Configuración SELinux | [README](selinux-secure-setup-README.md) |
-| `kernel-hardening.sh` | Parámetros de kernel | [README](kernel-hardening-README.md) |
-| `network-hardening.sh` | Hardening de red | [README](network-hardening-README.md) |
-| `cron-hardening.sh` | Restricción de cron | [README](cron-hardening-README.md) |
-| `disable-usb-storage.sh` | Deshabilitar USB | [README](disable-usb-storage.README.md) |
-| `cpu-hardening.sh` | Mitigaciones CPU | [README](cpu-hardening-README.md) |
-| `rsyslog-hardening.sh` | Hardening de logs | [README](rsyslog-hardening-README.md) |
-| `configure-time-sync.sh` | Sincronización horaria | [README](configure-time-sync-README.md) |
-| `configure-login-banners.sh` | Banners de login | [README](configure-login-banners-README.md) |
-| `aide-install.sh` | Monitor de integridad | [README](aide-install-README.md) |
-| `generate-iptables-rules.sh` | Reglas iptables | [README](generate-iptables-rules-README.md) |
-| `audit-listening-services.sh` | Auditoría de servicios | [README](audit-listening-services-README.md) |
-| `desintalar-paquetes-sin-usar.sh` | Limpieza de paquetes | [README](desintalar-paquetes-sin-usar.README.md) |
-| `desintalar-servicios-sin-usar.sh` | Limpieza de servicios | [README](desintalar-servicios-sin-usar-README.md) |
-| `remove-xinetd.sh` | Eliminar xinetd | [README](remove-xinetd-README.md) |
-| `remove-gui-hardening.sh` | Eliminar GUI | [README](remove-gui-hardening-README.md) |
-
-## Uso Básico
-
-```
+```bash
 git clone https://github.com/OrangeBox-Labs/Linux-Hardening.git
 cd Linux-Hardening
 chmod +x *.sh
 ```
 
-# Verificación (modo solo lectura)
-```
+Ejecutar una verificación:
+
+```bash
 ./ssh-hardening.sh
 ```
 
-# Aplicar cambios
-```
+Aplicar cambios:
+
+```bash
 ./ssh-hardening.sh --fix
 ```
 
+## Plataformas
 
-## Distribuciones Compatibles
+El repositorio está orientado principalmente a **Red Hat Enterprise Linux (RHEL), CentOS, Rocky Linux, AlmaLinux y Fedora**.
 
-| Distribución | Versiones | Estado |
-|--------------|-----------|--------|
-| Red Hat Enterprise Linux (RHEL) | 7, 8, 9 | Probado |
-| CentOS | 7, 8 | Probado |
-| Rocky Linux | 8, 9 | Probado |
-| AlmaLinux | 8, 9 | Probado |
-| Fedora | 38, 39, 40 | Compatible |
+La compatibilidad exacta depende de cada script. Revisa siempre el README individual antes de ejecutarlo.
 
-**NOTA IMPORTANTE:** Estos scripts NO son compatibles con Debian, Ubuntu o derivados debido a diferencias fundamentales en:
-- Sistema de autenticación PAM (archivos y sintaxis diferentes)
-- Gestión de paquetes (apt vs yum/dnf)
-- Sistema de seguridad (AppArmor vs SELinux)
-- Ubicación de archivos de configuración
+El proyecto no está diseñado como una colección genérica para Debian/Ubuntu: muchas políticas utilizan herramientas, PAM, SELinux, paquetes y rutas propias del ecosistema Red Hat.
 
+## Seguridad y compatibilidad
 
-## Licencia
+Los scripts de hardening modifican configuración del sistema. **Prueba primero en laboratorio, snapshot o una máquina de validación.**
 
-MIT
+No todos los controles son adecuados para todos los servidores. Revisa dependencias de aplicaciones, autenticación, acceso remoto, monitoreo y gestión antes de aplicar cambios.
 
+## OrangeBox IT Services
+
+**Felipe Román · OrangeBox IT Services**
+
+Enterprise Linux · Linux Security · Hardening · CIS Benchmarks · RHEL · Rocky Linux · AlmaLinux · CentOS · Fedora
+
+https://www.orangebox.cl/
+
+### Keywords
+
+Linux hardening, Linux security, CIS Benchmark, CIS hardening, RHEL hardening, Red Hat hardening, Rocky Linux hardening, AlmaLinux hardening, CentOS hardening, Fedora hardening, SSH hardening, sudo hardening, SELinux, auditd, kernel hardening, filesystem hardening, GRUB hardening, firewall hardening, Bash security, server hardening, Linux Enterprise, OrangeBox.
