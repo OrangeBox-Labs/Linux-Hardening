@@ -19,6 +19,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+ALLOW_SHOREWALL=false
 
 SYSCTL_FILE="/etc/sysctl.d/99-network-hardening.conf"
 BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
@@ -185,59 +186,72 @@ disable_module() {
 # ==============================================
 # FUNCION PARA VERIFICAR CONFLICTOS DE FIREWALL
 # ==============================================
-check_firewall_conflicts() {
-  echo -e "\n${BLUE}[*] Verificando conflictos de firewall...${NC}"
+shorewall_is_active() {
+  command -v shorewall >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet shorewall 2>/dev/null && return 0
+  local status
+  status="$(shorewall status 2>&1 || true)"
+  printf '%s\n' "$status" | grep -Eiq 'stopped|not running|inactive|is down' && return 1
+  printf '%s\n' "$status" | grep -Eiq 'running|started|active'
+}
 
-  local firewalld_installed=false
-  local firewalld_active=false
-  local nftables_installed=false
-  local nftables_active=false
-  local iptables_installed=false
-  local iptables_active=false
+check_firewall_conflicts() {
+  echo -e "\n${BLUE}[*] Verificando gestores y backend de firewall...${NC}"
+
+  local shorewall_installed=false shorewall_active=false
+  local firewalld_installed=false firewalld_active=false
+  local nftables_installed=false nftables_active=false
+  local iptables_installed=false iptables_active=false
+
+  command -v shorewall >/dev/null 2>&1 && shorewall_installed=true
+  shorewall_is_active && shorewall_active=true
 
   if rpm -q firewalld &>/dev/null; then
     firewalld_installed=true
-    if systemctl is-active --quiet firewalld 2>/dev/null; then
-      firewalld_active=true
-    fi
+    systemctl is-active --quiet firewalld 2>/dev/null && firewalld_active=true
   fi
-
   if rpm -q nftables &>/dev/null; then
     nftables_installed=true
-    if systemctl is-active --quiet nftables 2>/dev/null; then
-      nftables_active=true
-    fi
+    systemctl is-active --quiet nftables 2>/dev/null && nftables_active=true
   fi
-
   if rpm -q iptables-services &>/dev/null; then
     iptables_installed=true
-    if systemctl is-active --quiet iptables 2>/dev/null; then
-      iptables_active=true
-    fi
+    systemctl is-active --quiet iptables 2>/dev/null && iptables_active=true
   fi
 
+  echo -e "  shorewall: instalado=$shorewall_installed activo=$shorewall_active"
   echo -e "  firewalld: instalado=$firewalld_installed activo=$firewalld_active"
   echo -e "  nftables: instalado=$nftables_installed activo=$nftables_active"
-  echo -e "  iptables: instalado=$iptables_installed activo=$iptables_active"
+  echo -e "  iptables-services: instalado=$iptables_installed activo=$iptables_active"
 
-  local active_count=0
-  [ "$firewalld_active" = true ] && active_count=$((active_count + 1))
-  [ "$nftables_active" = true ] && active_count=$((active_count + 1))
-  [ "$iptables_active" = true ] && active_count=$((active_count + 1))
+  if [ "$shorewall_active" = true ]; then
+    echo -e "${GREEN}[✓] Shorewall está activo y se reconoce como gestor principal del firewall${NC}"
+    if [ "$firewalld_active" = true ]; then
+      echo -e "${RED}[!] Shorewall y firewalld aparecen activos; revisar posible doble gestión${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    if [ "$AUTO_FIX" = true ] && [ "$ALLOW_SHOREWALL" != true ]; then
+      echo -e "${RED}[!] Aplicación bloqueada: Shorewall está activo. Se requiere --allow-shorewall explícitamente.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
 
-  if [ $active_count -gt 1 ]; then
-    echo -e "${RED}[!] ADVERTENCIA: Multiples firewalls activos ($active_count)${NC}"
-    echo -e "${YELLOW}    Recomendacion: Tener solo un firewall activo${NC}"
+  local active_managers=0
+  [ "$firewalld_active" = true ] && active_managers=$((active_managers + 1))
+  [ "$nftables_active" = true ] && active_managers=$((active_managers + 1))
+  [ "$iptables_active" = true ] && active_managers=$((active_managers + 1))
+
+  if [ "$active_managers" -gt 1 ]; then
+    echo -e "${RED}[!] Varios servicios de firewall aparecen activos ($active_managers); revisar backend y reglas antes de cambiar configuración${NC}"
     WARNINGS=$((WARNINGS + 1))
-  elif [ $active_count -eq 0 ]; then
-    echo -e "${YELLOW}[!] No hay firewall activo${NC}"
-    echo -e "${YELLOW}    Recomendacion: Activar iptables${NC}"
+  elif [ "$active_managers" -eq 0 ]; then
+    echo -e "${YELLOW}[!] No se pudo confirmar un gestor de firewall activo (incluido Shorewall)${NC}"
     WARNINGS=$((WARNINGS + 1))
   else
-    echo -e "${GREEN}[✓] Solo un firewall activo${NC}"
+    echo -e "${GREEN}[✓] Un gestor/backend de firewall está activo${NC}"
   fi
 }
-
 # ==============================================
 # FUNCION PARA FLUSH ROUTES
 # ==============================================
@@ -447,43 +461,43 @@ show_summary() {
 main() {
   show_header
 
-  # Modo ayuda
-  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    show_usage
-    exit 0
-  fi
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h) show_usage; exit 0 ;;
+      --fix|-f) AUTO_FIX=true ;;
+      --allow-shorewall) ALLOW_SHOREWALL=true ;;
+      *) echo -e "${RED}[!] Opción desconocida: $1${NC}"; show_usage; exit 2 ;;
+    esac
+    shift
+  done
 
-  # Modo verificación (sin --fix)
-  if [ "$1" != "--fix" ] && [ "$1" != "-f" ]; then
+  if [ "$AUTO_FIX" = true ]; then
+    if shorewall_is_active && [ "$ALLOW_SHOREWALL" != true ]; then
+      echo -e "${RED}[ERROR] Shorewall está activo; no se aplicarán cambios de red sin --allow-shorewall.${NC}"
+      echo "No se han modificado sysctl ni módulos del kernel."
+      exit 2
+    fi
+    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    make_backup
+  else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     show_usage
     echo -e "\n${YELLOW}Estado actual del sistema:${NC}\n"
-    AUTO_FIX=false
   fi
 
-  # Modo automático (--fix o -f)
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
-    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    AUTO_FIX=true
-    make_backup
-  fi
-
-  # Deshabilitar modulos de red peligrosos (CIS 3.1.x)
   disable_dccp
   disable_tipc
   disable_sctp
   disable_rds
 
-  # Modulos adicionales no CIS pero recomendados
   for item in "${MODULES_TO_DISABLE[@]}"; do
     module="${item%%:*}"
     desc="${item##*:}"
     disable_module "$module" "$desc"
   done
 
-  # Configuraciones sysctl (CIS 3.2.x - 3.3.x)
   disable_send_redirects
   disable_source_route
   disable_secure_redirects
@@ -493,17 +507,13 @@ main() {
   enable_rp_filter
   enable_syncookies
   disable_ipv6_ra
-
-  # Verificar conflictos de firewall
   check_firewall_conflicts
-
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
+    echo -e "\n${BLUE}Para aplicar cambios en sistemas con Shorewall, use --fix --allow-shorewall solo tras revisar el impacto.${NC}"
   fi
 }
-
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}[!] Este script debe ejecutarse como root${NC}"
   exit 1
