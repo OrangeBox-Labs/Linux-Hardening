@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.4 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.5 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.4
+SCRIPT_VERSION=1.3.5
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -157,50 +157,29 @@ configure_ssh_banner() {
 
 banners_module() {
   echo -e "\n$BLUE### BANNERS / MOTD ###$NC"
-  local tmp target mode owner group selinux_mode selinux_line
-  selinux_mode="$(command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/null || echo unknown)"
-  case "$selinux_mode" in
-    Enforcing) selinux_line="SELinux en modo enforcing" ;;
-    Permissive) selinux_line="SELinux en modo permisivo" ;;
-    Disabled) selinux_line="SELinux deshabilitado" ;;
-    *) selinux_line="Estado de SELinux no verificable" ;;
-  esac
+  local tmp target mode owner group
 
   tmp="$(mktemp)" || { warn "No se pudo crear el banner temporal"; return; }
   cat > "$tmp" <<'ORANGEBOX_BANNER'
 *******************************************************************************
   ___                         ___
  / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
-| (_) | '_/ _` | ' \/ _` / -_) _ \/ _ \ \ /
+| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /
  \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
                     |___/
-                         SISTEMA DE ACCESO CONTROLADO
-                        Hardening por: www.orangebox.cl
+                         SISTEMA DE ACCESO RESTRINGIDO
+                           www.orangebox.cl
 *******************************************************************************
 
-Este servidor ha sido endurecido siguiendo estandares de seguridad CIS Benchmark.
-El acceso no autorizado esta estrictamente prohibido.
+Solo usuarios autorizados pueden acceder a este sistema.
+El acceso o uso no autorizado esta prohibido.
 
-CUALQUIER INTENTO DE ACCESO NO AUTORIZADO SERA:
-- Registrado y monitoreado
-- Reportado a las autoridades competentes
-- Utilizado con fines legales
-
-AL INGRESAR ACEPTA:
-- Las condiciones de uso del sistema
-- Que su actividad puede ser monitoreada las 24/7
-- Que la informacion obtenida es confidencial
-- Que los intentos no autorizados seran penalizados
-
-Este sistema utiliza:
-- @SELINUX_STATUS@
-- Firewall perimetral
-- Monitoreo de integridad de archivos
-- Deteccion de intrusiones
+La actividad realizada en este sistema puede ser registrada y revisada
+conforme a las politicas de la organizacion y a la legislacion aplicable.
+Si no cuenta con autorizacion, desconectese inmediatamente.
 
 *******************************************************************************
 ORANGEBOX_BANNER
-  sed -i "s|@SELINUX_STATUS@|$selinux_line|" "$tmp"
 
   for target in /etc/motd /etc/issue /etc/issue.net; do
     mode="$(stat -c '%a' "$target" 2>/dev/null || true)"
@@ -285,7 +264,7 @@ bash_module() {
 
   cat > "$tmp" <<'ORANGEBOX_BASH'
 # OrangeBox Linux Hardening - historial y prompt por rol
-# Se aplica solamente a shells interactivos.
+# Solo se aplica a shells interactivos.
 case $- in
   *i*) ;;
   *) return 0 ;;
@@ -298,7 +277,18 @@ export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
 export HISTCONTROL=ignoredups:ignorespace
 shopt -s histappend
 
-# Persistir comandos nuevos sin reemplazar PROMPT_COMMAND preexistente.
+# Fijar el prompt antes de cada indicador: otros perfiles pueden redefinir PS1
+# después de cargar /etc/profile.d. \D muestra la hora y \H el hostname completo.
+orangebox_set_prompt() {
+  if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@\H \w #\[\e[0m\] '
+  else
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@\H \w $\[\e[0m\] '
+  fi
+}
+
+# Guardar comandos y preservar PROMPT_COMMAND existente; no duplicar al cargar
+# el perfil desde /etc/profile y /etc/bashrc.
 case ";${PROMPT_COMMAND:-};" in
   *";history -a;"*) ;;
   *)
@@ -309,15 +299,19 @@ case ";${PROMPT_COMMAND:-};" in
     fi
     ;;
 esac
-export PROMPT_COMMAND
 
-# Hora en gris; root en rojo y usuario normal en verde.
-# La ruta y el terminador siguen el color del rol: # para root, $ para usuarios.
-if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-  export PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\h \w #\[\e[0m\] '
-else
-  export PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;32m\]\u@\h \w $\[\e[0m\] '
-fi
+case "${PROMPT_COMMAND:-}" in
+  *orangebox_set_prompt*) ;;
+  *)
+    if [ -n "${PROMPT_COMMAND:-}" ]; then
+      PROMPT_COMMAND="${PROMPT_COMMAND%;}; orangebox_set_prompt"
+    else
+      PROMPT_COMMAND="orangebox_set_prompt"
+    fi
+    ;;
+esac
+export PROMPT_COMMAND
+orangebox_set_prompt
 ORANGEBOX_BASH
 
   if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
@@ -325,13 +319,13 @@ ORANGEBOX_BASH
   elif $AUTO_FIX; then
     [ ! -e "$target" ] || backup_once "$target"
     if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
-      ok "Historial con fecha/hora y prompt por rol aplicados en $target"
+      ok "Historial con hora y hostname completo; prompt por rol aplicado en $target"
       FIXED=$((FIXED+1))
     else
       warn "No se pudo instalar/verificar $target"
     fi
   else
-    warn "$target requiere aplicarse para configurar HISTTIMEFORMAT y el prompt rojo/verde"
+    warn "$target requiere aplicarse para configurar HISTTIMEFORMAT y el prompt por rol"
   fi
   rm -f "$tmp"
 
