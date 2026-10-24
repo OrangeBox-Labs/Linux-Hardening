@@ -1,12 +1,12 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Mega Script
-# Version 1.0.0 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.2.0 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # AUDIT by default. --fix applies conservative controls only.
 # SSH crypto is configured directly in OpenSSH.
 # IMPORTANT: update-crypto-policies and /etc/crypto-policies are NEVER touched.
 
 set -u
-VERSION=1.1.0
+VERSION=1.2.0
 AUTO_FIX=false
 INTERACTIVE=false
 ROLLBACK_TARGET=""
@@ -61,51 +61,258 @@ set_sysctl(){
 }
 
 # Dedicated network profile; explicit opt-in because TCP retry values affect connection reliability.
-SYNFLOOD_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
+# Generic OrangeBox profile: this applies to supported Linux Enterprise servers, not only cPanel.
+SYNFLOOD_FILE=/etc/sysctl.d/99-orangebox-synflood-hardening.conf
+SYNFLOOD_LEGACY_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
 SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
 SYNFLOOD_VALUES="1 4096 4096 2 2"
+
 ask_synflood(){ [ "$INTERACTIVE" = true ] || return 0; while true; do printf "%s [y/N]: " "$1"; read -r answer || return 1; case "$answer" in y|Y|yes|YES) return 0;; n|N|no|NO|"") return 1;; *) echo "Responde y o n.";; esac; done; }
-synflood_value(){ f=$1; k=$2; awk -v key="$k" '$0 ~ "^[[:space:]]*" key "[[:space:]]*=" {v=$0;sub(/^[^=]*=[[:space:]]*/,"",v);sub(/[[:space:]#].*$/,"",v);got=v} END{if(got!="")print got}' "$f" 2>/dev/null; }
+synflood_value(){ local f="$1" k="$2"; awk -v key="$k" '$0 ~ "^[[:space:]]*" key "[[:space:]]*=" {v=$0;sub(/^[^=]*=[[:space:]]*/,"",v);sub(/[[:space:]#].*$/,"",v);got=v} END{if(got!="")print got}' "$f" 2>/dev/null; }
+synflood_managed_profile(){
+  local f="$1"
+  [ -f "$f" ] &&
+    grep -Fqx "# OrangeBox managed SYN flood profile" "$f" &&
+    grep -Fqx "# BEGIN ORANGEBOX SYNFLOOD" "$f" &&
+    grep -Fqx "# END ORANGEBOX SYNFLOOD" "$f"
+}
 synflood_module(){
   echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
-  [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe; revisión manual requerida"; return; }
-  idx=1; picked_keys=""; picked_values=""
+  [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe; revisión manual requerida"; return 1; }
+
+  if [ -e "$SYNFLOOD_FILE" ] && [ -e "$SYNFLOOD_LEGACY_FILE" ]; then
+    warn "Existen ambos perfiles SYN flood (nuevo y antiguo); no se modifican para evitar duplicados. Revisa ambos archivos."
+    return 1
+  fi
+
+  local profile_source="$SYNFLOOD_FILE"
+  if [ -e "$SYNFLOOD_FILE" ]; then
+    synflood_managed_profile "$SYNFLOOD_FILE" || {
+      warn "$SYNFLOOD_FILE existe pero no parece gestionado por OrangeBox; no se sobrescribe."
+      return 1
+    }
+  elif synflood_managed_profile "$SYNFLOOD_LEGACY_FILE"; then
+    profile_source="$SYNFLOOD_LEGACY_FILE"
+    warn "Se detectó el perfil OrangeBox con nombre cPanel antiguo; se migrará al nombre genérico si se aceptan cambios."
+  fi
+
+  local idx key current desired cfg external external_count migration_candidate
+  local picked_keys="" picked_values=""
+  idx=1
   for key in $SYNFLOOD_KEYS; do
-    current=$(sysctl -n "$key" 2>/dev/null || true); desired=$(printf "%s\n" "$SYNFLOOD_VALUES" | awk -v n="$idx" 'NR==n{print}')
-    if [ -z "$current" ]; then warn "$key no existe en el kernel; omitido"; idx=$((idx+1)); continue; fi
-    external=""
-    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; [ "$cfg" = "$SYNFLOOD_FILE" ] && continue; if grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg"; then external="$cfg"; break; fi; done
-    if [ -n "$external" ]; then
-      if [ "$key" = "net.ipv4.tcp_syncookies" ] && [ "$external" = "/etc/sysctl.d/99-orangebox-hardening.conf" ] && [ "$(synflood_value "$external" "$key")" = "$desired" ]; then warn "$key se migrará desde perfil OrangeBox anterior con respaldo"; else warn "$key definido en $external; omitido para evitar duplicados"; idx=$((idx+1)); continue; fi
+    current=$(sysctl -n "$key" 2>/dev/null || true)
+    desired=$(printf "%s\n" "$SYNFLOOD_VALUES" | awk -v n="$idx" 'NR==n{print}')
+    if [ -z "$current" ]; then
+      warn "$key no existe en el kernel; omitido"
+      idx=$((idx+1))
+      continue
     fi
+
+    external=""
+    migration_candidate=""
+    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do
+      [ -f "$cfg" ] || continue
+      [ "$cfg" = "$SYNFLOOD_FILE" ] && continue
+      [ "$cfg" = "$profile_source" ] && continue
+      if grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg"; then
+        external_count=$(grep -Ec "^[[:space:]]*$key[[:space:]]*=" "$cfg" || true)
+        if [ "$key" = "net.ipv4.tcp_syncookies" ] &&
+           [ "$cfg" = "/etc/sysctl.d/99-orangebox-hardening.conf" ] &&
+           [ "$external_count" = "1" ] &&
+           [ "$(synflood_value "$cfg" "$key")" = "$desired" ]; then
+          migration_candidate="$cfg"
+          continue
+        fi
+        external="$cfg"
+        break
+      fi
+    done
+
+    if [ -n "$external" ]; then
+      warn "$key definido en $external; se omite para evitar duplicados"
+      idx=$((idx+1))
+      continue
+    fi
+    [ -n "$migration_candidate" ] && warn "$key se migrará desde el perfil OrangeBox genérico con respaldo"
+
     [ "$current" = "$desired" ] && ok "$key=$desired" || warn "$key actual=$current requerido=$desired"
-    if [ "$INTERACTIVE" = true ]; then ask_synflood "Aplicar $key=$desired?" || { idx=$((idx+1)); continue; }; elif [ "$AUTO_FIX" != true ]; then idx=$((idx+1)); continue; fi
-    picked_keys="$picked_keys $key"; picked_values="$picked_values $desired"; idx=$((idx+1))
+    if [ "$INTERACTIVE" = true ]; then
+      ask_synflood "Aplicar $key=$desired?" || { idx=$((idx+1)); continue; }
+    elif [ "$AUTO_FIX" != true ]; then
+      idx=$((idx+1))
+      continue
+    fi
+    picked_keys="$picked_keys $key"
+    picked_values="$picked_values $desired"
+    idx=$((idx+1))
   done
-  [ -n "$picked_keys" ] || { ok "No hay cambios aceptados/necesarios; sin modificaciones"; return 0; }
-  state="$BACKUP_DIR/synflood"; mkdir -p "$state" || die "No se pudo crear estado rollback"; chmod 700 "$state" || die "No se pudo proteger estado rollback"
-  if [ -e "$SYNFLOOD_FILE" ]; then echo yes > "$state/profile-existed"; backup_once "$SYNFLOOD_FILE"; else echo no > "$state/profile-existed"; fi
-  legacy=/etc/sysctl.d/99-orangebox-hardening.conf
-  if [ -e "$legacy" ]; then echo yes > "$state/legacy-existed"; backup_once "$legacy"; else echo no > "$state/legacy-existed"; fi
-  : > "$state/runtime.before"; for key in $SYNFLOOD_KEYS; do value=$(sysctl -n "$key" 2>/dev/null || true); printf "%s|%s\n" "$key" "$value" >> "$state/runtime.before"; done; chmod 600 "$state/runtime.before"; echo "$RUN_ID" > "$state/run-id"
-  tmp=$(mktemp "${SYNFLOOD_FILE}.XXXXXX") || die "No se pudo crear temporal de perfil"
-  if [ -e "$SYNFLOOD_FILE" ]; then grep -Fq "# OrangeBox managed SYN flood profile" "$SYNFLOOD_FILE" || { rm -f "$tmp"; die "El perfil ya existe y no es gestionado por OrangeBox; no se sobrescribe"; }; awk '$0=="# BEGIN ORANGEBOX SYNFLOOD"{inside=1;next} $0=="# END ORANGEBOX SYNFLOOD"{inside=0;next} !inside && $0!="# OrangeBox managed SYN flood profile"{print}' "$SYNFLOOD_FILE" > "$tmp" || { rm -f "$tmp"; die "No se pudo leer perfil actual"; }; fi
-  { [ ! -s "$tmp" ] || printf "\n"; echo "# OrangeBox managed SYN flood profile"; echo "# BEGIN ORANGEBOX SYNFLOOD"; idx=1; for key in $SYNFLOOD_KEYS; do for active in $picked_keys; do if [ "$key" = "$active" ]; then desired=$(printf "%s\n" "$SYNFLOOD_VALUES" | awk -v n="$idx" 'NR==n{print}'); printf "%s = %s\n" "$key" "$desired"; break; fi; done; idx=$((idx+1)); done; echo "# END ORANGEBOX SYNFLOOD"; } >> "$tmp" || { rm -f "$tmp"; die "No se pudo construir perfil"; }
-  chmod 644 "$tmp" || { rm -f "$tmp"; die "No se pudo ajustar permisos"; }; chown root:root "$tmp" 2>/dev/null || true
-  awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} /^[[:space:]]*[a-zA-Z0-9_.]+[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*$/ {next} {exit 1}' "$tmp" || { rm -f "$tmp"; die "Perfil temporal inválido"; }
-  if ! cmp -s "$tmp" "$SYNFLOOD_FILE" 2>/dev/null; then mv "$tmp" "$SYNFLOOD_FILE" || { rm -f "$tmp"; die "No se pudo instalar perfil"; }; FIXED=$((FIXED+1)); else rm -f "$tmp"; fi
-  idx=1; for key in $picked_keys; do desired=$(printf "%s\n" "$picked_values" | awk -v n="$idx" 'NR==n{print}'); if ! sysctl -w "$key=$desired" >/dev/null 2>&1 || [ "$(sysctl -n "$key" 2>/dev/null || true)" != "$desired" ]; then warn "No se pudo aplicar/verificar $key; rollback disponible: $0 --rollback $RUN_ID"; return 1; fi; ok "$key aplicado/verificado=$desired"; FIXED=$((FIXED+1)); idx=$((idx+1)); done
-  if [ -f "$legacy" ] && printf "%s\n" "$picked_keys" | grep -q "net.ipv4.tcp_syncookies"; then t=$(mktemp "${legacy}.XXXXXX") || die "No se pudo crear temporal de migración"; awk '!/^[[:space:]]*net[.]ipv4[.]tcp_syncookies[[:space:]]*=/' "$legacy" > "$t" || { rm -f "$t"; die "No se pudo preparar migración"; }; mv "$t" "$legacy" || die "No se pudo guardar migración"; fi
+
+  [ -n "$picked_keys" ] || {
+    ok "No hay cambios aceptados/necesarios; sin modificaciones"
+    return 0
+  }
+
+  local state="$BACKUP_DIR/synflood"
+  local legacy=/etc/sysctl.d/99-orangebox-hardening.conf
+  local tmp value selected_value preserved selected_index active
+  mkdir -p "$state" || die "No se pudo crear estado rollback"
+  chmod 700 "$state" || die "No se pudo proteger estado rollback"
+
+  if [ -e "$profile_source" ]; then
+    echo yes > "$state/profile-existed"
+    backup_once "$profile_source"
+  else
+    echo no > "$state/profile-existed"
+  fi
+  printf "%s\n" "$profile_source" > "$state/profile-source-path"
+  printf "%s\n" "$SYNFLOOD_FILE" > "$state/profile-target-path"
+
+  if [ -e "$legacy" ]; then
+    echo yes > "$state/legacy-existed"
+    backup_once "$legacy"
+  else
+    echo no > "$state/legacy-existed"
+  fi
+  : > "$state/runtime.before"
+  for key in $SYNFLOOD_KEYS; do
+    value=$(sysctl -n "$key" 2>/dev/null || true)
+    printf "%s|%s\n" "$key" "$value" >> "$state/runtime.before"
+  done
+  chmod 600 "$state/runtime.before"
+  echo "$RUN_ID" > "$state/run-id"
+
+  tmp=$(mktemp "$SYNFLOOD_FILE.XXXXXX") || die "No se pudo crear temporal de perfil"
+  if [ -e "$profile_source" ]; then
+    awk '$0=="# BEGIN ORANGEBOX SYNFLOOD"{inside=1;next} $0=="# END ORANGEBOX SYNFLOOD"{inside=0;next} !inside && $0!="# OrangeBox managed SYN flood profile"{print}' "$profile_source" > "$tmp" ||
+      { rm -f "$tmp"; die "No se pudo leer perfil actual"; }
+  fi
+
+  {
+    [ ! -s "$tmp" ] || printf "\n"
+    echo "# OrangeBox managed SYN flood profile"
+    echo "# BEGIN ORANGEBOX SYNFLOOD"
+    idx=1
+    for key in $SYNFLOOD_KEYS; do
+      selected_value=""
+      selected_index=1
+      for active in $picked_keys; do
+        if [ "$key" = "$active" ]; then
+          selected_value=$(printf "%s\n" "$picked_values" | awk -v n="$selected_index" 'NR==n{print}')
+          break
+        fi
+        selected_index=$((selected_index+1))
+      done
+      if [ -n "$selected_value" ]; then
+        printf "%s = %s\n" "$key" "$selected_value"
+      elif [ -e "$profile_source" ]; then
+        preserved=$(synflood_value "$profile_source" "$key")
+        case "$preserved" in
+          ''|*[!0-9]*) ;;
+          *) printf "%s = %s\n" "$key" "$preserved";;
+        esac
+      fi
+      idx=$((idx+1))
+    done
+    echo "# END ORANGEBOX SYNFLOOD"
+  } >> "$tmp" || { rm -f "$tmp"; die "No se pudo construir perfil"; }
+
+  chmod 644 "$tmp" || { rm -f "$tmp"; die "No se pudo ajustar permisos"; }
+  chown root:root "$tmp" 2>/dev/null || true
+  awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} /^[[:space:]]*[a-zA-Z0-9_.]+[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*$/ {next} {exit 1}' "$tmp" ||
+    { rm -f "$tmp"; die "Perfil temporal inválido"; }
+
+  if ! cmp -s "$tmp" "$SYNFLOOD_FILE" 2>/dev/null; then
+    mv "$tmp" "$SYNFLOOD_FILE" || { rm -f "$tmp"; die "No se pudo instalar perfil"; }
+    FIXED=$((FIXED+1))
+  else
+    rm -f "$tmp"
+  fi
+
+  # After the generic profile is installed, remove the old filename only if managed.
+  if [ "$profile_source" != "$SYNFLOOD_FILE" ] && [ "$profile_source" = "$SYNFLOOD_LEGACY_FILE" ]; then
+    synflood_managed_profile "$profile_source" || {
+      warn "El perfil anterior dejó de ser reconocido como gestionado; no se elimina."
+      return 1
+    }
+    rm -f "$profile_source" || {
+      warn "No se pudo retirar el perfil antiguo $profile_source; rollback disponible: $0 --rollback $RUN_ID."
+      return 1
+    }
+    ok "Perfil antiguo migrado desde $profile_source a $SYNFLOOD_FILE."
+  fi
+
+  idx=1
+  for key in $picked_keys; do
+    desired=$(printf "%s\n" "$picked_values" | awk -v n="$idx" 'NR==n{print}')
+    if ! sysctl -w "$key=$desired" >/dev/null 2>&1 || [ "$(sysctl -n "$key" 2>/dev/null || true)" != "$desired" ]; then
+      warn "No se pudo aplicar/verificar $key; rollback disponible: $0 --rollback $RUN_ID"
+      return 1
+    fi
+    ok "$key aplicado/verificado=$desired"
+    FIXED=$((FIXED+1))
+    idx=$((idx+1))
+  done
+
+  if [ -f "$legacy" ] && printf "%s\n" "$picked_keys" | grep -q "net.ipv4.tcp_syncookies"; then
+    if [ "$(synflood_value "$legacy" "net.ipv4.tcp_syncookies")" = "1" ] &&
+       [ "$(grep -Ec '^[[:space:]]*net[.]ipv4[.]tcp_syncookies[[:space:]]*=' "$legacy" || true)" = "1" ]; then
+      local t
+      t=$(mktemp "$legacy.XXXXXX") || die "No se pudo crear temporal de migración"
+      awk '!/^[[:space:]]*net[.]ipv4[.]tcp_syncookies[[:space:]]*=/' "$legacy" > "$t" ||
+        { rm -f "$t"; die "No se pudo preparar migración"; }
+      chmod --reference="$legacy" "$t" 2>/dev/null || chmod 644 "$t"
+      chown --reference="$legacy" "$t" 2>/dev/null || chown root:root "$t"
+      mv "$t" "$legacy" || die "No se pudo guardar migración"
+      ok "net.ipv4.tcp_syncookies migrado fuera del perfil OrangeBox genérico."
+    fi
+  fi
+
   ok "SYN flood aplicado. Backup: $BACKUP_DIR. Rollback: $0 --rollback $RUN_ID"
 }
 rollback_synflood(){
-  target=$1; case "$target" in *[!0-9A-Za-z._/-]*|"") die "RUN_ID rollback inválido";; esac
+  local target="$1" bdir state legacy profile_source profile_target backup_legacy backup_profile key value
+  case "$target" in *[!0-9A-Za-z._/-]*|"") die "RUN_ID rollback inválido";; esac
   case "$target" in /*) bdir="$target"; state="$target/synflood";; *) bdir="/var/backups/orangebox-linux-hardening/$target"; state="$bdir/synflood";; esac
-  [ -r "$state/profile-existed" ] && [ -r "$state/legacy-existed" ] && [ -r "$state/runtime.before" ] || die "Estado rollback incompleto"
+  [ -r "$state/profile-existed" ] && [ -r "$state/legacy-existed" ] && [ -r "$state/runtime.before" ] ||
+    die "Estado rollback incompleto"
+
   legacy=/etc/sysctl.d/99-orangebox-hardening.conf
-  if [ "$(cat "$state/legacy-existed")" = yes ]; then [ -f "$bdir/etc/sysctl.d/99-orangebox-hardening.conf" ] || die "Falta backup del perfil genérico"; cp -a "$bdir/etc/sysctl.d/99-orangebox-hardening.conf" "$legacy" || die "No se pudo restaurar perfil genérico"; else rm -f "$legacy"; fi
-  if [ "$(cat "$state/profile-existed")" = yes ]; then [ -f "$bdir/etc/sysctl.d/99-cpanel-synflood-hardening.conf" ] || die "Falta backup del perfil SYN flood"; cp -a "$bdir/etc/sysctl.d/99-cpanel-synflood-hardening.conf" "$SYNFLOOD_FILE" || die "No se pudo restaurar perfil SYN flood"; else rm -f "$SYNFLOOD_FILE"; fi
-  while IFS="|" read -r key value; do [ -n "$key" ] || continue; [ -n "$value" ] || { warn "No hay valor previo capturado para $key; se omite"; continue; }; sysctl -w "$key=$value" >/dev/null 2>&1 || warn "No se pudo restaurar runtime $key=$value"; done < "$state/runtime.before"
+  # Old executions did not store these paths and used the cPanel-specific filename.
+  profile_source="$SYNFLOOD_LEGACY_FILE"
+  profile_target="$SYNFLOOD_LEGACY_FILE"
+  [ -r "$state/profile-source-path" ] && profile_source=$(cat "$state/profile-source-path")
+  [ -r "$state/profile-target-path" ] && profile_target=$(cat "$state/profile-target-path")
+  case "$profile_source" in "$SYNFLOOD_FILE"|"$SYNFLOOD_LEGACY_FILE") ;; *) die "Ruta de perfil de origen inválida en estado rollback.";; esac
+  case "$profile_target" in "$SYNFLOOD_FILE"|"$SYNFLOOD_LEGACY_FILE") ;; *) die "Ruta de perfil de destino inválida en estado rollback.";; esac
+
+  if [ "$(cat "$state/legacy-existed")" = yes ]; then
+    backup_legacy="$bdir/etc/sysctl.d/99-orangebox-hardening.conf"
+    [ -f "$backup_legacy" ] || die "Falta backup del perfil genérico"
+    cp -a "$backup_legacy" "$legacy" || die "No se pudo restaurar perfil genérico"
+  fi
+
+  if [ "$(cat "$state/profile-existed")" = yes ]; then
+    backup_profile="$bdir/$(printf "%s" "$profile_source" | sed 's#^/##')"
+    [ -f "$backup_profile" ] || die "Falta backup del perfil SYN flood original: $backup_profile"
+    cp -a "$backup_profile" "$profile_source" || die "No se pudo restaurar perfil SYN flood original"
+    if [ "$profile_target" != "$profile_source" ] && [ -e "$profile_target" ]; then
+      synflood_managed_profile "$profile_target" ||
+        die "El perfil de destino $profile_target ya no parece gestionado; no se elimina automáticamente."
+      rm -f "$profile_target" || die "No se pudo retirar el perfil SYN flood migrado."
+    fi
+  else
+    if [ -e "$profile_target" ]; then
+      synflood_managed_profile "$profile_target" ||
+        die "El perfil de destino $profile_target ya no parece gestionado; no se elimina automáticamente."
+      rm -f "$profile_target" || die "No se pudo retirar el perfil SYN flood creado por la ejecución."
+    fi
+  fi
+
+  while IFS="|" read -r key value; do
+    [ -n "$key" ] || continue
+    [ -n "$value" ] || { warn "No hay valor previo capturado para $key; se omite"; continue; }
+    sysctl -w "$key=$value" >/dev/null 2>&1 || warn "No se pudo restaurar runtime $key=$value"
+  done < "$state/runtime.before"
   ok "Rollback terminado; revisar runtime y persistencia"
 }
 
@@ -303,11 +510,11 @@ usage(){
   echo "OrangeBox Linux Hardening $VERSION"
   echo "Uso: $0 [--fix | --interactive] [--module MODULO] | --rollback RUN_ID"
   echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"
-  echo "Sin --fix o --interactive solo audita. --fix aplica sin preguntas; --interactive pregunta por parámetro."\n  echo "SYN flood opt-in: --module synflood; rollback: $0 --rollback RUN_ID."
+  echo "Sin --fix o --interactive solo audita. --fix aplica sin preguntas; --interactive pregunta por parámetro."
+  echo "SYN flood es opt-in para Linux Enterprise compatible: --module synflood; rollback: $0 --rollback RUN_ID."
   echo "SSH crypto: configuración directa de OpenSSH."
   echo "Crypto-policies globales: NO se modifican."
 }
-
 run_module(){
   case "$1" in
     ssh) ssh_module;; sudo) sudo_module;; password) password_module;; kernel) kernel_module;;
