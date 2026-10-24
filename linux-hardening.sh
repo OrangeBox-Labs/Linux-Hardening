@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.5 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.6 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.5
+SCRIPT_VERSION=1.3.6
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -157,14 +157,17 @@ configure_ssh_banner() {
 
 banners_module() {
   echo -e "\n$BLUE### BANNERS / MOTD ###$NC"
-  local tmp target mode owner group
+  local login_tmp motd_tmp target content_tmp mode owner group
 
-  tmp="$(mktemp)" || { warn "No se pudo crear el banner temporal"; return; }
-  cat > "$tmp" <<'ORANGEBOX_BANNER'
+  login_tmp="$(mktemp)" || { warn "No se pudo crear el banner previo al login"; return; }
+  motd_tmp="$(mktemp)" || { rm -f "$login_tmp"; warn "No se pudo crear el MOTD"; return; }
+
+  # Aviso legal previo a la autenticación: no enumera tecnologías defensivas.
+  cat > "$login_tmp" <<'ORANGEBOX_LOGIN_BANNER'
 *******************************************************************************
   ___                         ___
  / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
-| (_) | '_/ _` | ' \/ _` / -_) _ \/ _ \ \ /
+| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /
  \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
                     |___/
                          SISTEMA DE ACCESO RESTRINGIDO
@@ -179,21 +182,38 @@ conforme a las politicas de la organizacion y a la legislacion aplicable.
 Si no cuenta con autorizacion, desconectese inmediatamente.
 
 *******************************************************************************
-ORANGEBOX_BANNER
+ORANGEBOX_LOGIN_BANNER
+
+  # MOTD se presenta después del login: mantenerlo breve para no duplicar
+  # la advertencia legal que SSH ya muestra desde /etc/issue.net.
+  cat > "$motd_tmp" <<'ORANGEBOX_MOTD'
+*******************************************************************************
+                         ORANGEBOX IT SERVICES
+*******************************************************************************
+Sesion iniciada en un sistema administrado por OrangeBox.
+Respete las politicas de uso de la organizacion.
+*******************************************************************************
+ORANGEBOX_MOTD
 
   for target in /etc/motd /etc/issue /etc/issue.net; do
+    if [ "$target" = "/etc/motd" ]; then
+      content_tmp="$motd_tmp"
+    else
+      content_tmp="$login_tmp"
+    fi
+
     mode="$(stat -c '%a' "$target" 2>/dev/null || true)"
     owner="$(stat -c '%U' "$target" 2>/dev/null || true)"
     group="$(stat -c '%G' "$target" 2>/dev/null || true)"
-    if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
-      ok "$target ya contiene el banner OrangeBox correcto"
+    if [ -f "$target" ] && cmp -s "$content_tmp" "$target" && [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "$target ya contiene el mensaje OrangeBox correcto"
       continue
     fi
     if $AUTO_FIX; then
       [ ! -e "$target" ] || backup_once "$target"
-      if install -o root -g root -m 644 "$tmp" "$target"; then
-        if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
-          ok "Banner aplicado en $target (root:root 0644)"
+      if install -o root -g root -m 644 "$content_tmp" "$target"; then
+        if [ -f "$target" ] && cmp -s "$content_tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+          ok "$target actualizado (root:root 0644)"
           FIXED=$((FIXED+1))
         else
           warn "No se pudo verificar completamente $target"
@@ -202,10 +222,11 @@ ORANGEBOX_BANNER
         warn "No se pudo escribir $target"
       fi
     else
-      warn "$target requiere aplicar el banner OrangeBox o corregir sus permisos"
+      warn "$target requiere actualizar el contenido o los permisos"
     fi
   done
-  rm -f "$tmp"
+
+  rm -f "$login_tmp" "$motd_tmp"
   configure_ssh_banner
 }
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
