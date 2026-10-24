@@ -109,7 +109,6 @@ synflood_module(){
   [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }
 
   local idx=1 key current desired external cfg profile="$SYNFLOOD_FILE"
-  local -A external_configs=()
   [ -e "$SYNFLOOD_FILE" ] && ! synflood_managed "$SYNFLOOD_FILE" && {
     warn "$SYNFLOOD_FILE no es gestionado por OrangeBox; no se sobrescribe"
     return
@@ -141,7 +140,6 @@ synflood_module(){
     done
 
     if [ -n "$external" ]; then
-      external_configs["$key"]="$external"
       warn "$key definido en $external; se conservará el archivo y se aplicará el valor del perfil OrangeBox"
     elif [ "$current" = "$desired" ]; then
       ok "$key=$desired (runtime correcto)"
