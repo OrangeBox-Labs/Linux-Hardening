@@ -546,7 +546,7 @@ main(){
     esac
     shift
   done
-  if [ -n "$ROLLBACK_TARGET" ]; then detect_os; rollback_synflood "$ROLLBACK_TARGET"; exit 0; fi
+  if [ -n "$ROLLBACK_TARGET" ]; then detect_os; rollback_synflood "$ROLLBACK_TARGET" || exit 1; exit 0; fi
   detect_os; prepare_backup
   if [ "$INTERACTIVE" = true ]; then warn "MODO INTERACTIVO: se confirman los ajustes del módulo seleccionado."
   elif [ "$AUTO_FIX" = true ]; then warn "MODO FIX AUTOMÁTICO: se aplica sin preguntas."
