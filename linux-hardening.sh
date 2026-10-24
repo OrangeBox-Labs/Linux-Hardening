@@ -361,13 +361,15 @@ OrangeBox Linux Hardening $SCRIPT_VERSION
 
 Uso:
   $0                                Auditoría del baseline interno
-  $0 --fix                          Aplica solo MOTD/banners y Bash (perfil conservador)
+  $0 --fix                          Modo interactivo: explica los riesgos y pregunta
+  $0 --fix --auto                   Aplica solo controles seguros, sin preguntas
   $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
   $0 --fix --module bash            Historial con fecha/hora y prompt por rol
-  $0 --fix --module synflood --allow-risky
-                                    Aplica explícitamente el perfil SYN flood
-  $0 --module <modulo> [--fix] [--allow-risky]
+  $0 --fix --module synflood        Explica el impacto y pregunta antes de aplicar
+  $0 --fix --module network-full --allow-shorewall
+                                    Autoriza explícitamente cambios de red con Shorewall
+  $0 --module <modulo> [--fix] [--auto] [--allow-risky]
 
 Baseline interno:
   ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron
@@ -380,8 +382,11 @@ Módulos adicionales:
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full repo-audit
 
 Seguridad:
-  --allow-risky es obligatorio para aplicar módulos que pueden afectar red,
-  acceso SSH/sudo, PAM, filesystem, boot, firewall, logging, SELinux o servicios.
+  --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
+  --fix --auto no hace preguntas y omite controles críticos; solo aplica banners/MOTD
+  y Bash, mientras el resto se audita.
+  --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
+  --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
   post-install solo se puede ejecutar en auditoría desde este orquestador.
