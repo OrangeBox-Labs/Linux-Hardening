@@ -52,6 +52,16 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 *******************************************************************************
 "
 
+# El MOTD se muestra después de autenticar; no repetir la advertencia SSH.
+MOTD_TEXT="
+*******************************************************************************
+                         ORANGEBOX IT SERVICES
+*******************************************************************************
+Sesion iniciada en un sistema administrado por OrangeBox.
+Respete las politicas de uso de la organizacion.
+*******************************************************************************
+"
+
 # ==============================================
 # FUNCION PARA MOSTRAR USO
 # ==============================================
@@ -90,8 +100,16 @@ configure_banner_file() {
   fi
 
   if [ "$AUTO_FIX" = true ]; then
-    echo "$BANNER_TEXT" >"$file"
-    echo -e "${GREEN}[✓] Banner configurado en $file${NC}"
+    local content="$BANNER_TEXT"
+    if [ "$file" = "/etc/motd" ]; then
+      content="$MOTD_TEXT"
+    fi
+    printf '%s' "$content" > "$file"
+    if [ "$file" = "/etc/motd" ]; then
+      echo -e "\${GREEN}[✓] MOTD breve configurado en $file\${NC}"
+    else
+      echo -e "\${GREEN}[✓] Banner previo al login configurado en $file\${NC}"
+    fi
     FIXED=$((FIXED + 1))
   else
     if [ -f "$file" ]; then
