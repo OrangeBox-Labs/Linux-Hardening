@@ -1,13 +1,15 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.2 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.3 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # AUDIT by default. --fix applies conservative controls only.
 # SELinux is never changed. cron.allow/at.allow are never created.
 # System-wide crypto-policies are never changed and SSH crypto is audited, not overridden.
 
 set -u
-SCRIPT_VERSION=1.3.2
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_VERSION=1.3.3
 AUTO_FIX=false
+ALLOW_RISKY=false
 MODULE=all
 RUN_ID=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
@@ -51,7 +53,7 @@ synflood_module(){
     current=$(sysctl -n "$key" 2>/dev/null||true); desired="${SYNFLOOD_VALUES[$((idx-1))]}"
     [ -n "$current" ] || { warn "$key no existe"; idx=$((idx+1)); continue; }
     external=""
-    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; [ "$cfg" = "$SYNFLOOD_FILE" ] || [ "$cfg" = "$profile" ] && continue; grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg" && { external="$cfg"; break; }; done
+    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; if [ "$cfg" = "$SYNFLOOD_FILE" ] || [ "$cfg" = "$profile" ]; then continue; fi; grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg" && { external="$cfg"; break; }; done
     if [ -n "$external" ]; then
       external_configs["$key"]="$external"
       warn "$key definido en $external; se conserva y no se sobrescribe"
@@ -329,6 +331,26 @@ ORANGEBOX_BASH
     warn "$target requiere aplicarse para configurar HISTTIMEFORMAT y el prompt rojo/verde"
   fi
   rm -f "$tmp"
+
+  # CentOS/RHEL también inicia shells interactivos no-login desde /etc/bashrc.
+  # Agrega un único include administrado, preservando el resto de la configuración.
+  local system_bashrc=/etc/bashrc
+  if [ -f "$system_bashrc" ] && ! grep -Fq '# OrangeBox Linux Hardening managed shell config' "$system_bashrc"; then
+    if $AUTO_FIX; then
+      backup_once "$system_bashrc"
+      if printf '\n%s\n%s\n' \
+        '# OrangeBox Linux Hardening managed shell config' \
+        '[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh' \
+        >> "$system_bashrc"; then
+        ok "Include idempotente agregado a /etc/bashrc para shells interactivos no-login"
+        FIXED=$((FIXED+1))
+      else
+        warn "No se pudo añadir el include a /etc/bashrc"
+      fi
+    else
+      warn "/etc/bashrc no incluye el perfil OrangeBox para shells no-login"
+    fi
+  fi
 }
 usage(){ echo "OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "Uso: $0 [--fix] [--module MODULO]"; echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"; }
 run_module(){ case "$1" in ssh)ssh_module;;sudo)sudo_module;;password)password_module;;kernel)kernel_module;;synflood)synflood_module;;filesystem)filesystem_module;;auditd)auditd_module;;rsyslog)rsyslog_module;;selinux)selinux_module;;cron)cron_module;;usb)usb_module;;services)services_module;;banners)banners_module;;time)time_module;;grub)grub_module;;firewall)firewall_module;;fapolicyd)fapolicyd_module;;listening)listening_module;;bash)bash_module;;*)die "Módulo desconocido: $1";;esac; }
