@@ -61,7 +61,7 @@ set_sysctl(){
     return
   fi
   warn "$key actual=$current persistencia=${configured:-no definida} recomendado=$value"
-  $AUTO_FIX || return
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS+1)); return; fi
 
   mkdir -p /etc/sysctl.d || { warn "No se pudo crear /etc/sysctl.d"; return; }
   backup_once "$file"
@@ -310,16 +310,19 @@ configure_ssh_banner() {
   # posteriores o específicos de Match que contradigan el banner corporativo.
   awk '
     BEGIN { done=0 }
-    /^[[:space:]]*Banner[[:space:]]+/ { next }
-    /^[[:space:]]*Include[[:space:]]+/ && !done {
-      print "Banner /etc/issue.net"
-      done=1
+    {
+      keyword=tolower($1)
+      if (keyword == "banner") next
+      if (keyword == "include" && !done) {
+        print "Banner /etc/issue.net"
+        done=1
+      }
+      if (keyword == "match" && !done) {
+        print "Banner /etc/issue.net"
+        done=1
+      }
+      print
     }
-    /^[[:space:]]*Match([[:space:]]|$)/ && !done {
-      print "Banner /etc/issue.net"
-      done=1
-    }
-    { print }
     END { if (!done) print "Banner /etc/issue.net" }
   ' "$main" > "$tmp" || { rm -f "$tmp"; warn "No se pudo preparar sshd_config"; return; }
   chmod --reference="$main" "$tmp" 2>/dev/null || chmod 600 "$tmp"
