@@ -21,3 +21,4 @@ jobs:
           bash -n linux-hardening.sh
           bash -n network-hardening.sh
           bash -n generate-iptables-rules.sh
+          bash -n configure-login-banners.sh
