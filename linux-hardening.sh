@@ -593,7 +593,9 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --fix|-f) AUTO_FIX=true ;;
+      --auto) AUTO_MODE=true ;;
       --allow-risky) ALLOW_RISKY=true ;;
+      --allow-shorewall) ALLOW_SHOREWALL=true ;;
       --module|-m) shift; [ $# -gt 0 ] || die "--module requiere nombre"; MODULE="$1" ;;
       --help|-h) usage; exit 0 ;;
       --list-modules) usage; exit 0 ;;
@@ -602,12 +604,21 @@ main() {
     shift
   done
 
+  if [ "$AUTO_MODE" = true ] && [ "$AUTO_FIX" != true ]; then
+    die "--auto requiere --fix. Usa --fix --auto para aplicar únicamente controles seguros."
+  fi
+  if [ "$AUTO_MODE" = true ] && [ "$ALLOW_RISKY" = true ]; then
+    die "--auto y --allow-risky son incompatibles: --auto siempre omite controles críticos."
+  fi
+  if [ "$ALLOW_SHOREWALL" = true ] && [ "$MODULE" != "network-full" ]; then
+    warn "--allow-shorewall solo se utiliza con --module network-full."
+  fi
+
   detect_os
   prepare_backup
 
-  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$ALLOW_RISKY" != true ]; then
-    warn "MODO FIX CONSERVADOR: se aplican banners/MOTD y Bash; los controles restantes quedan solo en auditoría."
-    warn "No se modificarán sysctl/red, SSH general, logging ni servicios sin selección explícita y --allow-risky."
+  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
+    warn "MODO --FIX --AUTO: se aplican únicamente banners/MOTD y Bash; los cambios de riesgo quedan omitidos."
     run_module banners
     run_module bash
 
@@ -618,29 +629,44 @@ main() {
     done
     AUTO_FIX="$previous_fix"
     echo
-    echo "Para aplicar un control adicional, selecciónalo de forma explícita."
-    echo "Ejemplo: $0 --fix --module synflood --allow-risky"
+    echo "Modo automático terminado: no se aplicaron cambios de red/kernel, autenticación, firewall ni servicios."
+  elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
+    warn "MODO --FIX INTERACTIVO: se aplican banners/MOTD y Bash; cada módulo de riesgo explica su impacto y pide autorización."
+    warn "Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
+    run_module banners
+    run_module bash
+
+    local m
+    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
+      run_internal_module_with_confirmation "$m"
+    done
   elif [ "$MODULE" = "all" ]; then
-    if [ "$AUTO_FIX" = true ]; then
-      warn "MODO FIX AMPLIADO: puede modificar parámetros del kernel/red y configuración de servicios."
-      warn "Snapshot y consola de recuperación recomendados; --allow-risky fue especificado."
-    else
-      ok "MODO AUDITORÍA: sin cambios"
-    fi
+    ok "MODO AUDITORÍA: sin cambios"
     local m
     for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash; do
       run_module "$m"
     done
   else
-    if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$MODULE" && [ "$ALLOW_RISKY" != true ]; then
-      die "El módulo '$MODULE' requiere --allow-risky; puede afectar acceso SSH o parámetros de red."
-    fi
     if [ "$AUTO_FIX" = true ]; then
       warn "MODO FIX: módulo seleccionado=$MODULE"
     else
       ok "MODO AUDITORÍA: módulo seleccionado=$MODULE"
     fi
-    run_module "$MODULE"
+    if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$MODULE"; then
+      if [ "$AUTO_MODE" = true ]; then
+        echo
+        echo -e "$YELLOW[--auto] Se omitirá la aplicación del módulo '$MODULE'.$NC"
+        echo "Qué haría: $(risk_description "$MODULE")"
+        local previous_fix="$AUTO_FIX"
+        AUTO_FIX=false
+        run_module "$MODULE"
+        AUTO_FIX="$previous_fix"
+      else
+        run_internal_module_with_confirmation "$MODULE"
+      fi
+    else
+      run_module "$MODULE"
+    fi
   fi
 
   echo -e "\n$GREEN============================================================$NC"
