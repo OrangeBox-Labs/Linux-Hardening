@@ -352,7 +352,217 @@ ORANGEBOX_BASH
     fi
   fi
 }
-usage(){ echo "OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "Uso: $0 [--fix] [--module MODULO]"; echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"; }
-run_module(){ case "$1" in ssh)ssh_module;;sudo)sudo_module;;password)password_module;;kernel)kernel_module;;synflood)synflood_module;;filesystem)filesystem_module;;auditd)auditd_module;;rsyslog)rsyslog_module;;selinux)selinux_module;;cron)cron_module;;usb)usb_module;;services)services_module;;banners)banners_module;;time)time_module;;grub)grub_module;;firewall)firewall_module;;fapolicyd)fapolicyd_module;;listening)listening_module;;bash)bash_module;;*)die "Módulo desconocido: $1";;esac; }
-main(){ require_root; while [ $# -gt 0 ]; do case "$1" in --fix|-f)AUTO_FIX=true;;--module|-m)shift;[ $# -gt 0]||die "--module requiere nombre";MODULE=$1;;--help|-h)usage;exit 0;;--list-modules)echo "ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash";exit 0;;*)die "Argumento desconocido: $1";;esac;shift;done; detect_os;prepare_backup; $AUTO_FIX&&warn "MODO FIX: controles conservadores; no se toca SELinux, cron.allow ni PAM de forma destructiva"||ok "MODO AUDITORÍA: sin cambios"; if [ "$MODULE" = all ];then for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash;do run_module "$m";done;else run_module "$MODULE";fi; echo -e "\n$GREEN============================================================$NC";echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC";echo "Correcciones: $FIXED";echo "Advertencias: $WARNINGS";echo "Errores: $ERRORS";echo "Backup: $BACKUP_DIR";echo -e "$GREEN============================================================$NC"; }
+usage() {
+  cat <<EOF
+OrangeBox Linux Hardening $SCRIPT_VERSION
+
+Uso:
+  $0                                Auditoría del baseline interno
+  $0 --fix                          Aplica solo MOTD/banners y Bash (perfil conservador)
+  $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
+  $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
+  $0 --fix --module bash            Historial con fecha/hora y prompt por rol
+  $0 --fix --module synflood --allow-risky
+                                    Aplica explícitamente el perfil SYN flood
+  $0 --module <modulo> [--fix] [--allow-risky]
+
+Baseline interno:
+  ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron
+  usb services banners time grub firewall fapolicyd listening bash all
+
+Módulos adicionales:
+  aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full
+  packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
+  network-full password-full post-install gui-remove xinetd-remove rsyslog-full
+  selinux-setup ssh-cis ssh-complete sudo-full filesystem-full repo-audit
+
+Seguridad:
+  --allow-risky es obligatorio para aplicar módulos que pueden afectar red,
+  acceso SSH/sudo, PAM, filesystem, boot, firewall, logging, SELinux o servicios.
+  --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
+  aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
+  post-install solo se puede ejecutar en auditoría desde este orquestador.
+EOF
+}
+
+internal_module_requires_risk() {
+  case "$1" in
+    ssh|kernel|synflood|rsyslog) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_companion_module() {
+  local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  case "$name" in
+    aide) script="aide-install.sh"; risky=true ;;
+    audit-listeners) script="audit-listening-services.sh"; audit_only=true; fix_arg="" ;;
+    auditd-full) script="auditd-hardening.sh"; risky=true ;;
+    bash-full) script="bash-hardening.sh"; risky=true ;;
+    cis) script="cis-benchmark-check.sh"; audit_only=true; fix_arg="" ;;
+    time-sync) script="configure-time-sync.sh"; risky=true ;;
+    cpu-full) script="cpu-hardening.sh"; risky=true ;;
+    cron-full) script="cron-hardening.sh"; risky=true ;;
+    packages-remove) script="desintalar-paquetes-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    services-remove) script="desintalar-servicios-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    usb-storage) script="disable-usb-storage.sh"; risky=true ;;
+    firewall-rules)
+      die "Módulo bloqueado: generate-iptables-rules.sh vacía reglas, establece INPUT DROP y podría cortar SSH. En este host se usa Shorewall; no se aplicará un segundo firewall destructivo."
+      ;;
+    grub-full) script="grub-hardening.sh"; risky=true ;;
+    kernel-full) script="kernel-hardening.sh"; risky=true ;;
+    lpe-2026) script="kernel-lpe-2026-mitigation.sh"; risky=true; audit_arg="--check" ;;
+    network-full) script="network-hardening.sh"; risky=true ;;
+    password-full) script="password-hardening.sh"; risky=true ;;
+    post-install) script="post-install.sh"; audit_only=true; block_fix=true; fix_arg="" ;;
+    gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
+    xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
+    rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
+    selinux-setup) script="selinux-secure-setup.sh"; risky=true ;;
+    ssh-cis) script="ssh-hardening.sh"; risky=true ;;
+    ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
+    sudo-full) script="sudo-hardening.sh"; risky=true ;;
+    filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
+    repo-audit) run_repository_audit; return ;;
+    *) die "Módulo desconocido: $name" ;;
+  esac
+
+  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ]; then
+    die "Se bloquea --fix para $name: post-install.sh es para despliegue inicial y contiene cambios incompatibles con un servidor existente, como setenforce 0."
+  fi
+  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ] && [ "$ALLOW_RISKY" != true ]; then
+    die "El módulo '$name' requiere --allow-risky. Conserva el snapshot y una consola de recuperación antes de ejecutarlo."
+  fi
+  if [ ! -f "$SCRIPT_DIR/$script" ]; then
+    die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
+  fi
+  if [ "$AUTO_FIX" = false ] && [ "$interactive" = true ]; then
+    warn "$name no ofrece auditoría no interactiva; se omite. Para ejecutarlo, selecciona el módulo explícitamente con --fix --allow-risky."
+    return 0
+  fi
+
+  local -a args=()
+  if [ "$AUTO_FIX" = true ]; then
+    if [ "$audit_only" = true ]; then
+      warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
+    elif [ -n "$fix_arg" ]; then
+      args=("$fix_arg")
+    fi
+  elif [ -n "$audit_arg" ]; then
+    args=("$audit_arg")
+  fi
+
+  echo
+  echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
+  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+    ok "Módulo $name finalizado"
+  else
+    warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
+  fi
+}
+
+run_repository_audit() {
+  local previous_fix="$AUTO_FIX" name
+  AUTO_FIX=false
+  echo "========== AUDITORÍA DE LOS SCRIPTS DEL REPOSITORIO =========="
+  for name in \
+    aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full \
+    usb-storage grub-full kernel-full lpe-2026 network-full password-full \
+    post-install gui-remove xinetd-remove rsyslog-full selinux-setup \
+    ssh-cis ssh-complete sudo-full filesystem-full
+  do
+    run_companion_module "$name"
+  done
+  warn "Se omitieron los módulos interactivos de eliminación de paquetes/servicios y el generador de iptables por seguridad."
+  AUTO_FIX="$previous_fix"
+}
+
+run_module() {
+  case "$1" in
+    ssh) ssh_module ;;
+    sudo) sudo_module ;;
+    password) password_module ;;
+    kernel) kernel_module ;;
+    synflood) synflood_module ;;
+    filesystem) filesystem_module ;;
+    auditd) auditd_module ;;
+    rsyslog) rsyslog_module ;;
+    selinux) selinux_module ;;
+    cron) cron_module ;;
+    usb) usb_module ;;
+    services) services_module ;;
+    banners) banners_module ;;
+    time) time_module ;;
+    grub) grub_module ;;
+    firewall) firewall_module ;;
+    fapolicyd) fapolicyd_module ;;
+    listening) listening_module ;;
+    bash) bash_module ;;
+    *) run_companion_module "$1" ;;
+  esac
+}
+
+main() {
+  require_root
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --fix|-f) AUTO_FIX=true ;;
+      --allow-risky) ALLOW_RISKY=true ;;
+      --module|-m) shift; [ $# -gt 0 ] || die "--module requiere nombre"; MODULE="$1" ;;
+      --help|-h) usage; exit 0 ;;
+      --list-modules) usage; exit 0 ;;
+      *) die "Argumento desconocido: $1" ;;
+    esac
+    shift
+  done
+
+  detect_os
+  prepare_backup
+
+  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$ALLOW_RISKY" != true ]; then
+    warn "MODO FIX CONSERVADOR: se aplican banners/MOTD y Bash; los controles restantes quedan solo en auditoría."
+    warn "No se modificarán sysctl/red, SSH general, logging ni servicios sin selección explícita y --allow-risky."
+    run_module banners
+    run_module bash
+
+    local previous_fix="$AUTO_FIX" m
+    AUTO_FIX=false
+    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
+      run_module "$m"
+    done
+    AUTO_FIX="$previous_fix"
+    echo
+    echo "Para aplicar un control adicional, selecciónalo de forma explícita."
+    echo "Ejemplo: $0 --fix --module synflood --allow-risky"
+  elif [ "$MODULE" = "all" ]; then
+    if [ "$AUTO_FIX" = true ]; then
+      warn "MODO FIX AMPLIADO: puede modificar parámetros del kernel/red y configuración de servicios."
+      warn "Snapshot y consola de recuperación recomendados; --allow-risky fue especificado."
+    else
+      ok "MODO AUDITORÍA: sin cambios"
+    fi
+    local m
+    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash; do
+      run_module "$m"
+    done
+  else
+    if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$MODULE" && [ "$ALLOW_RISKY" != true ]; then
+      die "El módulo '$MODULE' requiere --allow-risky; puede afectar acceso SSH o parámetros de red."
+    fi
+    if [ "$AUTO_FIX" = true ]; then
+      warn "MODO FIX: módulo seleccionado=$MODULE"
+    else
+      ok "MODO AUDITORÍA: módulo seleccionado=$MODULE"
+    fi
+    run_module "$MODULE"
+  fi
+
+  echo -e "\n$GREEN============================================================$NC"
+  echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
+  echo "Correcciones: $FIXED"
+  echo "Advertencias: $WARNINGS"
+  echo "Errores: $ERRORS"
+  echo "Backup: $BACKUP_DIR"
+  echo -e "$GREEN============================================================$NC"
+}
 main "$@"
