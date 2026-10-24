@@ -134,7 +134,7 @@ Para ejecución automática y conservadora, sin preguntas:
 ./linux-hardening.sh --fix --auto
 ```
 
-`--auto` aplica banners/MOTD, Bash con historial ilimitado y el baseline sysctl acordado para kernel/red/SYN flood (SYN cookies, backlog y reintentos). Preserva `net.ipv4.ip_forward`; cuando el forwarding está activo usa `rp_filter=2` (modo loose). Los módulos adicionales de mayor riesgo se revisan en modo auditoría, sin aplicar cambios.
+`--auto` aplica únicamente banners/MOTD y Bash con historial ilimitado. Los controles delicados —incluidos los cambios sysctl de kernel y SYN flood— se revisan en auditoría y no se aplican. En modo interactivo `--fix`, cada control delicado pregunta por separado, explica qué cambiará y qué impacto operacional puede tener; responder No o no disponer de TTY deja ese control sin modificar.
 
 El aviso legal genérico completo se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` muestra un mensaje breve posterior al login para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
 
@@ -149,7 +149,7 @@ El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-harde
 | Módulo/script | Riesgo operacional que debe evaluarse |
 |---|---|
 | `generate-iptables-rules.sh` | Genera scripts que vacían reglas iptables y establecen `INPUT DROP`; puede cortar SSH y contradecir las políticas de Shorewall. El orquestador bloquea ese módulo y el generador se niega a ejecutarse si Shorewall está activo. |
-| `network-hardening.sh` | El orquestador aplica el baseline sysctl común sin cambiar `ip_forward` y usa `rp_filter=2` cuando el forwarding está activo. El módulo `network-full` además bloquea módulos de protocolos y sigue protegido por `--allow-shorewall`; puede afectar VPN, rutas asimétricas o aplicaciones que usen esos protocolos. |
+| `kernel` / `synflood` / `network-full` | Los perfiles base de kernel y SYN flood piden confirmación en `--fix` interactivo. `--auto` los deja en auditoría. `network-full` además bloquea módulos de protocolos y requiere autorización explícita para actuar con Shorewall; puede afectar VPN, rutas asimétricas o aplicaciones que usen esos protocolos. El código preserva `net.ipv4.ip_forward` y adapta `rp_filter` cuando detecta forwarding IPv4. |
 | `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Cambian parámetros de autenticación o algoritmos; clientes antiguos, automatizaciones y el acceso root pueden dejar de funcionar. |
 | `FS-hardening.sh` | Puede remontar directorios con opciones restrictivas, cambiar `/proc` a `hidepid=2`, bloquear módulos y deshabilitar autofs. Puede afectar monitoreo, procesos que inspeccionan otras cuentas y aplicaciones. |
 | `cron-hardening.sh` | Puede crear `cron.allow` y `at.allow` restringidos a root; esto puede impedir cron de usuarios de hosting o tareas administradas por cPanel. |
@@ -161,6 +161,6 @@ El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-harde
 | `post-install.sh` | Está pensado para preparación inicial de sistemas y contiene acciones que no deben ejecutarse ciegamente sobre un servidor existente, incluida la desactivación de SELinux. Desde el orquestador se permite solo auditoría. |
 | `desintalar-paquetes-sin-usar.sh` / `desintalar-servicios-sin-usar.sh` / `remove-gui-hardening.sh` / `remove-xinetd.sh` | Pueden eliminar paquetes, dependencias o servicios. No deben ejecutarse sin revisar inventario y plan de reversión. |
 
-**Para un firewall remoto como un host administrado con Shorewall:** crea un snapshot y confirma acceso por consola fuera de banda. `--fix --auto` aplica el baseline de sysctl manteniendo `ip_forward` y adaptando `rp_filter` a modo loose cuando hay forwarding; revisa los logs de martians y las rutas después del cambio. Los módulos adicionales de red, SSH, SELinux y GRUB requieren revisión por separado; no combines un generador de iptables con Shorewall.
+**Para un firewall remoto como un host administrado con Shorewall:** crea un snapshot y confirma acceso por consola fuera de banda. Usa `--fix` interactivo para que kernel/SYN flood soliciten autorización individual, revisa el resumen de cada cambio y comprueba las rutas después de aplicarlo. `--fix --auto` no aplica esos controles delicados. El código preserva `net.ipv4.ip_forward` y usa `rp_filter=2` si detecta forwarding IPv4; no combines un generador de iptables con Shorewall.
 
 La opción `--allow-risky` no sustituye una revisión de cambios ni garantiza compatibilidad. El orquestador crea respaldos para los archivos que modifica directamente, pero los módulos especializados mantienen sus propios mecanismos y limitaciones de reversión.
