@@ -1,9 +1,10 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
 # Version 1.3.3 - RHEL/CentOS/Rocky/AlmaLinux 6-10
-# AUDIT by default. --fix applies conservative controls only.
-# SELinux is never changed. cron.allow/at.allow are never created.
-# System-wide crypto-policies are never changed and SSH crypto is audited, not overridden.
+# Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
+# Core baseline never changes SELinux or creates cron.allow/at.allow.
+# High-risk companion modules require explicit selection and --allow-risky.
+# System-wide crypto-policies are never changed by the core baseline.
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
