@@ -1,12 +1,12 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Mega Script
-# Version 1.2.0 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.2.1 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # AUDIT by default. --fix applies conservative controls only.
 # SSH crypto is configured directly in OpenSSH.
 # IMPORTANT: update-crypto-policies and /etc/crypto-policies are NEVER touched.
 
 set -u
-VERSION=1.2.0
+VERSION=1.2.1
 AUTO_FIX=false
 INTERACTIVE=false
 ROLLBACK_TARGET=""
@@ -60,7 +60,7 @@ set_sysctl(){
   FIXED=$((FIXED+1))
 }
 
-# Dedicated network profile; explicit opt-in because TCP retry values affect connection reliability.
+# Dedicated network profile; part of the mandatory OrangeBox Linux baseline.
 # Generic OrangeBox profile: this applies to supported Linux Enterprise servers, not only cPanel.
 SYNFLOOD_FILE=/etc/sysctl.d/99-orangebox-synflood-hardening.conf
 SYNFLOOD_LEGACY_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
@@ -518,7 +518,7 @@ usage(){
   echo "Uso: $0 [--fix | --interactive] [--module MODULO] | --rollback RUN_ID"
   echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"
   echo "Sin --fix o --interactive solo audita. --fix aplica sin preguntas; --interactive pregunta por parámetro."
-  echo "SYN flood es opt-in para Linux Enterprise compatible: --module synflood; rollback: $0 --rollback RUN_ID."
+  echo "SYN flood forma parte del baseline Linux Enterprise: --module synflood permite ejecutarlo de forma dirigida; rollback: $0 --rollback RUN_ID."
   echo "SSH crypto: configuración directa de OpenSSH."
   echo "Crypto-policies globales: NO se modifican."
 }
@@ -548,10 +548,10 @@ main(){
   done
   if [ -n "$ROLLBACK_TARGET" ]; then detect_os; rollback_synflood "$ROLLBACK_TARGET" || exit 1; exit 0; fi
   detect_os; prepare_backup
-  if [ "$INTERACTIVE" = true ]; then warn "MODO INTERACTIVO: se confirman los ajustes del módulo seleccionado."
-  elif [ "$AUTO_FIX" = true ]; then warn "MODO FIX AUTOMÁTICO: se aplica sin preguntas."
+  if [ "$INTERACTIVE" = true ]; then warn "MODO INTERACTIVO: se confirman los ajustes del módulo seleccionado." 
+  elif [ "$AUTO_FIX" = true ]; then warn "MODO FIX AUTOMÁTICO: se aplica sin preguntas." 
   else ok "MODO AUDITORÍA: sin cambios"; fi
-  if [ "$MODULE" = all ]; then for m in ssh sudo password kernel filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash; do run_module "$m"; done; else run_module "$MODULE"; fi
+  if [ "$MODULE" = all ]; then for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash; do run_module "$m"; done; else run_module "$MODULE"; fi
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $VERSION - FIN $NC"
   echo "Correcciones: $FIXED"; echo "Advertencias: $WARNINGS"; echo "Errores: $ERRORS"; echo "Backup: $BACKUP_DIR"
