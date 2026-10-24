@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.6 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.6
+SCRIPT_VERSION=1.3.7
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -32,13 +32,70 @@ detect_os(){
 prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
 set_sysctl(){
-  local key="$1" value="$2" file=/etc/sysctl.d/99-orangebox-hardening.conf current
-  current=$(sysctl -n "$key" 2>/dev/null||true); [ "$current" = "$value" ] && { ok "$key=$value"; return; }
-  warn "$key actual=$current recomendado=$value"; $AUTO_FIX || return
-  backup_once "$file"; touch "$file"
-  if grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$file"; then sed -ri "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $value|" "$file"; else echo "$key = $value" >> "$file"; fi
-  if sysctl -w "$key=$value" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$value" ]; then ok "$key aplicado/verificado=$value"; FIXED=$((FIXED+1)); else warn "No se pudo aplicar/verificar $key"; fi
+  local key="$1" value="$2" file=/etc/sysctl.d/99zz-orangebox-hardening.conf current configured tmp
+  current=$(sysctl -n "$key" 2>/dev/null||true)
+  if [ -z "$current" ]; then
+    warn "$key no disponible en este kernel"
+    return
+  fi
+  configured=$(awk -v key="$key" '
+    {
+      line=$0
+      sub(/^[[:space:]]*#[[:space:]]*/, "", line)
+      if (index(line, "=")) {
+        lhs=line
+        sub(/=.*/, "", lhs)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+        if (lhs == key) {
+          val=line
+          sub(/^[^=]*=/, "", val)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+          found=val
+        }
+      }
+    }
+    END { print found }
+  ' "$file" 2>/dev/null || true)
+  if [ "$current" = "$value" ] && [ "$configured" = "$value" ]; then
+    ok "$key=$value (runtime y persistente)"
+    return
+  fi
+  warn "$key actual=$current persistencia=\${configured:-no definida} recomendado=$value"
+  $AUTO_FIX || return
+
+  mkdir -p /etc/sysctl.d || { warn "No se pudo crear /etc/sysctl.d"; return; }
+  backup_once "$file"
+  tmp=$(mktemp "$file.XXXXXX") || { warn "No se pudo crear temporal para $key"; return; }
+  if [ -f "$file" ]; then
+    awk -v key="$key" '
+      {
+        line=$0
+        sub(/^[[:space:]]*#[[:space:]]*/, "", line)
+        if (index(line, "=")) {
+          lhs=line
+          sub(/=.*/, "", lhs)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+          if (lhs == key) next
+        }
+        print
+      }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return; }
+  fi
+  printf '%s = %s\n' "$key" "$value" >> "$tmp" || { rm -f "$tmp"; warn "No se pudo escribir $key"; return; }
+  chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
+  if ! mv "$tmp" "$file"; then
+    rm -f "$tmp"
+    warn "No se pudo instalar la persistencia de $key"
+    return
+  fi
+  if sysctl -w "$key=$value" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$value" ]; then
+    ok "$key aplicado y persistido=$value"
+    FIXED=$((FIXED+1))
+  else
+    warn "No se pudo aplicar/verificar $key; revisar $file"
+  fi
 }
+
 
 SYNFLOOD_FILE=/etc/sysctl.d/99-orangebox-synflood-hardening.conf
 SYNFLOOD_LEGACY_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
