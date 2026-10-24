@@ -126,6 +126,7 @@ orangebox_history_guard() {
         HISTFILE="$HOME/.bash_history"
     fi
     export HISTSIZE HISTFILESIZE HISTFILE
+    history -a
 }
 case ";${PROMPT_COMMAND:-};" in
     *";orangebox_history_guard;"*) ;;
