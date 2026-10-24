@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.3 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.4 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.3
+SCRIPT_VERSION=1.3.4
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
