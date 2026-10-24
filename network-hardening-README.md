@@ -78,7 +78,7 @@ Parametros modificados:
 
 Que previene: Registra en /var/log/messages los paquetes con direcciones origen no validas (spoofing). Permite detectar intentos de ataque.
 
-Impacto: Se generan entradas en los logs. No afecta el funcionamiento normal. Los logs pueden revisarse con: grep -i 'martian' /var/log/messages
+Impacto: Se generan entradas en los logs. No afecta el funcionamiento normal. Los logs pueden revisarse con: grep -i 'martian' /var/log/messages. En hosts con mucho tráfico conviene revisar volumen de logs y retención.
 
 ### 3.3.5 - Ignorar peticiones ICMP broadcast
 
@@ -106,9 +106,11 @@ Impacto: El kernel no registra respuestas ICMP mal formadas. Evita que un atacan
 
 Parametros modificados:
 ```
-  net.ipv4.conf.all.rp_filter = 1
-  net.ipv4.conf.default.rp_filter = 1
+  net.ipv4.conf.all.rp_filter = 1 (servidor no-router)
+  net.ipv4.conf.default.rp_filter = 1 (servidor no-router)
 ```
+
+Si `net.ipv4.ip_forward=1`, el script usa `rp_filter=2` (modo loose) para reducir el riesgo de descartar tráfico legítimo en firewalls o rutas asimétricas.
 
 Que previene: Ataques de spoofing donde un atacante envia paquetes con IP de origen falsa. El kernel verifica que el paquete llegue por la interfaz que usaria para responder.
 
@@ -121,6 +123,10 @@ Impacto: El sistema descarta paquetes que llegan por una interfaz que no es la c
 Parametros modificados:
 ```
   net.ipv4.tcp_syncookies = 1
+  net.ipv4.tcp_max_syn_backlog = 4096
+  net.core.somaxconn = 4096
+  net.ipv4.tcp_synack_retries = 3
+  net.ipv4.tcp_syn_retries = 5
 ```
 
 Que previene: Ataques de denial of service por inundacion SYN (SYN flood). El atacante envia muchas solicitudes de conexion sin completarlas, agotando la cola del sistema.
@@ -190,7 +196,9 @@ No modifica las reglas de firewall. Solo informa si hay conflictos.
 
 Las configuraciones se respaldan en /root/network-backup-fecha/
 
-Para restaurar backup: cp /root/network-backup-fecha/sysctl.conf /etc/sysctl.d/99-network-hardening.conf
+El perfil administrado se escribe en `/etc/sysctl.d/99zz-orangebox-network-hardening.conf` para que cargue después de archivos estándar como `99-sysctl.conf`.
+
+Para restaurar un backup, copia el archivo correspondiente desde el directorio `/root/network-backup-fecha/` y valida los valores antes de recargar sysctl.
 
 ## Autor
 

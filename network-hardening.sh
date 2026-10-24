@@ -21,7 +21,8 @@ WARNINGS=0
 AUTO_FIX=false
 ALLOW_SHOREWALL=false
 
-SYSCTL_FILE="/etc/sysctl.d/99-network-hardening.conf"
+SYSCTL_FILE="/etc/sysctl.d/99zz-orangebox-network-hardening.conf"
+SYSCTL_LEGACY_FILE="/etc/sysctl.d/99-network-hardening.conf"
 BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
@@ -48,7 +49,8 @@ MODULES_TO_DISABLE=(
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0            - Auditoría (solo muestra lo que hay que corregir)"
+  echo "  $0 --check    - Solo auditoría, no aplica cambios"
   echo "  $0 --fix      - Modo automático (aplica las correcciones)"
   echo "  $0 -f         - Modo automático (versión corta)"
   echo ""
@@ -67,7 +69,9 @@ show_usage() {
 make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
-    [ -f /etc/sysctl.conf ] && cp /etc/sysctl.conf "$BACKUP_DIR/"
+    [ -f /etc/sysctl.conf ] && cp -a /etc/sysctl.conf "$BACKUP_DIR/"
+    [ -f "$SYSCTL_FILE" ] && cp -a "$SYSCTL_FILE" "$BACKUP_DIR/"
+    [ -f "$SYSCTL_LEGACY_FILE" ] && cp -a "$SYSCTL_LEGACY_FILE" "$BACKUP_DIR/"
     [ -d /etc/modprobe.d ] && cp -r /etc/modprobe.d "$BACKUP_DIR/"
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
   fi
@@ -77,56 +81,102 @@ make_backup() {
 # FUNCION PARA CONFIGURAR SYSCTL (maneja comentados)
 # ==============================================
 set_sysctl() {
-  local param=$1
-  local value=$2
+  local param="$1"
+  local value="$2"
   local description="${3:-$param}"
-  local current=$(sysctl -n "$param" 2>/dev/null)
+  local current configured tmp
 
-  if [ "$current" = "$value" ]; then
-    echo -e "${GREEN}[✓] $description = $value${NC}"
+  current=$(sysctl -n "$param" 2>/dev/null || true)
+  if [ -z "$current" ]; then
+    echo -e "${YELLOW}[!] $description no existe en este kernel${NC}"
+    WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
-  # Verificar si existe en el archivo (comentado o activo)
-  if grep -q "^[#]*\s*${param}\s*=" "$SYSCTL_FILE" 2>/dev/null; then
-    # Verificar si esta comentado con el valor correcto
-    if grep -q "^#\s*${param}\s*=\s*${value}" "$SYSCTL_FILE" 2>/dev/null; then
-      echo -e "${YELLOW}[!] $description esta comentado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i "s/^#\s*${param}\s*=.*/${param} = ${value}/" "$SYSCTL_FILE"
-        sysctl -w "$param=$value" >/dev/null 2>&1
-        echo -e "${GREEN}[✓] $description descomentado y corregido: $value${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-      return 0
-    fi
+  configured=$(awk -v key="$param" '
+    {
+      line=$0
+      if (line ~ /^[[:space:]]*#/) next
+      if (index(line, "=")) {
+        lhs=line
+        sub(/=.*/, "", lhs)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+        if (lhs == key) {
+          val=line
+          sub(/^[^=]*=/, "", val)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+          found=val
+        }
+      }
+    }
+    END { print found }
+  ' "$SYSCTL_FILE" 2>/dev/null || true)
 
-    # Existe con otro valor (comentado o activo)
-    echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i "s/^[#]*\s*${param}\s*=.*/${param} = ${value}/" "$SYSCTL_FILE"
-      sysctl -w "$param=$value" >/dev/null 2>&1
-      echo -e "${GREEN}[✓] $description corregido: $value${NC}"
-      FIXED=$((FIXED + 1))
-    else
+  if [ "$current" = "$value" ] && [ "$configured" = "$value" ]; then
+    echo -e "${GREEN}[✓] $description = $value (runtime y persistente)${NC}"
+    return 0
+  fi
+
+  if [ "$AUTO_FIX" != true ]; then
+    echo -e "${RED}[!] $description: runtime=$current persistencia=${configured:-no definida}; recomendado=$value${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  echo -e "${BLUE}[i] $description: runtime=$current persistencia=${configured:-no definida}; se aplicará=$value${NC}"
+
+  mkdir -p /etc/sysctl.d || {
+    echo -e "${YELLOW}[!] No se pudo crear /etc/sysctl.d${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  tmp=$(mktemp "${SYSCTL_FILE}.XXXXXX") || {
+    echo -e "${YELLOW}[!] No se pudo crear temporal para $param${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  if [ -f "$SYSCTL_FILE" ]; then
+    awk -v key="$param" '
+      {
+        line=$0
+        sub(/^[[:space:]]*#[[:space:]]*/, "", line)
+        if (index(line, "=")) {
+          lhs=line
+          sub(/=.*/, "", lhs)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
+          if (lhs == key) next
+        }
+        print
+      }
+    ' "$SYSCTL_FILE" > "$tmp" || {
+      rm -f "$tmp"
+      echo -e "${YELLOW}[!] No se pudo leer $SYSCTL_FILE${NC}"
       WARNINGS=$((WARNINGS + 1))
-    fi
-    return 0
+      return 1
+    }
+  fi
+  printf '%s = %s\n' "$param" "$value" >> "$tmp" || {
+    rm -f "$tmp"
+    echo -e "${YELLOW}[!] No se pudo escribir $param${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
+  if ! mv "$tmp" "$SYSCTL_FILE"; then
+    rm -f "$tmp"
+    echo -e "${YELLOW}[!] No se pudo instalar persistencia de $param${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
 
-  # No existe la linea
-  echo -e "${RED}[!] $description: $current (debe ser $value)${NC}"
-  if [ "$AUTO_FIX" = true ]; then
-    echo "$param = $value" >>"$SYSCTL_FILE"
-    sysctl -w "$param=$value" >/dev/null 2>&1
-    echo -e "${GREEN}[✓] $description configurado: $value${NC}"
+  if sysctl -w "$param=$value" >/dev/null 2>&1 && [ "$(sysctl -n "$param" 2>/dev/null || true)" = "$value" ]; then
+    echo -e "${GREEN}[✓] $description aplicado y persistido: $value${NC}"
     FIXED=$((FIXED + 1))
   else
+    echo -e "${YELLOW}[!] No se pudo aplicar/verificar $param; revisar $SYSCTL_FILE${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
+
 
 # ==============================================
 # FUNCION PARA DESHABILITAR MODULO (maneja comentados)
@@ -391,8 +441,16 @@ enable_rp_filter() {
   echo -e "${YELLOW}    Previene ataques de spoofing verificando que el paquete venga por la interfaz correcta${NC}"
   echo -e "${RED}    NOTA: Puede causar problemas si se utiliza enrutamiento asimetrico (BGP, OSPF)${NC}"
 
-  set_sysctl "net.ipv4.conf.all.rp_filter" "1" "net.ipv4.conf.all.rp_filter"
-  set_sysctl "net.ipv4.conf.default.rp_filter" "1" "net.ipv4.conf.default.rp_filter"
+  local forwarding rp_filter
+  forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
+  rp_filter=1
+  if [ "$forwarding" = 1 ]; then
+    # En routers/firewalls, strict mode puede descartar rutas asimétricas válidas.
+    rp_filter=2
+    echo -e "${GREEN}[✓] IP forwarding=1: usando rp_filter=2 (loose) para evitar descartar tráfico asimétrico${NC}"
+  fi
+  set_sysctl "net.ipv4.conf.all.rp_filter" "$rp_filter" "net.ipv4.conf.all.rp_filter"
+  set_sysctl "net.ipv4.conf.default.rp_filter" "$rp_filter" "net.ipv4.conf.default.rp_filter"
   flush_routes
 }
 
@@ -404,6 +462,10 @@ enable_syncookies() {
   echo -e "${YELLOW}    Previene ataques de denial of service por inundacion SYN${NC}"
 
   set_sysctl "net.ipv4.tcp_syncookies" "1" "net.ipv4.tcp_syncookies"
+  set_sysctl "net.ipv4.tcp_max_syn_backlog" "4096" "net.ipv4.tcp_max_syn_backlog"
+  set_sysctl "net.core.somaxconn" "4096" "net.core.somaxconn"
+  set_sysctl "net.ipv4.tcp_synack_retries" "3" "net.ipv4.tcp_synack_retries"
+  set_sysctl "net.ipv4.tcp_syn_retries" "5" "net.ipv4.tcp_syn_retries"
   flush_routes
 }
 
@@ -415,6 +477,12 @@ disable_ipv6_ra() {
   echo -e "${YELLOW}    Previene que el sistema acepte rutas maliciosas via RA${NC}"
 
   if [ -d /proc/sys/net/ipv6 ]; then
+    local ipv6_forward
+    ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
+    if [ "$ipv6_forward" = 1 ]; then
+      echo -e "${YELLOW}[!] IPv6 forwarding está activo; se preserva accept_ra para no romper rutas del uplink${NC}"
+      return 0
+    fi
     set_sysctl "net.ipv6.conf.all.accept_ra" "0" "net.ipv6.conf.all.accept_ra"
     set_sysctl "net.ipv6.conf.default.accept_ra" "0" "net.ipv6.conf.default.accept_ra"
     flush_routes
@@ -465,6 +533,7 @@ main() {
     case "$1" in
       --help|-h) show_usage; exit 0 ;;
       --fix|-f) AUTO_FIX=true ;;
+      --check) AUTO_FIX=false ;;
       --allow-shorewall) ALLOW_SHOREWALL=true ;;
       *) echo -e "${RED}[!] Opción desconocida: $1${NC}"; show_usage; exit 2 ;;
     esac
