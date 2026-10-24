@@ -72,7 +72,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -106,16 +106,32 @@ echo ""
 # Prompt personalizado: [HORA] usuario@hostname directorio $
 export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;32m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] $ "
 
-# Historial con fecha y hora
+# Historial con fecha y hora y sin límite de líneas.
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=10000
-export HISTFILESIZE=50000
-export HISTCONTROL=ignoredups:ignorespace
-export HISTFILE="$HOME/.bash_history"
-
-# Unificar historial de múltiples sesiones
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then
+    export HISTFILE="$HOME/.bash_history"
+fi
+unset HISTIGNORE
+set -o history
 shopt -s histappend
-export PROMPT_COMMAND="history -a; $PROMPT_COMMAND"
+
+orangebox_history_guard() {
+    set -o history
+    HISTSIZE=-1
+    HISTFILESIZE=-1
+    if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then
+        HISTFILE="$HOME/.bash_history"
+    fi
+    export HISTSIZE HISTFILESIZE HISTFILE
+}
+case ";${PROMPT_COMMAND:-};" in
+    *";orangebox_history_guard;"*) ;;
+    *) PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND:-}" ;;
+esac
+export PROMPT_COMMAND
 
 # Timeout de sesión inactiva (15 minutos) - solo si no está definido
 if [ -z "$TMOUT" ]; then
@@ -127,7 +143,6 @@ fi
 umask 027
 
 # Historial inmutable (evita que el usuario lo desactive)
-readonly HISTFILE
 EOF
     echo -e "${GREEN}[✓] Profile creado en $PROFILE_D${NC}"
     FIXED=$((FIXED + 1))
@@ -320,7 +335,7 @@ EOF
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
-  if grep -q "OrangeBox" "$BASHRC_ROOT" 2>/dev/null; then
+  if grep -q "OrangeBox" "$BASHRC_ROOT" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$BASHRC_ROOT" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$BASHRC_ROOT" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$BASHRC_ROOT"; then
     echo -e "${GREEN}[✓] /root/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -336,14 +351,25 @@ configure_root_bashrc() {
 
 # Historial mejorado
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=20000
-export HISTFILESIZE=100000
-export HISTCONTROL=ignoredups:ignorespace
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then export HISTFILE="$HOME/.bash_history"; fi
+unset HISTIGNORE
+set -o history
 shopt -s histappend
-export PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+export PROMPT_COMMAND="history -a; history -c; history -r; ${PROMPT_COMMAND:-}"
+orangebox_history_guard() {
+    set -o history
+    HISTSIZE=-1
+    HISTFILESIZE=-1
+    if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then HISTFILE="$HOME/.bash_history"; fi
+    export HISTSIZE HISTFILESIZE HISTFILE
+}
+PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND}"
+
 
 # Historial inmutable (protegido)
-readonly HISTFILE
 
 # Prompt personalizado para root (en rojo)
 export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # "
@@ -397,7 +423,7 @@ show_reboot_warning() {
 configure_skel() {
   echo -e "\n${BLUE}[*] Configurando /etc/skel para nuevos usuarios...${NC}"
 
-  if [ -f "$SKEL_BASHRC" ] && grep -q "OrangeBox" "$SKEL_BASHRC" 2>/dev/null; then
+  if [ -f "$SKEL_BASHRC" ] && grep -q "OrangeBox" "$SKEL_BASHRC" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$SKEL_BASHRC" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$SKEL_BASHRC"; then
     echo -e "${GREEN}[✓] /etc/skel/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -412,9 +438,12 @@ configure_skel() {
 # ==============================================
 
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=10000
-export HISTFILESIZE=50000
-export HISTCONTROL=ignoredups:ignorespace
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+if [ -z "${HISTFILE:-}" ] || [ "$HISTFILE" = /dev/null ] || [ "$HISTFILE" = /dev/zero ]; then export HISTFILE="$HOME/.bash_history"; fi
+unset HISTIGNORE
+set -o history
 shopt -s histappend
 
 if [ -z "$TMOUT" ]; then
