@@ -1,0 +1,23 @@
+name: Shell syntax validation
+
+on:
+  push:
+    paths:
+      - "*.sh"
+      - ".github/workflows/shell-syntax.yml"
+  pull_request:
+    paths:
+      - "*.sh"
+      - ".github/workflows/shell-syntax.yml"
+
+jobs:
+  bash-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate modified hardening scripts
+        run: |
+          bash -n linux-hardening.sh
+          bash -n network-hardening.sh
+          bash -n generate-iptables-rules.sh
