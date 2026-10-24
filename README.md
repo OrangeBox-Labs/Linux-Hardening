@@ -126,7 +126,7 @@ Aplicar cambios de forma interactiva:
 ./linux-hardening.sh --fix
 ```
 
-Este modo aplica banners corporativos y la configuración de Bash, y luego explica cada control clasificado como riesgoso y pregunta si se quiere aplicar. Si respondes No, o no hay terminal para confirmar, ese control no modifica el sistema y queda solo en auditoría.
+Este modo aplica banners corporativos y la configuración de Bash, y luego explica cada control clasificado como riesgoso y pregunta si se quiere aplicar. Si respondes No, el control no modifica el sistema; cuando hay un modo de auditoría seguro definido, se ejecuta. Si no lo hay, el módulo se omite sin cambios.
 
 Para ejecución automática y conservadora, sin preguntas:
 
