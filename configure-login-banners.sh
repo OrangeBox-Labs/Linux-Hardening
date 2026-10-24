@@ -38,29 +38,16 @@ ORANGEBOX_ASCII="
 BANNER_TEXT="
 *******************************************************************************
 $ORANGEBOX_ASCII
-                         SISTEMA DE ACCESO CONTROLADO
-                        Hardening por: www.orangebox.cl
+                         SISTEMA DE ACCESO RESTRINGIDO
+                           www.orangebox.cl
 *******************************************************************************
 
-Este servidor ha sido endurecido siguiendo estandares de seguridad CIS Benchmark.
-El acceso no autorizado esta estrictamente prohibido.
+Solo usuarios autorizados pueden acceder a este sistema.
+El acceso o uso no autorizado esta prohibido.
 
-CUALQUIER INTENTO DE ACCESO NO AUTORIZADO SERA:
-- Registrado y monitoreado
-- Reportado a las autoridades competentes
-- Utilizado con fines legales
-
-AL INGRESAR ACEPTA:
-- Las condiciones de uso del sistema
-- Que su actividad puede ser monitoreada las 24/7
-- Que la informacion obtenida es confidencial
-- Que los intentos no autorizados seran penalizados
-
-Este sistema utiliza:
-- SELinux en modo enforcing
-- Firewall perimetral
-- Monitoreo de integridad de archivos
-- Deteccion de intrusiones
+La actividad realizada en este sistema puede ser registrada y revisada
+conforme a las politicas de la organizacion y a la legislacion aplicable.
+Si no cuenta con autorizacion, desconectese inmediatamente.
 
 *******************************************************************************
 "
