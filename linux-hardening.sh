@@ -1,7 +1,7 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
 # Version 1.3.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
-# Audit by default. --fix asks before riskier modules; --fix --auto applies banners/Bash and the approved baseline sysctl/SYN-flood profile.
+# Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
 # System-wide crypto-policies are never changed by the core baseline.
