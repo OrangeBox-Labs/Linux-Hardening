@@ -110,7 +110,7 @@ Parametros modificados:
   net.ipv4.conf.default.rp_filter = 1 (servidor no-router)
 ```
 
-Si `net.ipv4.ip_forward=1`, el script usa `rp_filter=2` (modo loose) para reducir el riesgo de descartar tráfico legítimo en firewalls o rutas asimétricas.
+Si `net.ipv4.ip_forward=1`, el script usa `rp_filter=2` (modo loose) para reducir el riesgo de descartar tráfico legítimo en firewalls o rutas asimétricas. En el orquestador, este control se aplica solo después de confirmación individual en modo `--fix` interactivo; `--fix --auto` lo deja en auditoría.
 
 Que previene: Ataques de spoofing donde un atacante envia paquetes con IP de origen falsa. El kernel verifica que el paquete llegue por la interfaz que usaria para responder.
 
