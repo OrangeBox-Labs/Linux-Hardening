@@ -108,9 +108,9 @@ https://www.orangebox.cl/
 
 Linux hardening, Linux security, CIS Benchmark, CIS hardening, RHEL hardening, Red Hat hardening, Rocky Linux hardening, AlmaLinux hardening, CentOS hardening, Fedora hardening, SSH hardening, sudo hardening, SELinux, auditd, kernel hardening, filesystem hardening, GRUB hardening, firewall hardening, Bash security, server hardening, Linux Enterprise, OrangeBox.
 
-## cPanel SYN flood / TCP backlog (EL 6–10)
+## SYN flood / TCP backlog para Linux Enterprise (EL 6–10)
 
-El módulo de mitigación TCP es **opt-in**: no se ejecuta en la corrida general `--fix` porque `tcp_synack_retries=2` y `tcp_syn_retries=2` modifican la tolerancia ante pérdida de paquetes y enlaces lentos.
+El módulo de mitigación TCP está disponible para servidores Linux Enterprise, no solo cPanel, y es **opt-in**: no se ejecuta en la corrida general `--fix` porque `tcp_synack_retries=2` y `tcp_syn_retries=2` modifican la tolerancia ante pérdida de paquetes y enlaces lentos.
 
 Auditar sin cambios:
 
@@ -130,7 +130,7 @@ Aplicar de forma automática:
 sudo ./linux-hardening.sh --fix --module synflood
 ```
 
-El módulo intenta detectar definiciones existentes para no duplicar claves, omite claves definidas por otros archivos y crea un respaldo antes de escribir su perfil. Al terminar informa el identificador de la ejecución. Para revertirla:
+El módulo utiliza `/etc/sysctl.d/99-orangebox-synflood-hardening.conf`, detecta definiciones existentes para no duplicar claves, omite claves definidas por otros archivos y crea respaldos antes de escribir su perfil. Si encuentra el perfil OrangeBox antiguo `99-cpanel-synflood-hardening.conf`, intenta migrarlo de forma controlada. El rollback usa la ruta original registrada, restaura los archivos previos y no elimina el perfil genérico de sysctl si ese archivo no existía antes de la ejecución. Al terminar informa el identificador de la ejecución. Para revertirla:
 
 ```bash
 sudo ./linux-hardening.sh --rollback YYYYMMDD-HHMMSS
