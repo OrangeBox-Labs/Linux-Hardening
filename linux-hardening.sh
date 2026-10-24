@@ -160,7 +160,7 @@ synflood_module(){
 
   if [ -e "$profile_source" ]; then
     echo yes > "$state/profile-existed"
-    backup_once "$profile_source"
+    backup_once "$profile_source" || die "No se pudo respaldar el perfil SYN flood original."
   else
     echo no > "$state/profile-existed"
   fi
@@ -169,7 +169,7 @@ synflood_module(){
 
   if [ -e "$legacy" ]; then
     echo yes > "$state/legacy-existed"
-    backup_once "$legacy"
+    backup_once "$legacy" || die "No se pudo respaldar el perfil genérico antes de migrar tcp_syncookies."
   else
     echo no > "$state/legacy-existed"
   fi
@@ -270,7 +270,7 @@ synflood_module(){
   ok "SYN flood aplicado. Backup: $BACKUP_DIR. Rollback: $0 --rollback $RUN_ID"
 }
 rollback_synflood(){
-  local target="$1" bdir state legacy profile_source profile_target backup_legacy backup_profile key value
+  local target="$1" bdir state legacy profile_source profile_target backup_legacy backup_profile key value rollback_failures=0
   case "$target" in *[!0-9A-Za-z._/-]*|"") die "RUN_ID rollback inválido";; esac
   case "$target" in /*) bdir="$target"; state="$target/synflood";; *) bdir="/var/backups/orangebox-linux-hardening/$target"; state="$bdir/synflood";; esac
   [ -r "$state/profile-existed" ] && [ -r "$state/legacy-existed" ] && [ -r "$state/runtime.before" ] ||
@@ -310,10 +310,17 @@ rollback_synflood(){
 
   while IFS="|" read -r key value; do
     [ -n "$key" ] || continue
-    [ -n "$value" ] || { warn "No hay valor previo capturado para $key; se omite"; continue; }
-    sysctl -w "$key=$value" >/dev/null 2>&1 || warn "No se pudo restaurar runtime $key=$value"
+    [ -n "$value" ] || { warn "No hay valor previo capturado para $key; se omite"; rollback_failures=$((rollback_failures+1)); continue; }
+    if ! sysctl -w "$key=$value" >/dev/null 2>&1 || [ "$(sysctl -n "$key" 2>/dev/null || true)" != "$value" ]; then
+      warn "No se pudo restaurar/verificar runtime $key=$value"
+      rollback_failures=$((rollback_failures+1))
+    fi
   done < "$state/runtime.before"
-  ok "Rollback terminado; revisar runtime y persistencia"
+  if [ "$rollback_failures" -gt 0 ]; then
+    warn "Rollback de archivos completado con $rollback_failures valor(es) runtime sin restaurar/verificar."
+    return 1
+  fi
+  ok "Rollback terminado y valores runtime verificados."
 }
 
 ssh_supported(){ sshd -T 2>/dev/null | awk -v k="$1" '$1==k{$1="";sub(/^ /,"");print;exit}'; }
