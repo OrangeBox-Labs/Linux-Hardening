@@ -110,21 +110,21 @@ Linux hardening, Linux security, CIS Benchmark, CIS hardening, RHEL hardening, R
 
 ## SYN flood / TCP backlog para Linux Enterprise (EL 6–10)
 
-El módulo de mitigación TCP está disponible para servidores Linux Enterprise, no solo cPanel, y es **opt-in**: no se ejecuta en la corrida general `--fix` porque `tcp_synack_retries=2` y `tcp_syn_retries=2` modifican la tolerancia ante pérdida de paquetes y enlaces lentos.
+La mitigación TCP forma parte del **baseline obligatorio de OrangeBox para servidores Linux Enterprise**, no es una protección exclusiva de cPanel. Por eso se ejecuta también dentro de `--module all` y, en consecuencia, dentro de `--fix` sin necesidad de habilitar un módulo adicional.
 
-Auditar sin cambios:
+Para auditarla de forma dirigida sin cambios:
 
 ```bash
 sudo ./linux-hardening.sh --module synflood
 ```
 
-Aplicar de forma interactiva, confirmando cada parámetro:
+Para aplicar el baseline completo, incluido SYN flood:
 
 ```bash
-sudo ./linux-hardening.sh --interactive --module synflood
+sudo ./linux-hardening.sh --fix
 ```
 
-Aplicar de forma automática:
+También puede ejecutarse de forma dirigida:
 
 ```bash
 sudo ./linux-hardening.sh --fix --module synflood
