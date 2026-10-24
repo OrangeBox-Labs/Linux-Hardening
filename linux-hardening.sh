@@ -445,6 +445,8 @@ run_companion_module() {
   if [ "$AUTO_FIX" = true ]; then
     if [ "$audit_only" = true ]; then
       warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
+    elif [ "$name" = "network-full" ]; then
+      args=(--fix --allow-shorewall)
     elif [ -n "$fix_arg" ]; then
       args=("$fix_arg")
     fi
