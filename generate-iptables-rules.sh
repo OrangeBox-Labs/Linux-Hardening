@@ -20,6 +20,17 @@ IPTABLES_SCRIPT="/root/iptables.sh"
 IP6TABLES_SCRIPT="/root/ip6tables.sh"
 ALLOWED_PORTS=()
 
+# Shorewall administra el ruleset de este host. Generar otro conjunto que haga
+# flush de iptables y aplique INPUT DROP puede romper la política y cortar SSH.
+shorewall_is_active() {
+  command -v shorewall >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet shorewall 2>/dev/null && return 0
+  local status
+  status="$(shorewall status 2>&1 || true)"
+  printf '%s\n' "$status" | grep -Eiq 'stopped|not running|inactive|is down' && return 1
+  printf '%s\n' "$status" | grep -Eiq 'running|started|active'
+}
+
 # ==============================================
 # DETECTAR PUERTOS EN ESCUCHA (EXCLUYENDO SSH)
 # ==============================================
@@ -335,6 +346,12 @@ show_summary() {
 # FUNCION PRINCIPAL
 # ==============================================
 main() {
+  if shorewall_is_active; then
+    echo -e "${RED}[ERROR] Shorewall está activo. Este generador crea scripts que vacían reglas iptables y establecen INPUT DROP.${NC}"
+    echo -e "${YELLOW}No se generará un segundo firewall ni se tocará el ruleset. Administra las reglas de este host con Shorewall.${NC}"
+    exit 2
+  fi
+
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Generador de Scripts iptables${NC}"
   echo -e "${GREEN}============================================${NC}\n"
