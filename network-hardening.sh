@@ -476,6 +476,12 @@ disable_ipv6_ra() {
   echo -e "${YELLOW}    Previene que el sistema acepte rutas maliciosas via RA${NC}"
 
   if [ -d /proc/sys/net/ipv6 ]; then
+    local ipv6_forward
+    ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
+    if [ "$ipv6_forward" = 1 ]; then
+      echo -e "${YELLOW}[!] IPv6 forwarding está activo; se preserva accept_ra para no romper rutas del uplink${NC}"
+      return 0
+    fi
     set_sysctl "net.ipv6.conf.all.accept_ra" "0" "net.ipv6.conf.all.accept_ra"
     set_sysctl "net.ipv6.conf.default.accept_ra" "0" "net.ipv6.conf.default.accept_ra"
     flush_routes
