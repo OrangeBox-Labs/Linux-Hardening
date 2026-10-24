@@ -638,7 +638,7 @@ Uso:
   $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
   $0 --fix --module bash            Historial con fecha/hora y prompt por rol
-  $0 --fix --module synflood        Explica el impacto y pregunta antes de aplicar
+  $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
   $0 --fix --module network-full --allow-shorewall
                                     Autoriza explícitamente cambios de red con Shorewall
   $0 --module <modulo> [--fix] [--auto] [--allow-risky]
@@ -909,7 +909,7 @@ main() {
     echo
     echo "Modo automático terminado: baseline sysctl de seguridad aplicado; no se modificaron ip_forward, firewall, autenticación ni servicios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    warn "MODO --FIX INTERACTIVO: se aplican banners/MOTD y Bash; cada módulo de riesgo explica su impacto y pide autorización."
+    warn "MODO --FIX INTERACTIVO: se aplican banners/MOTD, Bash y baseline kernel/SYN flood; los demás módulos de riesgo explican su impacto y piden autorización."
     warn "Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
     run_module banners
     run_module bash
