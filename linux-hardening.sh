@@ -105,7 +105,7 @@ rollback_synflood(){
   legacy=/etc/sysctl.d/99-orangebox-hardening.conf
   if [ "$(cat "$state/legacy-existed")" = yes ]; then [ -f "$bdir/etc/sysctl.d/99-orangebox-hardening.conf" ] || die "Falta backup del perfil genérico"; cp -a "$bdir/etc/sysctl.d/99-orangebox-hardening.conf" "$legacy" || die "No se pudo restaurar perfil genérico"; else rm -f "$legacy"; fi
   if [ "$(cat "$state/profile-existed")" = yes ]; then [ -f "$bdir/etc/sysctl.d/99-cpanel-synflood-hardening.conf" ] || die "Falta backup del perfil SYN flood"; cp -a "$bdir/etc/sysctl.d/99-cpanel-synflood-hardening.conf" "$SYNFLOOD_FILE" || die "No se pudo restaurar perfil SYN flood"; else rm -f "$SYNFLOOD_FILE"; fi
-  while IFS="|" read -r key value; do [ -n "$key" ] && [ -n "$value" ] || continue; sysctl -w "$key=$value" >/dev/null 2>&1 || warn "No se pudo restaurar runtime $key=$value"; done < "$state/runtime.before"
+  while IFS="|" read -r key value; do [ -n "$key" ] || continue; [ -n "$value" ] || { warn "No hay valor previo capturado para $key; se omite"; continue; }; sysctl -w "$key=$value" >/dev/null 2>&1 || warn "No se pudo restaurar runtime $key=$value"; done < "$state/runtime.before"
   ok "Rollback terminado; revisar runtime y persistencia"
 }
 
@@ -303,7 +303,7 @@ usage(){
   echo "OrangeBox Linux Hardening $VERSION"
   echo "Uso: $0 [--fix | --interactive] [--module MODULO] | --rollback RUN_ID"
   echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"
-  echo "Sin --fix o --interactive solo audita. --fix aplica sin preguntas; --interactive pregunta por parámetro."
+  echo "Sin --fix o --interactive solo audita. --fix aplica sin preguntas; --interactive pregunta por parámetro."\n  echo "SYN flood opt-in: --module synflood; rollback: $0 --rollback RUN_ID."
   echo "SSH crypto: configuración directa de OpenSSH."
   echo "Crypto-policies globales: NO se modifican."
 }
