@@ -10,7 +10,9 @@ set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SCRIPT_VERSION=1.3.3
 AUTO_FIX=false
+AUTO_MODE=false
 ALLOW_RISKY=false
+ALLOW_SHOREWALL=false
 MODULE=all
 RUN_ID=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
@@ -388,9 +390,74 @@ EOF
 
 internal_module_requires_risk() {
   case "$1" in
-    ssh|kernel|synflood|rsyslog) return 0 ;;
+    ssh|sudo|kernel|synflood|rsyslog) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+risk_description() {
+  case "$1" in
+    ssh) echo "añade controles a sshd (intentos, tiempos de sesión y autenticación por host). Se valida la sintaxis; aun así, revisa clientes e integraciones SSH." ;;
+    sudo) echo "activa use_pty en sudoers. Mejora auditoría, pero puede alterar automatizaciones que dependen de una sesión sin pseudo-terminal." ;;
+    kernel) echo "cambia sysctl del kernel y de red, incluidos redirects. En un router/firewall puede alterar forwarding o comportamiento de red." ;;
+    synflood) echo "ajusta syncookies, backlog TCP y reintentos. Puede cambiar cómo el host gestiona picos de conexiones." ;;
+    rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
+    network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
+    firewall|firewall-rules) echo "modifica o reemplaza el filtrado. El generador de iptables está bloqueado porque vacía reglas y establece INPUT DROP; no se ejecutará sobre Shorewall." ;;
+    ssh-cis|ssh-complete) echo "modifica parámetros de SSH y/o algoritmos criptográficos. Puede dejar fuera clientes antiguos, automatizaciones o el acceso administrativo." ;;
+    password|password-full) echo "cambia política de contraseñas o valores por defecto. No se editará PAM a ciegas, pero podría afectar autenticación o futuras contraseñas." ;;
+    filesystem|filesystem-full) echo "puede restringir montajes, ocultar procesos con hidepid, bloquear módulos o deshabilitar autofs; podría afectar monitoreo y aplicaciones." ;;
+    cron|cron-full) echo "puede cambiar permisos de cron/at y crear listas allow limitadas a root, impidiendo tareas de usuarios o de hosting/cPanel." ;;
+    selinux|selinux-setup) echo "cambia configuración/etiquetas de SELinux y puede relabelar árboles grandes; servicios con contextos personalizados podrían dejar de funcionar." ;;
+    grub|grub-full) echo "cambia parámetros del arranque y regenera grub.cfg; el efecto pleno requiere reinicio y un error puede impedir arrancar." ;;
+    kernel-full|lpe-2026) echo "cambia mitigaciones de kernel/sysctl o bloquea módulos/namespaces; puede afectar contenedores, VPN y requiere reinicio para algunos efectos." ;;
+    auditd|auditd-full) echo "modifica reglas y servicio de auditoría; puede incrementar volumen de eventos y afectar configuración de auditd existente." ;;
+    time|time-sync) echo "puede cambiar el servicio de sincronización o dar un salto de hora; puede afectar certificados, autenticación y correlación de logs." ;;
+    usb|usb-storage) echo "bloquea almacenamiento USB mediante modprobe; puede afectar dispositivos o flujos de recuperación que dependan de USB." ;;
+    services|services-remove|packages-remove|xinetd-remove|gui-remove) echo "puede detener/deshabilitar servicios o eliminar paquetes y dependencias; podría afectar aplicaciones instaladas." ;;
+    aide) echo "instala AIDE y puede crear una base inicial de integridad, consumiendo espacio y CPU." ;;
+    bash-full) echo "instala auditoría amplia de comandos mediante trap DEBUG/syslog; puede aumentar volumen y registrar argumentos sensibles." ;;
+    post-install) echo "script para preparación inicial que puede tocar SELinux, GRUB y paquetes; está bloqueado en modo aplicación desde este orquestador." ;;
+    *) echo "este módulo puede modificar configuración o servicios; revisa el alcance y conserva una vía de recuperación." ;;
+  esac
+}
+
+confirm_risky_change() {
+  local name="$1" answer description
+  description="$(risk_description "$name")"
+  echo
+  echo -e "$YELLOW[ATENCIÓN] Control con riesgo operacional: $name$NC"
+  echo "Qué hará: $description"
+  if [ "$AUTO_MODE" = true ]; then
+    warn "Modo --auto: cambio omitido; no se aplican controles críticos."
+    return 1
+  fi
+  if [ "$ALLOW_RISKY" = true ]; then
+    ok "--allow-risky autoriza aplicar este control sin confirmación adicional."
+    return 0
+  fi
+  if [ ! -r /dev/tty ]; then
+    warn "No hay terminal disponible para confirmar; el cambio se omitirá por seguridad."
+    return 1
+  fi
+  read -r -p "¿Quieres aplicar '$name'? [s/N]: " answer </dev/tty
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) warn "Control '$name' rechazado por el usuario; se mantiene en auditoría."; return 1 ;;
+  esac
+}
+
+run_internal_module_with_confirmation() {
+  local name="$1" previous_fix="$AUTO_FIX"
+  if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
+    if ! confirm_risky_change "$name"; then
+      AUTO_FIX=false
+      run_module "$name"
+      AUTO_FIX="$previous_fix"
+      return 0
+    fi
+  fi
+  run_module "$name"
 }
 
 run_companion_module() {
