@@ -106,9 +106,9 @@ configure_banner_file() {
     fi
     printf '%s' "$content" > "$file"
     if [ "$file" = "/etc/motd" ]; then
-      echo -e "\${GREEN}[✓] MOTD breve configurado en $file\${NC}"
+      echo -e "${GREEN}[✓] MOTD breve configurado en $file${NC}"
     else
-      echo -e "\${GREEN}[✓] Banner previo al login configurado en $file\${NC}"
+      echo -e "${GREEN}[✓] Banner previo al login configurado en $file${NC}"
     fi
     FIXED=$((FIXED + 1))
   else
