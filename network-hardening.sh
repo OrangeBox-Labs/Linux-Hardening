@@ -117,11 +117,12 @@ set_sysctl() {
     return 0
   fi
 
-  echo -e "${RED}[!] $description: runtime=$current persistencia=${configured:-no definida}; recomendado=$value${NC}"
   if [ "$AUTO_FIX" != true ]; then
+    echo -e "${RED}[!] $description: runtime=$current persistencia=${configured:-no definida}; recomendado=$value${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
+  echo -e "${BLUE}[i] $description: runtime=$current persistencia=${configured:-no definida}; se aplicará=$value${NC}"
 
   mkdir -p /etc/sysctl.d || {
     echo -e "${YELLOW}[!] No se pudo crear /etc/sysctl.d${NC}"
