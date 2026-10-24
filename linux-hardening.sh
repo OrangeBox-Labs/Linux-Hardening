@@ -914,7 +914,7 @@ main() {
     done
     AUTO_FIX="$previous_fix"
     echo
-    echo "Modo automático terminado: baseline sysctl de seguridad aplicado; no se modificaron ip_forward, firewall, autenticación ni servicios."
+    echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
     warn "MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
     warn "Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
