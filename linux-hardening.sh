@@ -643,7 +643,7 @@ OrangeBox Linux Hardening $SCRIPT_VERSION
 Uso:
   $0                                Auditoría del baseline interno
   $0 --fix                          Modo interactivo: explica los riesgos y pregunta
-  $0 --fix --auto                   Aplica banners/Bash y baseline sysctl de kernel/red/SYN flood; audita el resto
+  $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
   $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
   $0 --fix --module bash            Historial con fecha/hora y prompt por rol
@@ -664,7 +664,7 @@ Módulos adicionales:
 
 Seguridad:
   --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
-  --fix --auto no hace preguntas: aplica banners/MOTD, Bash y el baseline sysctl de kernel/red/SYN flood. Los módulos adicionales de riesgo siguen en auditoría.
+  --fix --auto no hace preguntas: aplica únicamente banners/MOTD y Bash. Kernel, SYN flood y los demás módulos delicados quedan en auditoría sin aplicar cambios.
   --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
   --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
@@ -675,7 +675,7 @@ EOF
 
 internal_module_requires_risk() {
   case "$1" in
-    ssh|sudo|rsyslog) return 0 ;;
+    ssh|sudo|kernel|synflood|rsyslog) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -903,22 +903,20 @@ main() {
   prepare_backup
 
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
-    warn "MODO --FIX --AUTO: banners/MOTD, Bash e indicadores sysctl base (kernel/red/SYN flood); módulos adicionales en solo auditoría."
+    warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
     run_module banners
     run_module bash
-    run_module kernel
-    run_module synflood
 
     local previous_fix="$AUTO_FIX" m
     AUTO_FIX=false
-    for m in ssh sudo password filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
+    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
       run_module "$m"
     done
     AUTO_FIX="$previous_fix"
     echo
     echo "Modo automático terminado: baseline sysctl de seguridad aplicado; no se modificaron ip_forward, firewall, autenticación ni servicios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    warn "MODO --FIX INTERACTIVO: se aplican banners/MOTD, Bash y baseline kernel/SYN flood; los demás módulos de riesgo explican su impacto y piden autorización."
+    warn "MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
     warn "Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
     run_module banners
     run_module bash
