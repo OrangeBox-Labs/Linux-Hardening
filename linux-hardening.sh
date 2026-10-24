@@ -41,7 +41,7 @@ set_sysctl(){
   configured=$(awk -v key="$key" '
     {
       line=$0
-      sub(/^[[:space:]]*#[[:space:]]*/, "", line)
+      if (line ~ /^[[:space:]]*#/) next
       if (index(line, "=")) {
         lhs=line
         sub(/=.*/, "", lhs)
