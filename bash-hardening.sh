@@ -142,7 +142,7 @@ fi
 # Umask segura
 umask 027
 
-# Historial inmutable (evita que el usuario lo desactive)
+# Historial habilitado e ilimitado; los valores se revalidan por sesión.
 EOF
     echo -e "${GREEN}[✓] Profile creado en $PROFILE_D${NC}"
     FIXED=$((FIXED + 1))
@@ -369,7 +369,7 @@ orangebox_history_guard() {
 PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND}"
 
 
-# Historial inmutable (protegido)
+# Historial habilitado e ilimitado.
 
 # Prompt personalizado para root (en rojo)
 export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # "
