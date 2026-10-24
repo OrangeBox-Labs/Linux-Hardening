@@ -213,12 +213,12 @@ cron_module(){ echo -e "\n$BLUE### CRON / AT ###$NC"; [ -e /etc/cron.allow ]&&ok
 usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; warn "USB no se bloquea automáticamente"; }
 services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; warn "No se eliminan servicios automáticamente"; }
 configure_ssh_banner() {
-  local main=/etc/ssh/sshd_config current tmp backup
+  local main=/etc/ssh/sshd_config current tmp backup reload_ok=0
   echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"
   [ -f "$main" ] || { warn "$main no existe; no se configura el banner SSH"; return; }
   command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible; no se puede validar el banner SSH"; return; }
 
-  current="$(sshd -T 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
+  current="$(sshd -T -f "$main" 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
   if [ "$current" = "/etc/issue.net" ]; then
     ok "Banner SSH efectivo apunta a /etc/issue.net"
     return
@@ -231,14 +231,21 @@ configure_ssh_banner() {
   backup_once "$main"
   backup="$BACKUP_DIR$main"
   tmp="$(mktemp)" || { warn "No se pudo crear temporal para sshd_config"; return; }
+
+  # OpenSSH suele procesar Include al inicio. El primer valor efectivo gana;
+  # por eso Banner debe ir antes del primer Include y antes de cualquier Match.
+  # Se eliminan Banner previos del archivo principal para evitar valores
+  # posteriores o específicos de Match que contradigan el banner corporativo.
   awk '
     BEGIN { done=0 }
-    /^[[:space:]]*Banner[[:space:]]+/ {
-      if (!done) { print "Banner /etc/issue.net"; done=1 }
-      next
+    /^[[:space:]]*Banner[[:space:]]+/ { next }
+    /^[[:space:]]*Include[[:space:]]+/ && !done {
+      print "Banner /etc/issue.net"
+      done=1
     }
     /^[[:space:]]*Match([[:space:]]|$)/ && !done {
-      print "Banner /etc/issue.net"; done=1
+      print "Banner /etc/issue.net"
+      done=1
     }
     { print }
     END { if (!done) print "Banner /etc/issue.net" }
@@ -247,13 +254,18 @@ configure_ssh_banner() {
   chown --reference="$main" "$tmp" 2>/dev/null || chown root:root "$tmp"
   mv "$tmp" "$main" || { rm -f "$tmp"; warn "No se pudo instalar sshd_config"; return; }
 
-  current="$(sshd -T 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
-  if sshd -t >/dev/null 2>&1 && [ "$current" = "/etc/issue.net" ]; then
-    if systemctl reload sshd >/dev/null 2>&1; then
-      ok "Banner SSH aplicado y sshd recargado sin cortar sesiones"
+  current="$(sshd -T -f "$main" 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
+  if sshd -t -f "$main" >/dev/null 2>&1 && [ "$current" = "/etc/issue.net" ]; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl reload sshd >/dev/null 2>&1; then
+      reload_ok=1
+    elif command -v service >/dev/null 2>&1 && service sshd reload >/dev/null 2>&1; then
+      reload_ok=1
+    fi
+    if [ "$reload_ok" -eq 1 ]; then
+      ok "Banner SSH aplicado, validado y sshd recargado sin cortar sesiones"
       FIXED=$((FIXED+1))
     else
-      warn "Banner configurado y sshd -t válido, pero no se pudo recargar sshd; revisar servicio"
+      warn "Banner SSH configurado y validado; no se pudo recargar sshd, revisar servicio"
     fi
   else
     if [ -f "$backup" ]; then cp -a "$backup" "$main"; fi
