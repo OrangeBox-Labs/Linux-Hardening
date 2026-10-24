@@ -61,7 +61,7 @@ set_sysctl(){
     return
   fi
   warn "$key actual=$current persistencia=${configured:-no definida} recomendado=$value"
-  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS+1)); return; fi
+  [ "$AUTO_FIX" = true ] || return
 
   mkdir -p /etc/sysctl.d || { warn "No se pudo crear /etc/sysctl.d"; return; }
   backup_once "$file"
