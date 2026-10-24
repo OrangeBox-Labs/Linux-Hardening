@@ -1,7 +1,7 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
 # Version 1.3.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
-# Audit by default. Plain --fix applies only login banners/MOTD and Bash history/prompt.
+# Audit by default. --fix asks before riskier modules; --fix --auto applies banners/Bash and the approved baseline sysctl/SYN-flood profile.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
 # System-wide crypto-policies are never changed by the core baseline.
@@ -395,29 +395,96 @@ firewall_module() {
 }
 fapolicyd_module(){ echo -e "\n$BLUE### FAPOLICYD ###$NC"; rpm -q fapolicyd >/dev/null 2>&1&&systemctl is-active fapolicyd >/dev/null 2>&1&&ok "fapolicyd activo"||warn "fapolicyd ausente/inactivo; no se habilita automáticamente"; }
 listening_module(){ echo -e "\n$BLUE### LISTENING SERVICES ###$NC"; command -v ss >/dev/null 2>&1&&ss -lntup 2>/dev/null||true; }
+normalize_history_dotfile() {
+  local file="$1" tmp
+  [ -f "$file" ] || return 0
+  if grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file" &&
+     ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    return 0
+  fi
+  if ! $AUTO_FIX; then
+    warn "$file: se normalizará el historial a ilimitado al aplicar --fix"
+    return 0
+  fi
+
+  backup_once "$file"
+  tmp=$(mktemp) || { warn "No se pudo crear temporal para $file"; return 1; }
+  awk '
+    $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
+    $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
+    skip { next }
+    /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
+    { print }
+  ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
+  cat >> "$tmp" <<'ORANGEBOX_UNLIMITED_HISTORY'
+# ORANGEBOX UNLIMITED HISTORY BEGIN
+# El historial interactivo se conserva completo, sin límite de líneas.
+set -o history
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+unset HISTIGNORE
+case "${HISTFILE:-}" in
+  ""|/dev/null|/dev/zero) export HISTFILE="$HOME/.bash_history" ;;
+esac
+shopt -s histappend
+# ORANGEBOX UNLIMITED HISTORY END
+ORANGEBOX_UNLIMITED_HISTORY
+  chmod --reference="$file" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference="$file" "$tmp" 2>/dev/null || chown root:root "$tmp"
+  if mv "$tmp" "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    FIXED=$((FIXED+1))
+  else
+    rm -f "$tmp"
+    warn "No se pudo instalar configuración de historial en $file"
+    return 1
+  fi
+}
+
 bash_module() {
   echo -e "\n$BLUE### BASH / HISTORIAL / PROMPT ###$NC"
-  local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp
+  local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
   [ -d /etc/profile.d ] || { warn "/etc/profile.d no existe"; return; }
-  tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
 
+  # Detectar directivas que suelen deshabilitar el historial.
+  for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc; do
+    [ -f "$f" ] || continue
+    if grep -Eiq '(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)' "$f"; then
+      warn "Posible deshabilitación de Bash History detectada en $f; se revisará la configuración efectiva"
+    fi
+  done
+
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
   cat > "$tmp" <<'ORANGEBOX_BASH'
-# OrangeBox Linux Hardening - historial y prompt por rol
+# OrangeBox Linux Hardening - historial ilimitado y prompt por rol
 # Solo se aplica a shells interactivos.
 case $- in
   *i*) ;;
   *) return 0 ;;
 esac
 
-export HISTTIMEFORMAT='%F %T '
-export HISTSIZE=10000
-export HISTFILESIZE=50000
-export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
-export HISTCONTROL=ignoredups:ignorespace
-shopt -s histappend
+orangebox_history_guard() {
+  set -o history 2>/dev/null || true
+  HISTSIZE=-1
+  HISTFILESIZE=-1
+  case "${HISTFILE:-}" in
+    ""|/dev/null|/dev/zero) HISTFILE="${HOME}/.bash_history" ;;
+  esac
+  export HISTSIZE HISTFILESIZE HISTFILE
+  HISTCONTROL=
+  export HISTCONTROL
+  unset HISTIGNORE
+  shopt -s histappend
+}
 
-# Fijar el prompt antes de cada indicador: otros perfiles pueden redefinir PS1
-# después de cargar /etc/profile.d. \D muestra la hora y \H el hostname completo.
+export HISTTIMEFORMAT='%F %T '
+orangebox_history_guard
+
+# Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@\H \w #\[\e[0m\] '
@@ -426,26 +493,18 @@ orangebox_set_prompt() {
   fi
 }
 
-# Guardar comandos y preservar PROMPT_COMMAND existente; no duplicar al cargar
-# el perfil desde /etc/profile y /etc/bashrc.
+orangebox_pre_prompt() {
+  orangebox_history_guard
+  history -a
+  orangebox_set_prompt
+}
 case ";${PROMPT_COMMAND:-};" in
-  *";history -a;"*) ;;
+  *";orangebox_pre_prompt;"*) ;;
   *)
     if [ -n "${PROMPT_COMMAND:-}" ]; then
-      PROMPT_COMMAND="history -a; ${PROMPT_COMMAND}"
+      PROMPT_COMMAND="orangebox_pre_prompt; ${PROMPT_COMMAND}"
     else
-      PROMPT_COMMAND="history -a"
-    fi
-    ;;
-esac
-
-case "${PROMPT_COMMAND:-}" in
-  *orangebox_set_prompt*) ;;
-  *)
-    if [ -n "${PROMPT_COMMAND:-}" ]; then
-      PROMPT_COMMAND="${PROMPT_COMMAND%;}; orangebox_set_prompt"
-    else
-      PROMPT_COMMAND="orangebox_set_prompt"
+      PROMPT_COMMAND="orangebox_pre_prompt"
     fi
     ;;
 esac
@@ -453,23 +512,30 @@ export PROMPT_COMMAND
 orangebox_set_prompt
 ORANGEBOX_BASH
 
-  if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
-    ok "Historial y prompt OrangeBox ya están configurados"
+  if [ -f "$target" ] && cmp -s "$tmp" "$target" &&
+     [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
+     [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
+     [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+    ok "Bash History habilitado e ilimitado; prompt OrangeBox ya configurado"
   elif $AUTO_FIX; then
     [ ! -e "$target" ] || backup_once "$target"
     if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
-      ok "Historial con hora y hostname completo; prompt por rol aplicado en $target"
+      ok "Bash History habilitado sin límite y prompt por rol aplicado en $target"
       FIXED=$((FIXED+1))
     else
       warn "No se pudo instalar/verificar $target"
     fi
   else
-    warn "$target requiere aplicarse para configurar HISTTIMEFORMAT y el prompt por rol"
+    warn "$target requiere habilitar Bash History y establecer HISTSIZE/HISTFILESIZE=-1"
   fi
   rm -f "$tmp"
 
-  # CentOS/RHEL también inicia shells interactivos no-login desde /etc/bashrc.
-  # Agrega un único include administrado, preservando el resto de la configuración.
+  # Normalizar también los dotfiles administrados más sensibles sin tocar
+  # aliases, umask, timeout ni el resto de las preferencias existentes.
+  normalize_history_dotfile /root/.bashrc
+  normalize_history_dotfile /etc/skel/.bashrc
+
+  # CentOS/RHEL inicia shells interactivos no-login desde /etc/bashrc.
   local system_bashrc=/etc/bashrc
   if [ -f "$system_bashrc" ] && ! grep -Fq '# OrangeBox Linux Hardening managed shell config' "$system_bashrc"; then
     if $AUTO_FIX; then
@@ -488,6 +554,7 @@ ORANGEBOX_BASH
     fi
   fi
 }
+
 usage() {
   cat <<EOF
 OrangeBox Linux Hardening $SCRIPT_VERSION
