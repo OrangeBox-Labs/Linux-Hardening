@@ -136,7 +136,7 @@ Para ejecución automática y conservadora, sin preguntas:
 
 `--auto` aplica únicamente los controles seguros del baseline (banners/MOTD y Bash: historial con fecha/hora y prompt por rol) y omite controles críticos. Los módulos omitidos se revisan en modo auditoría, sin aplicar cambios.
 
-El banner de login es deliberadamente genérico: no informa el estado de SELinux ni enumera el firewall, herramientas de integridad o mecanismos de detección. El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
+El aviso legal genérico completo se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` muestra un mensaje breve posterior al login para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
 
 El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfiles reemplacen `PS1`. Muestra la hora en formato `HH:MM:SS`, el usuario, el hostname completo y el directorio; root aparece en rojo con `#` y los usuarios normales en verde con `$`.
 
