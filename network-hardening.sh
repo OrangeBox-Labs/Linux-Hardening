@@ -49,7 +49,7 @@ MODULES_TO_DISABLE=(
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
+  echo "  $0            - Auditoría (solo muestra lo que hay que corregir)"
   echo "  $0 --check    - Solo auditoría, no aplica cambios"
   echo "  $0 --fix      - Modo automático (aplica las correcciones)"
   echo "  $0 -f         - Modo automático (versión corta)"
