@@ -1,12 +1,12 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.1 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.2 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # AUDIT by default. --fix applies conservative controls only.
 # SELinux is never changed. cron.allow/at.allow are never created.
 # System-wide crypto-policies are never changed and SSH crypto is audited, not overridden.
 
 set -u
-VERSION=1.3.1
+SCRIPT_VERSION=1.3.2
 AUTO_FIX=false
 MODULE=all
 RUN_ID=$(date +%Y%m%d-%H%M%S)
@@ -39,28 +39,34 @@ SYNFLOOD_FILE=/etc/sysctl.d/99-orangebox-synflood-hardening.conf
 SYNFLOOD_LEGACY_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
 SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
 # 3/5 is deliberately more conservative than the previous 2/2 profile.
-SYNFLOOD_VALUES="1 4096 4096 3 5"
+SYNFLOOD_VALUES=(1 4096 4096 3 5)
 synflood_managed(){ local f="$1"; [ -f "$f" ] && grep -Fqx '# OrangeBox managed SYN flood profile' "$f" && grep -Fqx '# BEGIN ORANGEBOX SYNFLOOD' "$f" && grep -Fqx '# END ORANGEBOX SYNFLOOD' "$f"; }
 synflood_module(){
   echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"; [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }
   local idx=1 key current desired external cfg profile="$SYNFLOOD_FILE"
+  local -A external_configs=()
   [ -e "$SYNFLOOD_FILE" ] && ! synflood_managed "$SYNFLOOD_FILE" && { warn "$SYNFLOOD_FILE no es gestionado por OrangeBox; no se sobrescribe"; return; }
   [ ! -e "$SYNFLOOD_FILE" ] && synflood_managed "$SYNFLOOD_LEGACY_FILE" && profile="$SYNFLOOD_LEGACY_FILE"
   for key in $SYNFLOOD_KEYS; do
-    current=$(sysctl -n "$key" 2>/dev/null||true); desired=$(printf '%s\n' "$SYNFLOOD_VALUES"|awk -v n="$idx" 'NR==n{print}')
+    current=$(sysctl -n "$key" 2>/dev/null||true); desired="${SYNFLOOD_VALUES[$((idx-1))]}"
     [ -n "$current" ] || { warn "$key no existe"; idx=$((idx+1)); continue; }
     external=""
     for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; [ "$cfg" = "$SYNFLOOD_FILE" ] || [ "$cfg" = "$profile" ] && continue; grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg" && { external="$cfg"; break; }; done
-    [ -n "$external" ] && warn "$key definido en $external; se conserva" || { [ "$current" = "$desired" ] && ok "$key=$desired" || warn "$key actual=$current recomendado=$desired"; }
+    if [ -n "$external" ]; then
+      external_configs["$key"]="$external"
+      warn "$key definido en $external; se conserva y no se sobrescribe"
+    else
+      [ "$current" = "$desired" ] && ok "$key=$desired" || warn "$key actual=$current recomendado=$desired"
+    fi
     idx=$((idx+1))
   done
   $AUTO_FIX || return
   backup_once "$SYNFLOOD_FILE"; [ "$profile" = "$SYNFLOOD_FILE" ] || backup_once "$profile"
   local tmp; tmp=$(mktemp "$SYNFLOOD_FILE.XXXXXX") || { warn "No se pudo crear temporal"; return; }
   if [ -e "$profile" ]; then awk '$0=="# BEGIN ORANGEBOX SYNFLOOD"{i=1;next}$0=="# END ORANGEBOX SYNFLOOD"{i=0;next}!i&&$0!="# OrangeBox managed SYN flood profile"{print}' "$profile" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer perfil"; return; }; fi
-  { [ ! -s "$tmp" ] || printf '\n'; echo '# OrangeBox managed SYN flood profile'; echo '# BEGIN ORANGEBOX SYNFLOOD'; idx=1; for key in $SYNFLOOD_KEYS; do desired=$(printf '%s\n' "$SYNFLOOD_VALUES"|awk -v n="$idx" 'NR==n{print}'); echo "$key = $desired"; idx=$((idx+1)); done; echo '# END ORANGEBOX SYNFLOOD'; } >> "$tmp"
+  { [ ! -s "$tmp" ] || printf '\n'; echo '# OrangeBox managed SYN flood profile'; echo '# BEGIN ORANGEBOX SYNFLOOD'; idx=1; for key in $SYNFLOOD_KEYS; do desired="${SYNFLOOD_VALUES[$((idx-1))]}"; if [ -z "${external_configs[$key]:-}" ]; then echo "$key = $desired"; else echo "# Conservado: $key definido en ${external_configs[$key]}"; fi; idx=$((idx+1)); done; echo '# END ORANGEBOX SYNFLOOD'; } >> "$tmp"
   chmod 644 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$SYNFLOOD_FILE" || { rm -f "$tmp"; warn "No se pudo instalar perfil"; return; }; [ "$profile" = "$SYNFLOOD_FILE" ] || rm -f "$profile"
-  idx=1; for key in $SYNFLOOD_KEYS; do desired=$(printf '%s\n' "$SYNFLOOD_VALUES"|awk -v n="$idx" 'NR==n{print}'); if sysctl -w "$key=$desired" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$desired" ]; then FIXED=$((FIXED+1)); else warn "No se pudo aplicar/verificar $key"; fi; idx=$((idx+1)); done
+  idx=1; for key in $SYNFLOOD_KEYS; do desired="${SYNFLOOD_VALUES[$((idx-1))]}"; if [ -n "${external_configs[$key]:-}" ]; then warn "$key no aplicado en runtime: se conserva configuración externa en ${external_configs[$key]}"; elif sysctl -w "$key=$desired" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$desired" ]; then FIXED=$((FIXED+1)); else warn "No se pudo aplicar/verificar $key"; fi; idx=$((idx+1)); done
   ok "SYN flood conservador: syncookies=1 backlog=4096 somaxconn=4096 synack_retries=3 syn_retries=5"
 }
 
@@ -75,7 +81,7 @@ ssh_module(){
     local drop=/etc/ssh/sshd_config.d/49-orangebox-hardening.conf tmp
     if [ -e "$drop" ]; then warn "$drop ya existe; no se sobrescribe para preservar configuración existente"; else
       tmp=$(mktemp "$drop.XXXXXX") || { warn "No se pudo crear SSH temporal"; return; }
-      { echo "# OrangeBox Linux Hardening $VERSION"; echo "IgnoreRhosts yes"; echo "HostbasedAuthentication no"; echo "PermitEmptyPasswords no"; echo "PermitUserEnvironment no"; echo "MaxAuthTries 6"; echo "LoginGraceTime 60"; echo "ClientAliveInterval 300"; echo "ClientAliveCountMax 2"; echo "LogLevel INFO"; } > "$tmp"
+      { echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "IgnoreRhosts yes"; echo "HostbasedAuthentication no"; echo "PermitEmptyPasswords no"; echo "PermitUserEnvironment no"; echo "MaxAuthTries 6"; echo "LoginGraceTime 60"; echo "ClientAliveInterval 300"; echo "ClientAliveCountMax 2"; echo "LogLevel INFO"; } > "$tmp"
       chmod 600 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$drop"
       if sshd -t >/dev/null 2>&1; then ok "sshd -t válido después del hardening"; FIXED=$((FIXED+1)); else bad "sshd -t falló; se elimina el drop-in recién creado"; rm -f "$drop"; fi
     fi
@@ -95,14 +101,236 @@ selinux_module(){ echo -e "\n$BLUE### SELINUX ###$NC"; command -v getenforce >/d
 cron_module(){ echo -e "\n$BLUE### CRON / AT ###$NC"; [ -e /etc/cron.allow ]&&ok "cron.allow existe"||warn "cron.allow no existe; se deja intacto para no romper cPanel"; [ -e /etc/at.allow ]&&ok "at.allow existe"||warn "at.allow no existe; se deja intacto"; }
 usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; warn "USB no se bloquea automáticamente"; }
 services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; warn "No se eliminan servicios automáticamente"; }
-banners_module(){ echo -e "\n$BLUE### BANNER ###$NC"; [ -s /etc/issue.net ]&&ok "issue.net configurado"||warn "issue.net vacío"; if $AUTO_FIX; then backup_once /etc/issue.net; echo 'Sistema de uso autorizado. El acceso no autorizado está prohibido.'>/etc/issue.net; chmod 644 /etc/issue.net; chown root:root /etc/issue.net; FIXED=$((FIXED+1)); fi; }
+configure_ssh_banner() {
+  local main=/etc/ssh/sshd_config current tmp backup
+  echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"
+  [ -f "$main" ] || { warn "$main no existe; no se configura el banner SSH"; return; }
+  command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible; no se puede validar el banner SSH"; return; }
+
+  current="$(sshd -T 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
+  if [ "$current" = "/etc/issue.net" ]; then
+    ok "Banner SSH efectivo apunta a /etc/issue.net"
+    return
+  fi
+  if ! $AUTO_FIX; then
+    warn "Banner SSH efectivo=${current:-no verificable}; recomendado /etc/issue.net"
+    return
+  fi
+
+  backup_once "$main"
+  backup="$BACKUP_DIR$main"
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para sshd_config"; return; }
+  awk '
+    BEGIN { done=0 }
+    /^[[:space:]]*Banner[[:space:]]+/ {
+      if (!done) { print "Banner /etc/issue.net"; done=1 }
+      next
+    }
+    /^[[:space:]]*Match([[:space:]]|$)/ && !done {
+      print "Banner /etc/issue.net"; done=1
+    }
+    { print }
+    END { if (!done) print "Banner /etc/issue.net" }
+  ' "$main" > "$tmp" || { rm -f "$tmp"; warn "No se pudo preparar sshd_config"; return; }
+  chmod --reference="$main" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+  chown --reference="$main" "$tmp" 2>/dev/null || chown root:root "$tmp"
+  mv "$tmp" "$main" || { rm -f "$tmp"; warn "No se pudo instalar sshd_config"; return; }
+
+  current="$(sshd -T 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
+  if sshd -t >/dev/null 2>&1 && [ "$current" = "/etc/issue.net" ]; then
+    if systemctl reload sshd >/dev/null 2>&1; then
+      ok "Banner SSH aplicado y sshd recargado sin cortar sesiones"
+      FIXED=$((FIXED+1))
+    else
+      warn "Banner configurado y sshd -t válido, pero no se pudo recargar sshd; revisar servicio"
+    fi
+  else
+    if [ -f "$backup" ]; then cp -a "$backup" "$main"; fi
+    bad "La configuración SSH no validó el banner; se restauró sshd_config desde el backup"
+  fi
+}
+
+banners_module() {
+  echo -e "\n$BLUE### BANNERS / MOTD ###$NC"
+  local tmp target mode owner group selinux_mode selinux_line
+  selinux_mode="$(command -v getenforce >/dev/null 2>&1 && getenforce 2>/dev/null || echo unknown)"
+  case "$selinux_mode" in
+    Enforcing) selinux_line="SELinux en modo enforcing" ;;
+    Permissive) selinux_line="SELinux en modo permisivo" ;;
+    Disabled) selinux_line="SELinux deshabilitado" ;;
+    *) selinux_line="Estado de SELinux no verificable" ;;
+  esac
+
+  tmp="$(mktemp)" || { warn "No se pudo crear el banner temporal"; return; }
+  cat > "$tmp" <<'ORANGEBOX_BANNER'
+*******************************************************************************
+  ___                         ___
+ / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
+| (_) | '_/ _` | ' \/ _` / -_) _ \/ _ \ \ /
+ \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
+                    |___/
+                         SISTEMA DE ACCESO CONTROLADO
+                        Hardening por: www.orangebox.cl
+*******************************************************************************
+
+Este servidor ha sido endurecido siguiendo estandares de seguridad CIS Benchmark.
+El acceso no autorizado esta estrictamente prohibido.
+
+CUALQUIER INTENTO DE ACCESO NO AUTORIZADO SERA:
+- Registrado y monitoreado
+- Reportado a las autoridades competentes
+- Utilizado con fines legales
+
+AL INGRESAR ACEPTA:
+- Las condiciones de uso del sistema
+- Que su actividad puede ser monitoreada las 24/7
+- Que la informacion obtenida es confidencial
+- Que los intentos no autorizados seran penalizados
+
+Este sistema utiliza:
+- @SELINUX_STATUS@
+- Firewall perimetral
+- Monitoreo de integridad de archivos
+- Deteccion de intrusiones
+
+*******************************************************************************
+ORANGEBOX_BANNER
+  sed -i "s|@SELINUX_STATUS@|$selinux_line|" "$tmp"
+
+  for target in /etc/motd /etc/issue /etc/issue.net; do
+    mode="$(stat -c '%a' "$target" 2>/dev/null || true)"
+    owner="$(stat -c '%U' "$target" 2>/dev/null || true)"
+    group="$(stat -c '%G' "$target" 2>/dev/null || true)"
+    if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "$target ya contiene el banner OrangeBox correcto"
+      continue
+    fi
+    if $AUTO_FIX; then
+      [ ! -e "$target" ] || backup_once "$target"
+      if install -o root -g root -m 644 "$tmp" "$target"; then
+        if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+          ok "Banner aplicado en $target (root:root 0644)"
+          FIXED=$((FIXED+1))
+        else
+          warn "No se pudo verificar completamente $target"
+        fi
+      else
+        warn "No se pudo escribir $target"
+      fi
+    else
+      warn "$target requiere aplicar el banner OrangeBox o corregir sus permisos"
+    fi
+  done
+  rm -f "$tmp"
+  configure_ssh_banner
+}
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
 grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; warn "GRUB no se modifica automáticamente"; }
-firewall_module(){ echo -e "\n$BLUE### FIREWALL ###$NC"; if command -v firewall-cmd >/dev/null 2>&1; then firewall-cmd --state 2>/dev/null|grep -q running&&ok "firewalld activo"||warn "firewalld no activo"; elif command -v nft >/dev/null 2>&1; then nft list ruleset >/dev/null 2>&1&&ok "nftables disponible"||warn "nftables sin ruleset"; else warn "No se detectó firewall"; fi; warn "No se aplican DROP automáticamente"; }
+firewall_module() {
+  echo -e "\n$BLUE### FIREWALL ###$NC"
+  local status rules
+  if command -v shorewall >/dev/null 2>&1; then
+    status="$(systemctl is-active shorewall 2>/dev/null || true)"
+    if [ "$status" = "active" ]; then
+      ok "Shorewall activo (firewall detectado)"
+    else
+      status="$(shorewall status 2>&1 || true)"
+      if printf '%s\n' "$status" | grep -Eiq 'not running|stopped|inactive|is down'; then
+        warn "Shorewall está instalado pero el estado indica que no está activo"
+        printf '%s\n' "$status" | head -n 5
+      elif printf '%s\n' "$status" | grep -Eiq 'running|active|started'; then
+        ok "Shorewall activo (según shorewall status)"
+      else
+        ok "Shorewall detectado; verificar estado con: shorewall status"
+        printf '%s\n' "$status" | head -n 5
+      fi
+    fi
+    if command -v iptables-save >/dev/null 2>&1; then
+      rules="$(iptables-save 2>/dev/null || true)"
+      if printf '%s\n' "$rules" | grep -q '^-A '; then
+        ok "Se detectan reglas de filtrado en iptables"
+      else
+        warn "Shorewall detectado, pero iptables-save no mostró reglas -A; revisar backend y estado de Shorewall"
+      fi
+    elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q .; then
+      ok "Se detectan reglas de filtrado en nftables"
+    else
+      warn "No se pudo inspeccionar el ruleset efectivo; no se modifica el firewall"
+    fi
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then
+    ok "firewalld activo"
+  elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q .; then
+    ok "nftables tiene un ruleset cargado"
+  elif command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null | grep -q '^-A '; then
+    ok "iptables tiene reglas de filtrado cargadas"
+  elif command -v firewall-cmd >/dev/null 2>&1; then
+    warn "firewalld no activo y no se pudo confirmar otro ruleset mediante las comprobaciones básicas"
+  else
+    warn "No se detectó un backend de firewall con ruleset verificable"
+  fi
+  warn "No se aplican reglas DROP automáticamente"
+}
 fapolicyd_module(){ echo -e "\n$BLUE### FAPOLICYD ###$NC"; rpm -q fapolicyd >/dev/null 2>&1&&systemctl is-active fapolicyd >/dev/null 2>&1&&ok "fapolicyd activo"||warn "fapolicyd ausente/inactivo; no se habilita automáticamente"; }
 listening_module(){ echo -e "\n$BLUE### LISTENING SERVICES ###$NC"; command -v ss >/dev/null 2>&1&&ss -lntup 2>/dev/null||true; }
-bash_module(){ echo -e "\n$BLUE### BASH ###$NC"; [ -d /etc/profile.d ]&&ok "/etc/profile.d existe"||warn "/etc/profile.d ausente"; }
-usage(){ echo "OrangeBox Linux Hardening $VERSION"; echo "Uso: $0 [--fix] [--module MODULO]"; echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"; }
+bash_module() {
+  echo -e "\n$BLUE### BASH / HISTORIAL / PROMPT ###$NC"
+  local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp
+  [ -d /etc/profile.d ] || { warn "/etc/profile.d no existe"; return; }
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
+
+  cat > "$tmp" <<'ORANGEBOX_BASH'
+# OrangeBox Linux Hardening - historial y prompt por rol
+# Se aplica solamente a shells interactivos.
+case $- in
+  *i*) ;;
+  *) return 0 ;;
+esac
+
+export HISTTIMEFORMAT='%F %T '
+export HISTSIZE=10000
+export HISTFILESIZE=50000
+export HISTFILE="${HISTFILE:-$HOME/.bash_history}"
+export HISTCONTROL=ignoredups:ignorespace
+shopt -s histappend
+
+# Persistir comandos nuevos sin reemplazar PROMPT_COMMAND preexistente.
+case ";${PROMPT_COMMAND:-};" in
+  *";history -a;"*) ;;
+  *)
+    if [ -n "${PROMPT_COMMAND:-}" ]; then
+      PROMPT_COMMAND="history -a; ${PROMPT_COMMAND}"
+    else
+      PROMPT_COMMAND="history -a"
+    fi
+    ;;
+esac
+export PROMPT_COMMAND
+
+# Hora en gris; root en rojo y usuario normal en verde.
+# La ruta y el terminador siguen el color del rol: # para root, $ para usuarios.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  export PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\h \w #\[\e[0m\] '
+else
+  export PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;32m\]\u@\h \w $\[\e[0m\] '
+fi
+ORANGEBOX_BASH
+
+  if [ -f "$target" ] && cmp -s "$tmp" "$target" && [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] && [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] && [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+    ok "Historial y prompt OrangeBox ya están configurados"
+  elif $AUTO_FIX; then
+    [ ! -e "$target" ] || backup_once "$target"
+    if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
+      ok "Historial con fecha/hora y prompt por rol aplicados en $target"
+      FIXED=$((FIXED+1))
+    else
+      warn "No se pudo instalar/verificar $target"
+    fi
+  else
+    warn "$target requiere aplicarse para configurar HISTTIMEFORMAT y el prompt rojo/verde"
+  fi
+  rm -f "$tmp"
+}
+usage(){ echo "OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "Uso: $0 [--fix] [--module MODULO]"; echo "Módulos: ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash"; }
 run_module(){ case "$1" in ssh)ssh_module;;sudo)sudo_module;;password)password_module;;kernel)kernel_module;;synflood)synflood_module;;filesystem)filesystem_module;;auditd)auditd_module;;rsyslog)rsyslog_module;;selinux)selinux_module;;cron)cron_module;;usb)usb_module;;services)services_module;;banners)banners_module;;time)time_module;;grub)grub_module;;firewall)firewall_module;;fapolicyd)fapolicyd_module;;listening)listening_module;;bash)bash_module;;*)die "Módulo desconocido: $1";;esac; }
 main(){ require_root; while [ $# -gt 0 ]; do case "$1" in --fix|-f)AUTO_FIX=true;;--module|-m)shift;[ $# -gt 0]||die "--module requiere nombre";MODULE=$1;;--help|-h)usage;exit 0;;--list-modules)echo "ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash";exit 0;;*)die "Argumento desconocido: $1";;esac;shift;done; detect_os;prepare_backup; $AUTO_FIX&&warn "MODO FIX: controles conservadores; no se toca SELinux, cron.allow ni PAM de forma destructiva"||ok "MODO AUDITORÍA: sin cambios"; if [ "$MODULE" = all ];then for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash;do run_module "$m";done;else run_module "$MODULE";fi; echo -e "\n$GREEN============================================================$NC";echo -e "$GREEN OrangeBox Linux Hardening $VERSION - FIN $NC";echo "Correcciones: $FIXED";echo "Advertencias: $WARNINGS";echo "Errores: $ERRORS";echo "Backup: $BACKUP_DIR";echo -e "$GREEN============================================================$NC"; }
 main "$@"
