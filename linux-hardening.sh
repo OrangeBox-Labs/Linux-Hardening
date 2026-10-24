@@ -495,33 +495,49 @@ run_companion_module() {
     *) die "Módulo desconocido: $name" ;;
   esac
 
-  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ]; then
-    die "Se bloquea --fix para $name: post-install.sh es para despliegue inicial y contiene cambios incompatibles con un servidor existente, como setenforce 0."
+  local apply_fix="$AUTO_FIX" skip_without_audit=false
+  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ] && [ "$AUTO_MODE" != true ]; then
+    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar SELinux, GRUB y paquetes. Ejecuta el script aparte después de revisar el host."
   fi
-  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ] && [ "$ALLOW_RISKY" != true ]; then
-    die "El módulo '$name' requiere --allow-risky. Conserva el snapshot y una consola de recuperación antes de ejecutarlo."
+
+  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ]; then
+    if [ "$AUTO_MODE" = true ]; then
+      echo
+      echo -e "$YELLOW[--auto] Se omitirá la aplicación de '$name'.$NC"
+      echo "Qué haría: $(risk_description "$name")"
+      apply_fix=false
+    elif ! confirm_risky_change "$name"; then
+      apply_fix=false
+    fi
+    if [ "$apply_fix" != true ] && [ -z "$audit_arg" ] && [ "$audit_only" != true ]; then
+      warn "No se ejecutó '$name': no tiene una ruta de auditoría segura declarada en el orquestador."
+      return 0
+    fi
   fi
+
   if [ ! -f "$SCRIPT_DIR/$script" ]; then
     die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
   fi
-  if [ "$AUTO_FIX" = false ] && [ "$interactive" = true ]; then
-    warn "$name no ofrece auditoría no interactiva; se omite. Para ejecutarlo, selecciona el módulo explícitamente con --fix --allow-risky."
+  if [ "$apply_fix" != true ] && [ "$interactive" = true ]; then
+    warn "$name no ofrece auditoría no interactiva; se omite."
     return 0
   fi
 
   local -a args=()
-  if [ "$AUTO_FIX" = true ]; then
+  if [ "$apply_fix" = true ]; then
     if [ "$audit_only" = true ]; then
       warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
     elif [ "$name" = "network-full" ]; then
-      args=(--fix --allow-shorewall)
+      args=(--fix)
+      if [ "$ALLOW_SHOREWALL" = true ]; then
+        args+=(--allow-shorewall)
+      fi
     elif [ -n "$fix_arg" ]; then
       args=("$fix_arg")
     fi
   elif [ -n "$audit_arg" ]; then
     args=("$audit_arg")
   fi
-
   echo
   echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
   if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
