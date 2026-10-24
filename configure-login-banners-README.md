@@ -40,6 +40,19 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 El texto del banner es deliberadamente generico: no informa el estado de SELinux
 ni enumera el firewall, herramientas de integridad o mecanismos de deteccion.
 
+## Mensaje posterior al login (/etc/motd)
+
+El MOTD es deliberadamente breve, porque se muestra después de autenticarse. El aviso legal completo aparece antes del login en `/etc/issue.net` por SSH y en `/etc/issue` por consola local.
+
+```text
+*******************************************************************************
+                         ORANGEBOX IT SERVICES
+*******************************************************************************
+Sesion iniciada en un sistema administrado por OrangeBox.
+Respete las politicas de uso de la organizacion.
+*******************************************************************************
+```
+
 ## Backup
 
 Los archivos existentes se respaldan en:
