@@ -60,8 +60,12 @@ set_sysctl(){
     ok "$key=$value (runtime y persistente)"
     return
   fi
-  warn "$key actual=$current persistencia=${configured:-no definida} recomendado=$value"
-  [ "$AUTO_FIX" = true ] || return
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "$BLUE[INFO]$NC $key actual=$current persistencia=${configured:-no definida}; se aplicará=$value"
+  else
+    warn "$key actual=$current persistencia=${configured:-no definida} recomendado=$value"
+    return
+  fi
 
   mkdir -p /etc/sysctl.d || { warn "No se pudo crear /etc/sysctl.d"; return; }
   backup_once "$file"
@@ -143,6 +147,8 @@ synflood_module(){
       warn "$key definido en $external; se conservará el archivo y se aplicará el valor del perfil OrangeBox"
     elif [ "$current" = "$desired" ]; then
       ok "$key=$desired (runtime correcto)"
+    elif [ "$AUTO_FIX" = true ]; then
+      echo -e "$BLUE[INFO]$NC $key actual=$current; se aplicará=$desired"
     else
       warn "$key actual=$current recomendado=$desired"
     fi
