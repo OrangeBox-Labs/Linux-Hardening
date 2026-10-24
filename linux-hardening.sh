@@ -115,7 +115,7 @@ synflood_module(){
     current=$(sysctl -n "$key" 2>/dev/null||true); desired="${SYNFLOOD_VALUES[$((idx-1))]}"
     [ -n "$current" ] || { warn "$key no existe"; idx=$((idx+1)); continue; }
     external=""
-    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; if [ "$cfg" = "$SYNFLOOD_FILE" ] || [ "$cfg" = "$profile" ]; then continue; fi; grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg" && { external="$cfg"; break; }; done
+    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do [ -f "$cfg" ] || continue; if [ "$cfg" = "$SYNFLOOD_FILE" ] || [ "$cfg" = "$profile" ]; then continue; fi; if { [ "$cfg" = "$SYNFLOOD_OLD_FILE" ] || [ "$cfg" = "$SYNFLOOD_LEGACY_FILE" ]; } && synflood_managed "$cfg"; then continue; fi; grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg" && { external="$cfg"; break; }; done
     if [ -n "$external" ]; then
       external_configs["$key"]="$external"
       warn "$key definido en $external; se conserva y no se sobrescribe"
@@ -129,7 +129,7 @@ synflood_module(){
   local tmp; tmp=$(mktemp "$SYNFLOOD_FILE.XXXXXX") || { warn "No se pudo crear temporal"; return; }
   if [ -e "$profile" ]; then awk '$0=="# BEGIN ORANGEBOX SYNFLOOD"{i=1;next}$0=="# END ORANGEBOX SYNFLOOD"{i=0;next}!i&&$0!="# OrangeBox managed SYN flood profile"{print}' "$profile" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer perfil"; return; }; fi
   { [ ! -s "$tmp" ] || printf '\n'; echo '# OrangeBox managed SYN flood profile'; echo '# BEGIN ORANGEBOX SYNFLOOD'; idx=1; for key in $SYNFLOOD_KEYS; do desired="${SYNFLOOD_VALUES[$((idx-1))]}"; if [ -z "${external_configs[$key]:-}" ]; then echo "$key = $desired"; else echo "# Conservado: $key definido en ${external_configs[$key]}"; fi; idx=$((idx+1)); done; echo '# END ORANGEBOX SYNFLOOD'; } >> "$tmp"
-  chmod 644 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$SYNFLOOD_FILE" || { rm -f "$tmp"; warn "No se pudo instalar perfil"; return; }; [ "$profile" = "$SYNFLOOD_FILE" ] || rm -f "$profile"
+  chmod 644 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$SYNFLOOD_FILE" || { rm -f "$tmp"; warn "No se pudo instalar perfil"; return; }; [ "$profile" = "$SYNFLOOD_FILE" ] || rm -f "$profile"; if [ "$profile" != "$SYNFLOOD_OLD_FILE" ] && synflood_managed "$SYNFLOOD_OLD_FILE"; then backup_once "$SYNFLOOD_OLD_FILE"; rm -f "$SYNFLOOD_OLD_FILE"; fi; if [ "$profile" != "$SYNFLOOD_LEGACY_FILE" ] && synflood_managed "$SYNFLOOD_LEGACY_FILE"; then backup_once "$SYNFLOOD_LEGACY_FILE"; rm -f "$SYNFLOOD_LEGACY_FILE"; fi
   idx=1; for key in $SYNFLOOD_KEYS; do desired="${SYNFLOOD_VALUES[$((idx-1))]}"; if [ -n "${external_configs[$key]:-}" ]; then warn "$key no aplicado en runtime: se conserva configuración externa en ${external_configs[$key]}"; elif sysctl -w "$key=$desired" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$desired" ]; then FIXED=$((FIXED+1)); else warn "No se pudo aplicar/verificar $key"; fi; idx=$((idx+1)); done
   ok "SYN flood conservador: syncookies=1 backlog=4096 somaxconn=4096 synack_retries=3 syn_retries=5"
 }
@@ -562,7 +562,7 @@ OrangeBox Linux Hardening $SCRIPT_VERSION
 Uso:
   $0                                Auditoría del baseline interno
   $0 --fix                          Modo interactivo: explica los riesgos y pregunta
-  $0 --fix --auto                   Aplica solo controles seguros, sin preguntas
+  $0 --fix --auto                   Aplica banners/Bash y baseline sysctl de kernel/red/SYN flood; audita el resto
   $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
   $0 --fix --module bash            Historial con fecha/hora y prompt por rol
