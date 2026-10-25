@@ -32,11 +32,11 @@ grep -Fq '[s/N]' "$SYSCTL_SAFE" || fail "sysctl-safe no usa la confirmación est
 grep -Fq '[s/N]' "$NETWORK" || fail "network-hardening no usa la confirmación estándar [s/N]"
 grep -Fq '[s/N]' "$POST_INSTALL_SCRIPT" || fail "post-install no usa la confirmación estándar [s/N]"
 grep -Fq 'sysctl_safe_log()' "$SYSCTL_SAFE" || fail "sysctl-safe no centraliza los colores de estado"
-for script in "$SYSCTL_SAFE" "$NETWORK" "$POST_INSTALL_SCRIPT"; do
-  if grep -Fq '[y/N]' "$script" || grep -Fq '(s/n)' "$script" || grep -Fq '(s/N)' "$script"; then
-    fail "$(basename "$script") conserva un formato de confirmación antiguo; usar [s/N]"
-  fi
-done
+legacy_prompts="$(find "$ROOT_DIR" -type f -name '*.sh' ! -path "$ROOT_DIR/tests/*" -print0 | xargs -0 grep -n -F -e '[y/N]' -e '[Y/n]' -e '[Y/N]' -e '[y/n]' -e '(s/n)' -e '(s/N)' 2>/dev/null || true)"
+if [ -n "$legacy_prompts" ]; then
+  printf '%s\n' "$legacy_prompts" >&2
+  fail "quedan prompts con formatos antiguos; usar [s/N]"
+fi
 pass "confirmaciones estandarizadas en español y estados SYSCTL coloreados"
 
 # Password aging must be observed but never rewritten by either baseline.
