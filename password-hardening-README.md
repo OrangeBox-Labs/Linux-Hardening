@@ -23,6 +23,10 @@ Les dejo un video que hicimos de como funcionan los ataques por fuerza bruta y c
 *Haz clic en la imagen para ver el video en YouTube*
 
 
+## Política operacional OrangeBox
+
+`PASS_MAX_DAYS` se conserva exactamente como está. Este repositorio no cambia ese parámetro ni ejecuta cambios masivos de expiración de contraseñas, porque una política de expiración inesperada puede interrumpir el acceso operativo.
+
 ## Que hace este script
 
 ### CIS 5.4.1 - Requisitos de creacion de contraseñas (pwquality.conf)

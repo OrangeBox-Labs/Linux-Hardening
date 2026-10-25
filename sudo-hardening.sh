@@ -126,9 +126,67 @@ check_sudo_installed() {
 # ==============================================
 # 5.2.2 - ENSURE SUDO COMMANDS USE PTY
 # ==============================================
+cpanel_host_detected() {
+  [ -d /usr/local/cpanel ] || [ -f /etc/cpanel/cpanel.config ] || command -v whmapi1 >/dev/null 2>&1
+}
+
 check_sudo_pty() {
   echo -e "\n${BLUE}[*] CIS 5.2.2 - Verificando uso de pseudo-terminal (pty) en sudo...${NC}"
-  check_sudoers_config "Defaults.*use_pty" "sudo usa pseudo-terminal (pty)" "Defaults use_pty"
+
+  if cpanel_host_detected; then
+    if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' "$SUDOERS_FILE" "$SUDOERS_D_DIR" 2>/dev/null; then
+      echo -e "${YELLOW}[!] cPanel detectado y use_pty ya está configurado; puede afectar funcionalidades. No se modifica automáticamente.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    else
+      echo -e "${BLUE}[i] cPanel detectado: se omite use_pty porque puede romper funcionalidades/automatizaciones del hosting.${NC}"
+    fi
+    return 0
+  fi
+
+  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' "$SUDOERS_FILE" "$SUDOERS_D_DIR" 2>/dev/null; then
+    echo -e "${GREEN}[✓] sudo usa pseudo-terminal (pty)${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}[!] sudo no tiene Defaults use_pty configurado${NC}"
+  if [ "$AUTO_FIX" != true ]; then
+    WARNINGS=$((WARNINGS + 1))
+    echo -e "${BLUE}    La aplicación requiere confirmación interactiva; no se recomienda aplicar a cPanel.${NC}"
+    return 1
+  fi
+
+  if [ ! -r /dev/tty ]; then
+    echo -e "${YELLOW}[!] No hay terminal para confirmar; use_pty no se modificará.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  local answer
+  read -r -p "¿Habilitar Defaults use_pty? Puede afectar automatizaciones sin TTY. [s/N]: " answer </dev/tty
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) ;;
+    *) echo -e "${YELLOW}[i] use_pty no confirmado; se conserva la configuración actual.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1 ;;
+  esac
+
+  printf '%s\n' 'Defaults use_pty' >> "$SUDOERS_FILE" || {
+    echo -e "${RED}[!] No se pudo escribir en $SUDOERS_FILE${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  if visudo -c >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] Configuracion agregada y validada: Defaults use_pty${NC}"
+    FIXED=$((FIXED + 1))
+    return 0
+  fi
+
+  if [ -f "$BACKUP_DIR/sudoers" ]; then
+    cp "$BACKUP_DIR/sudoers" "$SUDOERS_FILE"
+    echo -e "${YELLOW}[!] Sintaxis no valida; se restauró el backup de sudoers${NC}"
+  else
+    sed -i '$d' "$SUDOERS_FILE"
+  fi
+  WARNINGS=$((WARNINGS + 1))
+  return 1
 }
 
 # ==============================================

@@ -58,8 +58,10 @@ pwquality_module(){
 password_aging_module(){
   echo -e "\n$BLUE### PASSWORD AGING ###$NC"
   [ -f "$LOGIN_DEFS" ] || { warn "$LOGIN_DEFS no existe"; return; }
-  # -1 disables the maximum-age restriction in login.defs. This affects defaults for new accounts.
-  set_conf_value "$LOGIN_DEFS" PASS_MAX_DAYS -1
+  # PASS_MAX_DAYS is intentionally preserved: changing password aging can cause operational lockouts.
+  local current_max
+  current_max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' "$LOGIN_DEFS")
+  info "PASS_MAX_DAYS=${current_max:-no definido} se conserva sin cambios por política operacional."
   set_conf_value "$LOGIN_DEFS" PASS_MIN_DAYS 0
   set_conf_value "$LOGIN_DEFS" PASS_WARN_AGE -1
   info "login.defs solo define defaults; no cambia el aging de cuentas existentes. Se auditan abajo y no se ejecuta chage masivo automáticamente."
