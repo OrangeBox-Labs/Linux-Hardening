@@ -20,7 +20,7 @@ FIXED=0
 WARNINGS=0
 ERRORS=0
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-ok(){ echo -e "$GREEN[OK]$NC $*"; }; warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
+ok(){ echo -e "$GREEN[OK]$NC $*"; }; info(){ echo -e "$BLUE[INFO]$NC $*"; }; warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
 detect_os(){
   [ -r /etc/os-release ] || die "Falta /etc/os-release"; . /etc/os-release
@@ -236,7 +236,7 @@ ssh_module(){
       warn "No se cumplen las condiciones para instalar el drop-in SSH; no se modifica sshd_config automáticamente"
     fi
   fi
-  warn "No se fuerza PasswordAuthentication, PubkeyAuthentication, PermitRootLogin, AllowUsers/AllowGroups, forwarding, GSSAPI/Kerberos ni crypto algorithms: esos cambios requieren inventario de clientes/integraciones para no romper accesos."
+  info "No se fuerzan PasswordAuthentication, PubkeyAuthentication, PermitRootLogin, AllowUsers/AllowGroups, forwarding, GSSAPI/Kerberos ni algoritmos criptográficos sin inventario de clientes e integraciones."
 }
 
 sudo_module(){ echo -e "\n$BLUE### SUDO ###$NC"; command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }; visudo -cf /etc/sudoers >/dev/null 2>&1&&ok "sudoers válido"||bad "sudoers inválido"; grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty' /etc/sudoers /etc/sudoers.d 2>/dev/null&&ok "use_pty habilitado"||{ warn "use_pty no configurado"; if $AUTO_FIX; then local f=/etc/sudoers.d/99-orangebox-hardening; echo 'Defaults use_pty'>"$f"; chmod 440 "$f"; chown root:root "$f"; visudo -cf "$f" >/dev/null 2>&1&&{ ok "use_pty habilitado"; FIXED=$((FIXED+1)); }||rm -f "$f"; fi; }
@@ -374,8 +374,8 @@ rsyslog_module(){
 
 selinux_module(){ echo -e "\n$BLUE### SELINUX ###$NC"; command -v getenforce >/dev/null 2>&1||{ warn "SELinux no disponible"; return; }; local mode; mode=$(getenforce); [ "$mode" = Enforcing ]&&ok "SELinux Enforcing"||warn "SELinux=$mode; NO se modifica por política OrangeBox"; }
 cron_module(){ echo -e "\n$BLUE### CRON / AT ###$NC"; [ -e /etc/cron.allow ]&&ok "cron.allow existe"||warn "cron.allow no existe; se deja intacto para no romper cPanel"; [ -e /etc/at.allow ]&&ok "at.allow existe"||warn "at.allow no existe; se deja intacto"; }
-usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; warn "USB no se bloquea automáticamente"; }
-services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; warn "No se eliminan servicios automáticamente"; }
+usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; info "USB no se bloquea automáticamente; requiere decisión explícita de política"; }
+services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; info "No se eliminan servicios automáticamente; revisar los servicios legacy detectados si los hubiera"; }
 configure_ssh_banner() {
   local main=/etc/ssh/sshd_config current tmp backup reload_ok=0
   echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"
@@ -515,7 +515,7 @@ ORANGEBOX_MOTD
   configure_ssh_banner
 }
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
-grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; warn "GRUB no se modifica automáticamente"; }
+grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"; }
 firewall_module() {
   echo -e "\n$BLUE### FIREWALL ###$NC"
   local status rules
@@ -558,7 +558,7 @@ firewall_module() {
   else
     warn "No se detectó un backend de firewall con ruleset verificable"
   fi
-  warn "No se aplican reglas DROP automáticamente"
+  info "No se aplican reglas DROP automáticamente; el firewall debe revisarse y modificarse por separado"
 }
 fapolicyd_module(){ echo -e "\n$BLUE### FAPOLICYD ###$NC"; rpm -q fapolicyd >/dev/null 2>&1&&systemctl is-active fapolicyd >/dev/null 2>&1&&ok "fapolicyd activo"||warn "fapolicyd ausente/inactivo; no se habilita automáticamente"; }
 listening_module(){ echo -e "\n$BLUE### LISTENING SERVICES ###$NC"; command -v ss >/dev/null 2>&1&&ss -lntup 2>/dev/null||true; }
