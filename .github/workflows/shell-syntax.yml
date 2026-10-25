@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "*.sh"
+      - "**/*.sh"
       - ".github/workflows/shell-syntax.yml"
   pull_request:
     paths:
       - "*.sh"
+      - "**/*.sh"
       - ".github/workflows/shell-syntax.yml"
 
 jobs:
