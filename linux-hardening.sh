@@ -102,13 +102,17 @@ sudo_module() {
   command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }
   visudo -cf /etc/sudoers >/dev/null 2>&1 && ok "sudoers válido" || bad "sudoers inválido"
 
-  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
-    ok "use_pty habilitado"
+  if cpanel_host_detected; then
+    if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
+      warn "cPanel detectado y use_pty ya está configurado; puede afectar funcionalidades/automatizaciones. No se modifica automáticamente."
+    else
+      info "cPanel detectado: por política OrangeBox no se activa use_pty, ya que puede romper funcionalidades o automatizaciones del hosting."
+    fi
     return
   fi
 
-  if cpanel_host_detected; then
-    info "cPanel detectado: por política OrangeBox no se activa use_pty, ya que puede romper funcionalidades o automatizaciones del hosting."
+  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
+    ok "use_pty habilitado"
     return
   fi
 
