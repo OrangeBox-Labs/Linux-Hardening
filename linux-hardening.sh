@@ -39,7 +39,7 @@ detect_os(){
 prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
 set_sysctl(){
-  local key="$1" value="$2" file=/etc/sysctl.d/99zz-orangebox-hardening.conf
+  local key="$1" value="$2" file=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
   if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
@@ -47,29 +47,17 @@ set_sysctl(){
   fi
 }
 
-SYNFLOOD_FILE=/etc/sysctl.d/99zz-orangebox-synflood-hardening.conf
+SYNFLOOD_FILE=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
 SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
 SYNFLOOD_VALUES=(1 4096 4096 3 5)
-synflood_managed(){
-  local f="$1"
-  [ -f "$f" ] &&
-    grep -Fqx '# OrangeBox managed SYN flood profile' "$f" &&
-    grep -Fqx '# BEGIN ORANGEBOX SYNFLOOD' "$f" &&
-    grep -Fqx '# END ORANGEBOX SYNFLOOD' "$f"
-}
 synflood_module(){
-  echo -e "\\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
+  echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
   [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }
-
-  if [ -e "$SYNFLOOD_FILE" ] && ! synflood_managed "$SYNFLOOD_FILE"; then
-    warn "$SYNFLOOD_FILE existe y no es un perfil gestionado por OrangeBox; no se sobrescribe"
-    return
-  fi
 
   local idx=0 key desired
   for key in $SYNFLOOD_KEYS; do
     desired="${SYNFLOOD_VALUES[$idx]}"
-    if sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" "$AUTO_FIX" "# BEGIN ORANGEBOX SYNFLOOD" "# END ORANGEBOX SYNFLOOD"; then
+    if sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
       [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
     else
       WARNINGS=$((WARNINGS+1))
