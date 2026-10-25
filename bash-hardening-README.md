@@ -102,7 +102,7 @@ sudo ./bash-hardening.sh
 - Activa HISTTIMEFORMAT para historial con fecha/hora
 - Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
 - Establece umask segura (027)
-- Hace el historial inmutable con readonly HISTFILE
+- Mantiene el historial habilitado y sin límite de líneas; no marca `HISTFILE` como `readonly` para no romper su configuración
 
 ### 2. Alias Avanzados (/etc/profile.d/aliases.sh)
 
@@ -191,7 +191,7 @@ bash-hardening.sh
 | /root/.bashrc | Configuración específica para root |
 | /etc/skel/.bashrc | Configuración para nuevos usuarios |
 | /etc/rsyslog.d/30-bash.conf | Configuración de logging |
-| /var/log/bash_history/ | Directorio de historiales por usuario |
+| `$HOME/.bash_history` | Historial individual por usuario, protegido con permisos `0600` |
 | /var/log/bash_commands.log | Log de comandos ejecutados |
 
 ## Personalización
@@ -214,8 +214,7 @@ Para usuario root: TMOUT=600 (10 minutos)
 
 ### Tamaños de historial
 
-Usuarios regulares: HISTSIZE=10000, HISTFILESIZE=50000
-Usuario root: HISTSIZE=20000, HISTFILESIZE=100000
+Todos los usuarios: `HISTSIZE=-1`, `HISTFILESIZE=-1` (sin límite de líneas). El archivo puede crecer indefinidamente; conviene definir una política de retención/rotación si se necesita limitar el uso de disco.
 
 ## Solución de Problemas
 
