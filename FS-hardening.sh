@@ -5,8 +5,9 @@
 # Autor: Felipe Roman
 # Web: https://www.orangebox.cl
 # Email: froman@orangebox.cl
-# Descripcion: Hardening de sistema de archivos segun CIS Benchmark
+# Descripcion: Hardening operativo del sistema de archivos (perfil OrangeBox)
 #              - Verifica particiones separadas criticas
+#              - No calcula cumplimiento CIS; eso corresponde a cis-benchmark-check.sh
 #              - Configura opciones de montaje seguras
 #              - Deshabilita modulos de filesystem inseguros
 #              - Aplica sticky bit
@@ -66,7 +67,7 @@ declare -A MOUNT_REQUIREMENTS=(
   ["/tmp"]="noexec,nosuid,nodev"
   ["/opt"]="nosuid,nodev"
   ["/boot"]="nodev,nosuid,noexec"
-  ["/home"]="noexec,nosuid,nodev"
+  ["/home"]="nosuid,nodev"
   ["/var/log"]="noexec,nosuid,nodev"
   ["/var/tmp"]="noexec,nosuid,nodev"
   ["/var/log/audit"]="noexec,nosuid,nodev"
@@ -484,7 +485,7 @@ show_summary() {
 # ==============================================
 main() {
   echo -e "${GREEN}============================================${NC}"
-  echo -e "${GREEN}  Hardening de Filesystem - CIS Benchmark${NC}"
+  echo -e "${GREEN}  Hardening de Filesystem - perfil OrangeBox${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
