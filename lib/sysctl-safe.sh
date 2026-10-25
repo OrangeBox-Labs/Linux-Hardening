@@ -10,14 +10,14 @@ SYSCTL_SAFE_CHANGED=false
 sysctl_safe_log() {
   local level="$1"
   shift
-  local color reset="${NC:-$'\\033[0m'}"
+  local color reset="${NC:-$'\033[0m'}"
   case "$level" in
-    OK) color="${GREEN:-$'\\033[0;32m'}" ;;
-    ERROR) color="${RED:-$'\\033[0;31m'}" ;;
-    INFO|CAMBIO\ PROPUESTO) color="${BLUE:-$'\\033[0;34m'}" ;;
-    *) color="${YELLOW:-$'\\033[0;33m'}" ;;
+    OK) color="${GREEN:-$'\033[0;32m'}" ;;
+    ERROR) color="${RED:-$'\033[0;31m'}" ;;
+    INFO|CAMBIO\ PROPUESTO) color="${BLUE:-$'\033[0;34m'}" ;;
+    *) color="${YELLOW:-$'\033[0;33m'}" ;;
   esac
-  printf '%b[SYSCTL][%s]%b %s\\n' "$color" "$level" "$reset" "$*"
+  printf '%b[SYSCTL][%s]%b %s\n' "$color" "$level" "$reset" "$*"
 }
 
 sysctl_safe_description() {
