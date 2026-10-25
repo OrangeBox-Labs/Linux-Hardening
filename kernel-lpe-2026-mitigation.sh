@@ -42,7 +42,7 @@ else
 fi
 
 STATE_DIR="/var/lib/orangebox/kernel-lpe-2026"
-SYSCTL_FILE="/etc/sysctl.d/99-orangebox-kernel-lpe-2026.conf"
+SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
 MODPROBE_FILE="/etc/modprobe.d/orangebox-kernel-lpe-2026.conf"
 BACKUP_DIR="$STATE_DIR/backups"
 
