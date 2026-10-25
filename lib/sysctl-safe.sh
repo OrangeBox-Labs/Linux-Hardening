@@ -36,6 +36,7 @@ sysctl_safe_description() {
 }
 
 # Emits filepath|line|value for all active exact-key definitions.
+# Accepts both "key = value" and "key value" syntax, and slash/dot key notation.
 sysctl_safe_inventory() {
   local key="$1" file
   for file in /etc/sysctl.conf /etc/sysctl.d/*.conf /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf; do
@@ -49,10 +50,19 @@ sysctl_safe_inventory() {
         if (line ~ /^[ \t]*#/) next
         sub(/[ \t]*#.*/, "", line)
         eq=index(line, "=")
-        if (!eq) next
-        lhs=trim(substr(line, 1, eq-1))
+        if (eq) {
+          lhs=trim(substr(line, 1, eq-1))
+          rhs=trim(substr(line, eq+1))
+        } else {
+          line=trim(line)
+          if (line !~ /^[^ \t]+[ \t]+[^ \t]/) next
+          lhs=line
+          sub(/[ \t].*$/, "", lhs)
+          rhs=line
+          sub(/^[^ \t]+[ \t]+/, "", rhs)
+          rhs=trim(rhs)
+        }
         gsub(/\//, ".", lhs)
-        rhs=trim(substr(line, eq+1))
         if (lhs == key && rhs != "") printf "%s|%d|%s\n", path, FNR, rhs
       }
     ' "$file" 2>/dev/null
@@ -88,10 +98,17 @@ sysctl_safe_write_profile() {
         function trim(s) {
           sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s
         }
-        function haskey(line, eq, lhs) {
+        function haskey(line, eq, lhs, rest) {
           if (line ~ /^[ \t]*#/) return 0
-          eq=index(line, "="); if (!eq) return 0
-          lhs=trim(substr(line, 1, eq-1)); gsub(/\//, ".", lhs)
+          eq=index(line, "=")
+          if (eq) lhs=trim(substr(line, 1, eq-1))
+          else {
+            line=trim(line)
+            if (line !~ /^[^ \t]+[ \t]+[^ \t]/) return 0
+            lhs=line
+            sub(/[ \t].*$/, "", lhs)
+          }
+          gsub(/\//, ".", lhs)
           return lhs == key
         }
         $0 == begin { inside=1; print; next }
@@ -111,8 +128,15 @@ sysctl_safe_write_profile() {
         inside {
           line=$0
           if (line ~ /^[ \t]*#/) next
-          eq=index(line, "="); if (!eq) next
-          lhs=substr(line,1,eq-1)
+          eq=index(line, "=")
+          if (eq) lhs=substr(line,1,eq-1)
+          else {
+            line2=line
+            if (line2 !~ /^[ \t]*[^ \t]+[ \t]+[^ \t]/) next
+            sub(/^[ \t]+/, "", line2)
+            lhs=line2
+            sub(/[ \t].*$/, "", lhs)
+          }
           gsub(/^[ \t]+|[ \t]+$/, "", lhs); gsub(/\//, ".", lhs)
           if (lhs==key) found=1
         }
@@ -133,8 +157,15 @@ sysctl_safe_write_profile() {
         }
         function haskey(line, eq, lhs) {
           if (line ~ /^[ \t]*#/) return 0
-          eq=index(line, "="); if (!eq) return 0
-          lhs=trim(substr(line, 1, eq-1)); gsub(/\//, ".", lhs)
+          eq=index(line, "=")
+          if (eq) lhs=trim(substr(line, 1, eq-1))
+          else {
+            line=trim(line)
+            if (line !~ /^[^ \t]+[ \t]+[^ \t]/) return 0
+            lhs=line
+            sub(/[ \t].*$/, "", lhs)
+          }
+          gsub(/\//, ".", lhs)
           return lhs == key
         }
         haskey($0) { if (!written) { print key " = " value; written=1 } ; next }
@@ -155,7 +186,7 @@ sysctl_safe_write_profile() {
 # Return 0 when already correct or applied; 1 when skipped or failed.
 sysctl_safe_apply() {
   local key="$1" expected="$2" supplied_desc="$3" target="$4" backup_dir="$5" fix_mode="$6" begin="$7" end="$8"
-  local current defs any_defs=false conflict=false cfg_file cfg_line cfg_value answer desc need_persist=false
+  local current defs any_defs=false conflict=false sysctl_conf_conflict=false cfg_file cfg_line cfg_value answer desc need_persist=false target_value legacy_target
   SYSCTL_SAFE_CHANGED=false
   current="$(sysctl -n "$key" 2>/dev/null || true)"
   if [ -z "$current" ]; then echo "[SYSCTL][WARN] $key no está disponible en este kernel; no se aplica."; return 1; fi
@@ -167,7 +198,10 @@ sysctl_safe_apply() {
     any_defs=true
     while IFS='|' read -r cfg_file cfg_line cfg_value; do
       [ -n "$cfg_value" ] || continue
-      [ "$cfg_value" = "$expected" ] || conflict=true
+      if [ "$cfg_value" != "$expected" ]; then
+        conflict=true
+        [ "$cfg_file" = "/etc/sysctl.conf" ] && sysctl_conf_conflict=true
+      fi
     done <<< "$defs"
   fi
 
@@ -176,13 +210,24 @@ sysctl_safe_apply() {
     echo "[SYSCTL][CONFLICTO] $key ya tiene definiciones persistentes diferentes."
     echo "  Qué cambia: $desc"
     echo "  Valor activo: $current | Valor propuesto: $expected"
-    echo "  Definiciones detectadas (los archivos existentes no se modifican):"
+    echo "  Definiciones detectadas (los archivos existentes no se modifican salvo /etc/sysctl.conf si se confirma):"
     while IFS='|' read -r cfg_file cfg_line cfg_value; do
       [ -n "$cfg_value" ] && printf '    - %s:%s = %s\n' "$cfg_file" "$cfg_line" "$cfg_value"
     done <<< "$defs"
+
+    target_value="$(sysctl_safe_inventory "$key" | awk -F'|' -v target="$target" '$1==target {value=$3} END {print value}')"
+    if [ "$current" = "$expected" ] && [ "$target_value" = "$expected" ] && [ "$sysctl_conf_conflict" != true ]; then
+      echo "[SYSCTL][OK] $key=$expected ya está aplicado mediante el override $target; las definiciones anteriores se conservan y no se vuelve a preguntar."
+      return 0
+    fi
+
     if [ "$fix_mode" != true ]; then echo "[SYSCTL][WARN] Auditoría: se conserva la configuración actual."; return 1; fi
     if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then echo "[SYSCTL][WARN] No hay terminal interactiva; se omite $key por seguridad."; return 1; fi
-    printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [y/N] ' "$key" "$expected" "$target" > /dev/tty
+    if [ "$sysctl_conf_conflict" = true ]; then
+      printf '¿Confirmas aplicar %s=%s, crear el override en %s y actualizar solo las asignaciones conflictivas de /etc/sysctl.conf? [y/N] ' "$key" "$expected" "$target" > /dev/tty
+    else
+      printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [y/N] ' "$key" "$expected" "$target" > /dev/tty
+    fi
     IFS= read -r answer < /dev/tty || answer=""
     case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) echo "[SYSCTL][OMITIDO] No se modificó $key."; return 1 ;; esac
     need_persist=true
@@ -220,6 +265,14 @@ sysctl_safe_apply() {
     fi
     SYSCTL_SAFE_CHANGED=true
     echo "[SYSCTL][OK] Persistencia de $key=$expected escrita en $target; las otras definiciones quedan intactas."
+    if [ "$sysctl_conf_conflict" = true ]; then
+      legacy_target="$(readlink -f /etc/sysctl.conf 2>/dev/null || echo /etc/sysctl.conf)"
+      if ! sysctl_safe_write_profile "$key" "$expected" "$legacy_target" "$backup_dir" "" ""; then
+        echo "[SYSCTL][WARN] Se escribió $target, pero no se pudo reconciliar la asignación conflictiva de /etc/sysctl.conf ($legacy_target)."
+        return 1
+      fi
+      echo "[SYSCTL][OK] Asignación conflictiva de $key actualizada en $legacy_target tras la confirmación."
+    fi
   fi
   if [ "$current" != "$expected" ]; then
     if sysctl -w "$key=$expected" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null || true)" = "$expected" ]; then
