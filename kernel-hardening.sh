@@ -9,6 +9,15 @@
 # ==============================================
 
 # Colores para output
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$SCRIPT_DIR/lib/sysctl-safe.sh" ]; then
+  # shellcheck source=lib/sysctl-safe.sh
+  source "$SCRIPT_DIR/lib/sysctl-safe.sh"
+else
+  echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -42,37 +51,12 @@ show_usage() {
 # FUNCION PARA VERIFICAR O AGREGAR PARAMETRO SYSCTL
 # ==============================================
 check_sysctl_param() {
-  local param="$1"
-  local expected="$2"
-  local description="$3"
+  local param="$1" expected="$2" description="$3"
   local SYSCTL_FILE="/etc/sysctl.d/99-cis-hardening.conf"
-
-  local current=$(sysctl -n "$param" 2>/dev/null)
-
-  if [ -z "$current" ]; then
-    echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      [ ! -f "$SYSCTL_FILE" ] && echo "# Kernel Hardening - $(date)" >"$SYSCTL_FILE"
-      echo "$param = $expected" >>"$SYSCTL_FILE"
-      sysctl -w "$param=$expected" >/dev/null
-      echo -e "${GREEN}[✓] $description configurado: $expected${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  elif [ "$current" = "$expected" ]; then
-    echo -e "${GREEN}[✓] $description: $current${NC}"
+  if sysctl_safe_apply "$param" "$expected" "$description" "$SYSCTL_FILE" "/var/backups/orangebox-kernel-hardening" "$AUTO_FIX" "" ""; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
   else
-    echo -e "${RED}[!] $description: $current (debe ser $expected)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i "s/^$param.*/$param = $expected/" "$SYSCTL_FILE" 2>/dev/null
-      echo "$param = $expected" >>"$SYSCTL_FILE"
-      sysctl -w "$param=$expected" >/dev/null
-      echo -e "${GREEN}[✓] $description corregido: $expected${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
