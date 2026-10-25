@@ -225,8 +225,8 @@ Abrir una nueva sesión interactiva o aplicar manualmente:
 
 ```bash
 set -o emacs
-bind '\"\\C-a\": beginning-of-line'
-bind '\"\\C-e\": end-of-line'
+bind '"\C-a": beginning-of-line'
+bind '"\C-e": end-of-line'
 source /etc/profile.d/orangebox.sh
 source /etc/profile.d/aliases.sh
 source ~/.bashrc
