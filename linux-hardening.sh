@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.3 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.4 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.3
+SCRIPT_VERSION=1.4.4
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -100,19 +100,120 @@ synflood_state_compliant() {
   return 0
 }
 ssh_effective(){ sshd -T 2>/dev/null|awk -v k="$1" '$1==k{$1="";sub(/^ /,"");print;exit}'; }
+
+# SSH settings that the generic baseline is allowed to enforce.
+# sshd -T parses the effective configuration from disk; no daemon reload is done.
+SSH_DROPIN=/etc/ssh/sshd_config.d/49-orangebox-hardening.conf
+SSH_EXPECTED_SETTINGS=(
+  "ignorerhosts|yes|IgnoreRhosts"
+  "hostbasedauthentication|no|HostbasedAuthentication"
+  "permituserenvironment|no|PermitUserEnvironment"
+  "permitemptypasswords|no|PermitEmptyPasswords"
+  "maxauthtries|6|MaxAuthTries"
+  "logingracetime|60|LoginGraceTime"
+  "clientaliveinterval|300|ClientAliveInterval"
+  "clientalivecountmax|2|ClientAliveCountMax"
+  "loglevel|INFO|LogLevel"
+)
+SSH_PENDING_DIRECTIVES=()
+
+# Return codes: 0 = compliant; 1 = settings differ; 2 = cannot verify safely.
+# Optional report mode prints pending values before the confirmation prompt or during audit.
+ssh_state_status() {
+  local report="${1:-quiet}" output setting key desired directive actual status=0 rest
+  SSH_PENDING_DIRECTIVES=()
+
+  if [ ! -f /etc/ssh/sshd_config ] || ! command -v sshd >/dev/null 2>&1; then
+    case "$report" in
+      preflight) info "No se puede verificar SSH (sshd_config o sshd ausente); se omite aplicación automática." ;;
+      audit|apply) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
+    esac
+    return 2
+  fi
+
+  output="$(sshd -T 2>/dev/null)" || {
+    case "$report" in
+      preflight) info "sshd -T no pudo interpretar la configuración; no se aplicará SSH automáticamente." ;;
+      audit|apply) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
+    esac
+    return 2
+  }
+  [ -n "$output" ] || {
+    case "$report" in
+      preflight) info "sshd -T no devolvió valores; no se aplicará SSH automáticamente." ;;
+      audit|apply) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
+    esac
+    return 2
+  }
+
+  for setting in "${SSH_EXPECTED_SETTINGS[@]}"; do
+    key="${setting%%|*}"
+    rest="${setting#*|}"
+    desired="${rest%%|*}"
+    directive="${rest#*|}"
+    actual="$(awk -v k="$key" '$1==k{$1="";sub(/^ /,"");print;exit}' <<< "$output")"
+
+    if [ -z "$actual" ] || [ "$actual" != "$desired" ]; then
+      status=1
+      SSH_PENDING_DIRECTIVES+=("$directive $desired")
+      case "$report" in
+        preflight) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+        audit|apply) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+      esac
+    elif [ "$report" = "audit" ] || [ "$report" = "apply" ]; then
+      ok "SSH $directive=$actual"
+    fi
+  done
+  return "$status"
+}
+
+# Only prompt when sshd is readable, settings are known to differ, and the
+# module can create its managed drop-in without overwriting existing config.
+ssh_module_can_apply() {
+  [ "${OS_VERSION:-0}" -ge 8 ] &&
+    [ -d /etc/ssh/sshd_config.d ] &&
+    [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
+    [ -f /etc/ssh/sshd_config ] &&
+    command -v sshd >/dev/null 2>&1
+}
 ssh_module(){
   echo -e "\n$BLUE### SSH ###$NC"; [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }; command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
-  local perms policy; perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true); [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
+  local perms policy ssh_status; perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true); [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
   policy=$(command -v update-crypto-policies >/dev/null 2>&1 && update-crypto-policies --show 2>/dev/null||echo unknown); case "$policy" in LEGACY*) warn "Crypto policy=$policy: revisar migración";; unknown) warn "No se pudo determinar crypto policy";; *) ok "Crypto policy=$policy";; esac
   [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"; [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"; [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
   # Safe SSH controls only. Existing crypto/auth/forwarding choices are preserved.
+  if $AUTO_FIX; then
+    ssh_state_status apply
+  else
+    ssh_state_status audit
+  fi
+  ssh_status=$?
+
   if $AUTO_FIX && [ "$OS_VERSION" -ge 8 ] && [ -d /etc/ssh/sshd_config.d ]; then
-    local drop=/etc/ssh/sshd_config.d/49-orangebox-hardening.conf tmp
-    if [ -e "$drop" ]; then warn "$drop ya existe; no se sobrescribe para preservar configuración existente"; else
+    local drop="$SSH_DROPIN" tmp
+    if [ "$ssh_status" -eq 0 ]; then
+      ok "Los controles SSH ya cumplen los objetivos efectivos; no se crea un drop-in redundante"
+    elif [ "$ssh_status" -eq 2 ]; then
+      warn "No se puede verificar de forma segura la configuración SSH; no se modifica"
+    elif [ -e "$drop" ] || [ -L "$drop" ]; then
+      warn "$drop ya existe; no se sobrescribe para preservar configuración existente"
+    else
       tmp=$(mktemp "$drop.XXXXXX") || { warn "No se pudo crear SSH temporal"; return; }
-      { echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "IgnoreRhosts yes"; echo "HostbasedAuthentication no"; echo "PermitEmptyPasswords no"; echo "PermitUserEnvironment no"; echo "MaxAuthTries 6"; echo "LoginGraceTime 60"; echo "ClientAliveInterval 300"; echo "ClientAliveCountMax 2"; echo "LogLevel INFO"; } > "$tmp"
+      {
+        echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"
+        local directive
+        for directive in "${SSH_PENDING_DIRECTIVES[@]}"; do
+          printf '%s\n' "$directive"
+        done
+      } > "$tmp"
       chmod 600 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$drop"
-      if sshd -t >/dev/null 2>&1; then ok "sshd -t válido después del hardening"; FIXED=$((FIXED+1)); else bad "sshd -t falló; se elimina el drop-in recién creado"; rm -f "$drop"; fi
+      if sshd -t >/dev/null 2>&1 && ssh_state_status apply; then
+        ok "sshd -t válido; se verificaron los controles modificados y los demás permanecen intactos"
+        FIXED=$((FIXED+1))
+      else
+        bad "Los controles SSH pendientes no quedaron efectivos; se elimina el drop-in recién creado"
+        rm -f "$drop"
+      fi
     fi
   elif $AUTO_FIX; then
     if [ "$OS_VERSION" -lt 8 ]; then
@@ -761,7 +862,7 @@ internal_module_requires_risk() {
 
 risk_description() {
   case "$1" in
-    ssh) echo "añade controles a sshd (intentos, tiempos de sesión y autenticación por host). Se valida la sintaxis; aun así, revisa clientes e integraciones SSH." ;;
+    ssh) echo "aplica solo controles SSH pendientes (intentos, tiempos de sesión y autenticación por host); se valida la sintaxis, pero revisa clientes e integraciones." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
     synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
@@ -812,13 +913,32 @@ confirm_risky_change() {
 }
 
 run_internal_module_with_confirmation() {
-  local name="$1" previous_fix="$AUTO_FIX"
+  local name="$1" previous_fix="$AUTO_FIX" ssh_status=0
   if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
-    # Do not ask for consent to apply a module when its active and persistent
-    # values already pass the same read-only checks. The module will still run
-    # once in fix mode to print the normal verification report; it makes no
-    # changes because the preflight found no pending settings.
-    if [ "$name" = "synflood" ] && synflood_state_compliant; then
+    if [ "$name" = "ssh" ]; then
+      ssh_state_status preflight
+      ssh_status=$?
+      if [ "$ssh_status" -eq 0 ]; then
+        info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+      elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
+        if ! confirm_risky_change "$name"; then
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+      else
+        if [ "$ssh_status" -eq 1 ]; then
+          info "Hay controles SSH pendientes, pero no se puede aplicar sin sobrescribir configuración o fuera de las condiciones admitidas; se mantiene en auditoría."
+        else
+          info "No se pudo verificar el estado efectivo de SSH; se omite la confirmación y no se modifica."
+        fi
+        AUTO_FIX=false
+        run_module "$name"
+        AUTO_FIX="$previous_fix"
+        return 0
+      fi
+    elif [ "$name" = "synflood" ] && synflood_state_compliant; then
       info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; se omite la confirmación porque no hay cambios pendientes."
     elif ! confirm_risky_change "$name"; then
       AUTO_FIX=false
