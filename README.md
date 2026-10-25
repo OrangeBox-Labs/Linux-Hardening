@@ -10,107 +10,359 @@
 
 Colección de scripts de **Linux hardening** desarrollados por **OrangeBox IT Services** para asegurar servidores Linux Enterprise de forma reproducible, transparente y auditable.
 
-El proyecto cubre áreas como **SSH, sudo, PAM, passwords, auditd, SELinux, kernel, filesystem, GRUB, red, cron, rsyslog, servicios, AIDE, sincronización horaria y mitigaciones de seguridad**.
+El proyecto cubre **SSH, sudo, PAM, passwords, auditd, SELinux, kernel, filesystem, GRUB, red, cron, rsyslog, servicios, AIDE, sincronización horaria, firewalls y mitigaciones de seguridad**.
 
 La idea es simple: código visible, comportamiento explícito y herramientas que un administrador Linux pueda revisar antes de aplicarlas.
 
-## Filosofía
+> **Primero comprobar. Después preguntar. Finalmente cambiar.**
 
-**Infraestructura antes que magia.**
+## 🚀 ¿Qué hay de nuevo?
 
-Los scripts:
+Linux-Hardening está evolucionando hacia algo más útil que una colección de scripts que modifican archivos porque sí.
 
-- están escritos principalmente en Bash
-- muestran exactamente qué cambios realizan
-- separan verificación de aplicación cuando corresponde
-- evitan dependencias innecesarias
-- están pensados para administradores Linux
+La filosofía actual de OrangeBox es bastante simple: **primero comprobar, después preguntar y finalmente cambiar**. El baseline incorpora controles de idempotencia, preflight de configuración efectiva, auditorías de solo lectura y políticas especiales para ambientes donde romper SSH a las 3 de la mañana no es precisamente una feature.
 
-## Requisito previo
+### Cambios recientes del baseline y los módulos
 
-El hardening debe aplicarse sobre un sistema Linux correctamente instalado y configurado.
+| Script / componente | Cambios y mejoras documentadas |
+|---|---|
+| `linux-hardening.sh` | Baseline 1.4.5, ejecución idempotente, preflight antes de pedir confirmaciones, confirmaciones por parámetro, nuevo MOTD y timeout de 120 s para usuarios no-root. |
+| `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
+| `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
+| `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
+| `lib/listener-firewall-audit.sh` | Correlación de listeners no-loopback con políticas y reglas de filtrado verificables. Solo lectura. |
+| `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
+| `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
+| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict` y `kernel.kptr_restrict`. |
+| `kernel-lpe-2026-mitigation.sh` | Mitigaciones específicas para escenarios LPE recientes, separadas del hardening general. |
+| `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
+| `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
+| `sudo-hardening.sh` | `use_pty` requiere confirmación específica y se omite en hosts cPanel. |
+| `auditd-hardening.sh` | Auditoría reforzada y separación entre comprobación y aplicación. |
+| `rsyslog-hardening.sh` | Evita reconfigurar o preguntar cuando journald ya cumple el objetivo. |
+| `aide-install.sh` | AIDE es opcional y requiere consentimiento en `--fix`; se advierte posible solapamiento con Wazuh FIM. |
+| `selinux-secure-setup.sh` | Auditoría de solo lectura. No cambia modo, configuración, contextos, paquetes ni reinicia el sistema. |
+| `cron-hardening.sh` | Política conservadora con `cron.allow`/`at.allow` para evitar romper cPanel y otros entornos de hosting. |
+| `FS-hardening.sh` | Controles sobre filesystem, montajes, `hidepid`, módulos y autofs con advertencias de impacto operacional. |
+| `grub-hardening.sh` | Hardening de arranque con advertencias por cambios que pueden requerir reinicio. |
+| `configure-time-sync.sh` | Configuración de sincronización horaria con advertencia sobre cambios bruscos de tiempo y servicios dependientes. |
+| `cpu-hardening.sh` | Mitigaciones relacionadas con CPU y uso del helper seguro de sysctl. |
+| `remove-xinetd.sh` | Eliminación de componente legacy como módulo separado del baseline principal. |
+| `remove-gui-hardening.sh` | Reducción opcional de superficie de ataque eliminando componentes GUI. |
+| `generate-iptables-rules.sh` | Módulo de alto riesgo; no forma parte del flujo automático y puede cortar acceso remoto si se usa incorrectamente. |
+| `post-install.sh` | Preparación inicial; queda fuera de la auditoría agregada porque puede instalar paquetes o modificar configuración incluso sin `--fix`. |
+| `cis-benchmark-check.sh` | Benchmark CIS independiente de la auditoría operacional de los módulos. |
+| `linux-hardening-audit.sh` | Auditoría agregada de solo lectura; no ejecuta `--fix` ni mezcla su resultado con el porcentaje CIS. |
 
-Para una instalación segura de Linux puedes revisar nuestros materiales:
+## 🧠 Hardening idempotente
 
-- Blog: https://www.orangebox.cl/blog/
-- YouTube: https://www.youtube.com/@OrangeBoxLinux
-- Web: https://www.orangebox.cl/
+Los módulos principales comprueban primero si el sistema ya cumple el objetivo.
 
-## Scripts
+Si un parámetro ya está correcto, se muestra `[OK]` y no se vuelve a modificar ni se solicita autorización innecesaria.
+
+Esto permite ejecutar las comprobaciones repetidamente sin convertir cada ejecución en una aventura.
+
+## 🔐 SSH con preflight
+
+Los módulos de SSH verifican primero la configuración efectiva. Si los controles ya cumplen, no se solicita confirmación. Si existen cambios pendientes, el sistema evalúa primero si puede aplicarlos de forma segura.
+
+Esto reduce el riesgo de modificar SSH sin necesidad y evita el clásico:
+
+> "Funcionaba hasta que ejecuté el script."
+
+## 🧱 Kernel, sysctl y SYN flood
+
+Los controles sysctl distinguen entre valor activo, persistente, configuración existente, configuración conflictiva y estados que no pueden verificarse con seguridad.
+
+Los cambios pendientes pueden requerir confirmación individual.
+
+Política OrangeBox para los controles principales:
+
+```text
+fs.suid_dumpable = 0
+kernel.dmesg_restrict = 1
+```
+
+Para `kernel.kptr_restrict`, los valores activos `1` o `2` se consideran seguros y se conservan. Solo un valor `0` propone cambio a `1`, siguiendo la confirmación individual del modo `--fix`.
+
+La protección SYN flood revisa:
+
+```text
+net.ipv4.tcp_syncookies
+net.ipv4.tcp_max_syn_backlog
+net.core.somaxconn
+```
+
+El baseline no modifica automáticamente `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`, porque esos parámetros dependen de latencia, pérdida, aplicaciones y política operacional.
+
+Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
+
+## 🌐 Auditoría de firewall
+
+El inventario de sockets identifica protocolo, dirección, puerto, proceso y servicio cuando la información está disponible.
+
+La auditoría puede correlacionar listeners no-loopback con las políticas y reglas que se puedan verificar en:
+
+- firewalld
+- nftables
+- iptables / iptables-nft
+- CSF
+- Imunify360
+- Shorewall
+
+Esta auditoría es **estrictamente de solo lectura**. No elimina ni modifica reglas, servicios o configuraciones de firewall y no decide si un puerto permitido debería estar expuesto.
+
+Si el backend no puede interpretarse con certeza, el sistema informa `INFO` en vez de asumir que el puerto está desprotegido.
+
+No es:
+
+> "Vi un puerto y me dio ansiedad, así que lo cerré."
+
+## 🐚 Bash Hardening
+
+El hardening de Bash incorpora:
+
+- hostname FQDN
+- prompt por usuario/rol
+- hora en el prompt
+- bindings Emacs/Readline
+- historial por usuario
+- permisos `0600`
+- `HISTTIMEFORMAT`
+- `histappend`
+- timeout de sesión
+- logging mediante syslog
+
+El prompt permite identificar rápidamente una sesión root frente a una sesión normal.
+
+El logging de comandos tiene una advertencia importante: **los argumentos de línea de comandos pueden contener secretos**. No deben pasarse contraseñas, tokens u otros secretos como argumentos cuando esta captura esté habilitada.
+
+La protección del historial es de mejor esfuerzo y no constituye un mecanismo antimanipulación. Para auditoría resistente a alteraciones se recomienda una arquitectura de logging controlada/remota y los mecanismos apropiados de auditd.
+
+## ⏱️ Timeout de sesiones
+
+Las shells interactivas de usuarios distintos de `root` utilizan:
+
+```text
+TMOUT=120
+```
+
+El timeout es de 120 segundos de inactividad.
+
+Las shells root eliminan el `TMOUT` heredado y el mecanismo no se aplica a shells no interactivas.
+
+## 🧾 MOTD y banners
+
+El proyecto diferencia claramente:
+
+### Antes del login
+
+`/etc/issue` y `/etc/issue.net` contienen el aviso legal.
+
+### Después del login
+
+`/etc/motd` utiliza una tarjeta ASCII compacta de OrangeBox.
+
+El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
+
+Los banners no enumeran controles defensivos ni revelan el estado de SELinux.
+
+## 🛡️ SELinux
+
+`selinux-secure-setup.sh` funciona como auditoría de solo lectura.
+
+Por política OrangeBox, el proyecto no cambia automáticamente:
+
+- modo Enforcing/Permissive
+- `/etc/selinux/config`
+- contextos
+- paquetes SELinux
+- reinicios
+
+Primero se revisa. Después decide el administrador.
+
+## 🧩 AIDE y Wazuh
+
+AIDE es opcional. Durante `./linux-hardening.sh --fix`, si no está instalado, se solicita autorización antes de instalarlo y configurar la base.
+
+El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar controles sin una razón clara.
+
+`--fix --auto` no instala AIDE.
+
+## 📋 Scripts
 
 | Script | Área |
 |---|---|
-| `post-install.sh` | Preparación inicial del servidor |
+| `linux-hardening.sh` | Orquestador principal |
+| `linux-hardening-audit.sh` | Auditoría agregada |
+| `cis-benchmark-check.sh` | Benchmark CIS independiente |
+| `post-install.sh` | Preparación inicial |
 | `bash-hardening.sh` | Bash, profiles e historial |
-| `cis-benchmark-check.sh` | Verificación CIS |
-| `ssh-hardening.sh` | Hardening de SSH |
-| `ssh-hardening-complete.sh` | Hardening avanzado de SSH |
-| `password-hardening.sh` | Políticas de contraseñas |
-| `grub-hardening.sh` | GRUB |
-| `FS-hardening.sh` | Sistema de archivos |
+| `ssh-hardening.sh` | Hardening SSH |
+| `ssh-hardening-complete.sh` | Hardening avanzado SSH |
+| `password-hardening.sh` | Contraseñas y políticas PAM |
 | `sudo-hardening.sh` | sudo |
 | `auditd-hardening.sh` | Auditoría |
-| `selinux-secure-setup.sh` | Auditoría SELinux de solo lectura; no modifica configuración ni estado |
+| `selinux-secure-setup.sh` | Auditoría SELinux de solo lectura |
 | `kernel-hardening.sh` | Kernel |
-| `network-hardening.sh` | Red |
-| `cron-hardening.sh` | cron |
+| `kernel-lpe-2026-mitigation.sh` | Mitigaciones LPE |
+| `network-hardening.sh` | Red y sysctl |
+| `FS-hardening.sh` | Sistema de archivos |
+| `grub-hardening.sh` | GRUB |
+| `cron-hardening.sh` | cron/at |
 | `rsyslog-hardening.sh` | Logs |
-| `aide-install.sh` | Integridad |
+| `aide-install.sh` | Integridad de archivos |
 | `audit-listening-services.sh` | Servicios escuchando |
-| `generate-iptables-rules.sh` | Firewall |
+| `generate-iptables-rules.sh` | Generación de firewall; alto riesgo |
 | `configure-time-sync.sh` | Sincronización horaria |
+| `cpu-hardening.sh` | Mitigaciones CPU |
+| `remove-xinetd.sh` | Eliminación de xinetd |
+| `remove-gui-hardening.sh` | Reducción de superficie GUI |
+| `disable-usb-storage.sh` | Control opcional de USB |
+| `desintalar-paquetes-sin-usar.sh` | Limpieza de paquetes |
+| `desintalar-servicios-sin-usar.sh` | Limpieza de servicios |
+| `configure-login-banners.sh` | Banners de acceso |
 
-La auditoría de sockets identifica TCP y UDP por proceso y dirección de escucha, sin sugerir eliminar paquetes a partir del puerto. La auditoría de cobertura INPUT correlaciona listeners no-loopback con las políticas y reglas de filtrado que se puedan verificar en iptables/iptables-nft y nftables. Una política efectiva DROP/REJECT o una regla aplicable al protocolo/puerto se considera control; solo se emite WARN cuando la auditoría puede confirmar que el INPUT acepta tráfico y no encuentra control aplicable. Si el backend no se puede interpretar con certeza, muestra INFO en vez de asumir que el puerto está desprotegido. Esta comprobación es estrictamente de solo lectura: nunca cambia reglas, políticas, servicios ni configuración de CSF, Imunify360, firewalld, Shorewall, iptables o nftables; tampoco decide si un puerto permitido debería estar expuesto. En modo `./network-hardening.sh --check`, el diagnóstico compara los frontends iptables y revisa rulesets seleccionados y legacy para detectar integración de Imunify360; esas comprobaciones son de solo lectura y no editan reglas del firewall. El modo `--fix` del módulo de red aplica sus controles de kernel/protocolos, pero tampoco administra reglas del firewall.
+## 🔎 Auditoría de módulos de hardening
 
-## Uso básico
-
-Clonar:
-
-```bash
-git clone https://github.com/OrangeBox-Labs/Linux-Hardening.git
-cd Linux-Hardening
-chmod +x *.sh
-```
-
-Ejecutar una verificación:
+Ejecutar:
 
 ```bash
-./ssh-hardening.sh
+./linux-hardening-audit.sh
 ```
 
-Aplicar cambios:
+Este programa consulta las comprobaciones operacionales de los módulos, fuerza `--check` donde corresponde y nunca pasa `--fix`.
+
+No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y no crea backups ni reportes persistentes.
+
+Los módulos de preparación, eliminación interactiva de paquetes/servicios y generación destructiva de reglas de firewall quedan excluidos.
+
+## 🏆 Benchmark CIS independiente
+
+El benchmark CIS es una evaluación separada de los chequeos operacionales de los módulos.
+
+Ejecuta:
 
 ```bash
-./ssh-hardening.sh --fix
+./cis-benchmark-check.sh
 ```
 
-## Plataformas
+El porcentaje CIS proviene exclusivamente de los controles de `cis-benchmark-check.sh`. No se mezcla con advertencias, recomendaciones o estados internos de otros scripts.
 
-El repositorio está orientado principalmente a **Red Hat Enterprise Linux (RHEL), CentOS, Rocky Linux, AlmaLinux y Fedora**.
+Esto permite distinguir entre:
 
-La compatibilidad exacta depende de cada script. Revisa siempre el README individual antes de ejecutarlo.
+**"Cumple el benchmark CIS"**
 
-El proyecto no está diseñado como una colección genérica para Debian/Ubuntu: muchas políticas utilizan herramientas, PAM, SELinux, paquetes y rutas propias del ecosistema Red Hat.
+y
 
-### Matriz de pruebas de compatibilidad
+**"Los controles operacionales de este servidor están actualmente correctos."**
 
-El workflow **Compatibility smoke** ejecuta la validación sintáctica de los scripts y las pruebas de regresión en contenedores representativos de varias generaciones del ecosistema RPM:
+No son exactamente lo mismo.
 
-| Entorno de prueba | Propósito |
+## 🚦 Orquestador unificado: `linux-hardening.sh`
+
+### Auditar
+
+```bash
+./linux-hardening.sh
+```
+
+Modo de revisión previa sin aplicar cambios delicados.
+
+### Aplicar de forma interactiva
+
+```bash
+./linux-hardening.sh --fix
+```
+
+Primero comprueba los valores efectivos y persistentes. Kernel y SYN flood solicitan confirmación por parámetro; sudo utiliza su confirmación específica; journald solo pregunta si necesita cambios.
+
+Si los valores ya cumplen, muestra `[OK]` sin pedir autorizaciones redundantes ni reescribirlos.
+
+### Aplicación automática conservadora
+
+```bash
+./linux-hardening.sh --fix --auto
+```
+
+Aplica únicamente banners/MOTD y Bash con historial ilimitado. Los controles delicados, incluidos kernel y SYN flood, permanecen en auditoría.
+
+### Módulos especializados
+
+El orquestador permite seleccionar módulos de AIDE, auditd, Bash, sincronización horaria, CPU, cron, filesystem, GRUB, kernel, mitigación LPE, red, passwords, xinetd, GUI, rsyslog, SELinux, SSH y sudo.
+
+El benchmark CIS se ejecuta por separado.
+
+Los scripts de eliminación de paquetes/servicios requieren selección manual. `post-install.sh` queda fuera del orquestador porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar configuración incluso sin `--fix`.
+
+La opción `--module selinux-setup` está bloqueada por política porque SELinux se mantiene como auditoría de solo lectura.
+
+## ⚠️ Controles de alto riesgo
+
+| Módulo/script | Riesgo operacional |
 |---|---|
-| CentOS 6 y CentOS 7 | Detectar incompatibilidades con generaciones antiguas de Bash y herramientas del sistema. |
-| AlmaLinux 8, 9 y 10 | Validar sintaxis y pruebas de usuario en generaciones actuales compatibles con RHEL. |
+| `generate-iptables-rules.sh` | Puede vaciar reglas iptables y establecer `INPUT DROP`, cortando SSH. No debe combinarse con Shorewall. |
+| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, rutas asimétricas y aplicaciones. `--auto` los deja en auditoría. |
+| `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Pueden afectar clientes antiguos, automatizaciones y métodos de autenticación. |
+| `FS-hardening.sh` | Opciones restrictivas, `hidepid`, módulos y autofs pueden afectar monitoreo y aplicaciones. |
+| `cron-hardening.sh` | Restricciones de cron/at pueden romper tareas de usuarios o cPanel. |
+| `grub-hardening.sh` | Cambios de arranque pueden requerir reinicio y dejar un sistema inaccesible si se aplican incorrectamente. |
+| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Validar contenedores, VPN y aplicaciones. |
+| `auditd-hardening.sh` / `rsyslog-hardening.sh` | Pueden aumentar volumen de logs o afectar reglas y destinos existentes. |
+| `configure-time-sync.sh` | Cambios bruscos de hora pueden afectar certificados, autenticación y correlación de logs. |
+| `bash-hardening.sh` | Logging de comandos puede elevar volumen de logs y capturar argumentos sensibles. |
+| Scripts de eliminación | Pueden eliminar dependencias, paquetes o servicios necesarios. Revisar inventario y reversión. |
 
-Esta matriz es una **prueba de humo**, no una certificación completa de compatibilidad con cada versión de RHEL. No reproduce por sí sola el kernel del host, el arranque, los servicios activos, los backends reales de firewall, cPanel/CloudLinux ni los efectos de ejecutar `--fix`. Antes de declarar un módulo apto para producción en una versión concreta, sus rutas de ejecución y dependencias deben validarse también en una VM de laboratorio de esa generación, y en el perfil de proveedor correspondiente cuando aplique.
+Si el servidor es remoto, usa snapshot y consola fuera de banda antes de aplicar controles de red, SSH, filesystem, kernel o firewall.
 
+## 🧪 Compatibilidad
 
-## Seguridad y compatibilidad
+El repositorio está orientado principalmente a **RHEL, CentOS, Rocky Linux, AlmaLinux y Fedora**.
 
-Los scripts de hardening modifican configuración del sistema. **Prueba primero en laboratorio, snapshot o una máquina de validación.**
+La compatibilidad exacta depende de cada script. El proyecto no está diseñado como una colección genérica para Debian/Ubuntu: muchas políticas utilizan herramientas, PAM, SELinux, paquetes y rutas propias del ecosistema Red Hat.
 
-No todos los controles son adecuados para todos los servidores. Revisa dependencias de aplicaciones, autenticación, acceso remoto, monitoreo y gestión antes de aplicar cambios.
+### Matriz de pruebas
 
-## OrangeBox IT Services
+| Entorno | Propósito |
+|---|---|
+| CentOS 6 | Compatibilidad con generaciones antiguas |
+| CentOS 7 | Compatibilidad con generaciones antiguas |
+| AlmaLinux 8 | Validación RHEL-like actual |
+| AlmaLinux 9 | Validación RHEL-like actual |
+| AlmaLinux 10 | Validación RHEL-like actual |
+
+Esta matriz es una **prueba de humo**, no una certificación completa de compatibilidad con cada versión de RHEL. No reproduce por sí sola el kernel del host, arranque, servicios activos, firewalls reales, cPanel/CloudLinux ni los efectos de `--fix`.
+
+## 🔐 Seguridad antes de ejecutar
+
+Los scripts de hardening modifican configuración del sistema.
+
+**Prueba primero en laboratorio, snapshot o una máquina de validación.**
+
+Antes de aplicar cambios revisa:
+
+1. Acceso SSH y consola de emergencia.
+2. Dependencias de las aplicaciones.
+3. Firewall activo y proveedor de firewall.
+4. cPanel/CloudLinux/Wazuh u otras plataformas instaladas.
+5. Monitoreo y logging.
+6. Backup y procedimiento de rollback.
+7. Impacto esperado de cada módulo.
+
+No todos los controles son adecuados para todos los servidores.
+
+## 📚 Recursos OrangeBox
+
+- Web: https://www.orangebox.cl/
+- Blog técnico: https://www.orangebox.cl/blog/
+- YouTube: https://www.youtube.com/@OrangeBoxLinux
+- GitHub: https://github.com/OrangeBox-Labs
+
+## 🔍 SEO / temas relacionados
+
+Linux hardening, Linux security, Linux server hardening, RHEL hardening, Red Hat hardening, Rocky Linux security, Rocky Linux hardening, AlmaLinux security, AlmaLinux hardening, CentOS hardening, Fedora security, CIS Benchmark Linux, CIS hardening, SSH hardening, sudo hardening, SELinux security, auditd Linux, kernel hardening, filesystem hardening, GRUB hardening, firewall Linux, firewall hardening, Linux server security, seguridad servidores Linux, hardening servidores Linux, ciberseguridad Linux, infraestructura Linux empresarial, seguridad Linux Chile, OrangeBox Linux.
+
+## 🏢 OrangeBox IT Services
 
 **Felipe Román · OrangeBox IT Services**
 
@@ -118,122 +370,16 @@ Enterprise Linux · Linux Security · Hardening · CIS Benchmarks · RHEL · Roc
 
 https://www.orangebox.cl/
 
-### Keywords
+## 🤝 Open Source
 
-Linux hardening, Linux security, CIS Benchmark, CIS hardening, RHEL hardening, Red Hat hardening, Rocky Linux hardening, AlmaLinux hardening, CentOS hardening, Fedora hardening, SSH hardening, sudo hardening, SELinux, auditd, kernel hardening, filesystem hardening, GRUB hardening, firewall hardening, Bash security, server hardening, Linux Enterprise, OrangeBox.
+Este proyecto es open source y está pensado para que otros administradores Linux puedan revisar, adaptar y mejorar los controles.
 
-## Auditoría de módulos de hardening (solo lectura)
+Si encuentras un problema, incompatibilidad o una forma mejor de hacer un control, abre un issue o pull request.
 
-La auditoría agregada de módulos se ejecuta con:
+Y si una mejora evita que alguien pierda acceso SSH en producción, probablemente sea una mejora bastante buena.
 
-```bash
-./linux-hardening-audit.sh
-```
+---
 
-Este programa consulta las comprobaciones operacionales de los módulos, fuerza `--check` en red, filesystem y mitigación LPE, y nunca pasa `--fix`. No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y no crea backups ni reportes persistentes. Los módulos de preparación, eliminación interactiva de paquetes/servicios y generación destructiva de reglas de firewall quedan excluidos.
+**MIT License**
 
-## Benchmark CIS independiente
-
-El benchmark CIS es una evaluación separada de los chequeos operacionales de los módulos. Ejecuta únicamente:
-
-```bash
-./cis-benchmark-check.sh
-```
-
-El resultado y el porcentaje de cumplimiento CIS provienen exclusivamente de los controles de `cis-benchmark-check.sh`. No se suman ni se mezclan con advertencias, recomendaciones o estados internos que reportan otros scripts.
-
-Para **aplicar hardening**, usa `linux-hardening.sh --fix`. Sin `--fix`, el orquestador principal conserva su modo de revisión previa sin aplicar cambios. La opción antigua `--module repo-audit` se rechaza y muestra la ruta del auditor separado.
-
-## Orquestador unificado: `linux-hardening.sh`
-
-`linux-hardening.sh` es el punto de entrada para el baseline y los scripts especializados del repositorio. El comportamiento está diseñado para que una ejecución global no modifique a ciegas la red ni la autenticación de un servidor remoto.
-
-### Uso recomendado
-
-Auditar el baseline interno sin aplicar cambios:
-
-```bash
-./linux-hardening.sh
-```
-
-Aplicar cambios de forma interactiva:
-
-```bash
-./linux-hardening.sh --fix
-```
-
-Este modo aplica banners corporativos y la configuración de Bash. Para los controles sensibles, primero comprueba los valores efectivos y persistentes: kernel y SYN flood solicitan confirmación por parámetro, sudo utiliza su propia confirmación específica (y nunca activa `use_pty` en cPanel) y journald solo pregunta si necesita cambiar su configuración. Si los valores ya cumplen, muestra `[OK]` sin pedir autorizaciones redundantes ni reescribirlos. Si no se puede verificar un control de forma segura, se mantiene en auditoría.
-
-Para ejecución automática y conservadora, sin preguntas:
-
-```bash
-./linux-hardening.sh --fix --auto
-```
-
-`--auto` aplica únicamente banners/MOTD y Bash con historial ilimitado. Los controles delicados —incluidos los cambios sysctl de kernel y SYN flood— se revisan en auditoría y no se aplican. En modo interactivo `--fix`, cada control delicado pregunta por separado, explica qué cambiará y qué impacto operacional puede tener; responder No o no disponer de TTY deja ese control sin modificar.
-
-El aviso legal previo al login se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` usa una tarjeta ASCII compacta de OrangeBox posterior al login, distinta del aviso legal previo, para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
-
-Política operacional: `PASS_MAX_DAYS` se informa pero nunca se modifica; `use_pty` requiere confirmación específica y se omite en servidores cPanel; SELinux solo se audita y nunca se cambia; `fapolicyd` no se instala ni se activa. Si se detecta Wazuh, el auditor lo informa y mantiene esta política.
-
-El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfiles reemplacen `PS1`. Muestra la hora en formato `HH:MM:SS`, el usuario, el hostname completo y el directorio; root aparece en rojo con `#` y los usuarios normales en verde con `$`.
-
-Las shells interactivas de usuarios distintos de `root` tienen un timeout por inactividad de 120 segundos (`TMOUT=120`); el perfil elimina el `TMOUT` heredado en shells root. El timeout no se fija en shells no interactivas ni en root.
-
-### Módulos especializados del repositorio
-
-El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. El benchmark `cis-benchmark-check.sh` se ejecuta por separado y no forma parte del selector de módulos de hardening. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` se conserva como auditoría de solo lectura. Tanto ese script como `post-install.sh` informan el estado de SELinux, pero no cambian su modo, `/etc/selinux/config`, contextos, paquetes ni reinician el servidor. La opción `--module selinux-setup` está bloqueada por política.
-
-**AIDE es opcional:** en el flujo interactivo `./linux-hardening.sh --fix`, si no está instalado se pregunta antes de instalarlo y configurar la base y la verificación diaria. El mensaje explica que AIDE compara una base de integridad y que puede solaparse con Wazuh FIM. `--fix --auto` no instala AIDE.
-
-### Controles de alto riesgo
-
-| Módulo/script | Riesgo operacional que debe evaluarse |
-|---|---|
-| `generate-iptables-rules.sh` | Genera scripts que vacían reglas iptables y establecen `INPUT DROP`; puede cortar SSH y contradecir las políticas de Shorewall. El orquestador bloquea ese módulo y el generador se niega a ejecutarse si Shorewall está activo. |
-| `kernel` / `synflood` / `network-full` | Los perfiles base de kernel y SYN flood piden confirmación en `--fix` interactivo. `--auto` los deja en auditoría. `network-full` además bloquea módulos de protocolos y requiere autorización explícita para actuar con Shorewall; puede afectar VPN, rutas asimétricas o aplicaciones que usen esos protocolos. El código preserva `net.ipv4.ip_forward` y adapta `rp_filter` cuando detecta forwarding IPv4. |
-| `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Cambian parámetros de autenticación o algoritmos; clientes antiguos, automatizaciones y el acceso root pueden dejar de funcionar. |
-| `FS-hardening.sh` | Puede remontar directorios con opciones restrictivas, cambiar `/proc` a `hidepid=2`, bloquear módulos y deshabilitar autofs. Puede afectar monitoreo, procesos que inspeccionan otras cuentas y aplicaciones. |
-| `cron-hardening.sh` | Puede crear `cron.allow` y `at.allow` restringidos a root; esto puede impedir cron de usuarios de hosting o tareas administradas por cPanel. |
-| `selinux-secure-setup.sh` / `post-install.sh` | Solo auditan SELinux; por política OrangeBox no cambian su estado, configuración, contextos ni reinician el sistema. |
-| `grub-hardening.sh` / `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Cambian parámetros de arranque, sysctl o bloquean módulos/namespaces. Algunos efectos requieren reinicio y pueden afectar contenedores, VPN y aplicaciones. |
-| `rsyslog-hardening.sh` / `auditd-hardening.sh` | Reinician servicios de logging o amplían la auditoría; hay que revisar destinos, retención, volumen de eventos y reglas personalizadas. |
-| `configure-time-sync.sh` | Puede retirar el paquete NTP, instalar chrony o corregir la hora de golpe. Un salto temporal puede afectar certificados, autenticación y correlación de logs. |
-| `bash-hardening.sh` | Su modo completo añade un trap DEBUG para registrar comandos; puede elevar el volumen de logs y capturar argumentos sensibles. El baseline utiliza una implementación más acotada para historia y prompt. |
-| `post-install.sh` | Está pensado para preparación inicial; puede instalar paquetes, habilitar servicios y modificar configuración incluso sin `--fix`. Se omite del orquestador y no forma parte de `linux-hardening-audit.sh`. |
-| `desintalar-paquetes-sin-usar.sh` / `desintalar-servicios-sin-usar.sh` / `remove-gui-hardening.sh` / `remove-xinetd.sh` | Pueden eliminar paquetes, dependencias o servicios. No deben ejecutarse sin revisar inventario y plan de reversión. |
-
-**Para un firewall remoto como un host administrado con Shorewall:** crea un snapshot y confirma acceso por consola fuera de banda. Usa `--fix` interactivo para que kernel/SYN flood soliciten autorización individual, revisa el resumen de cada cambio y comprueba las rutas después de aplicarlo. `--fix --auto` no aplica esos controles delicados. El código preserva `net.ipv4.ip_forward` y usa `rp_filter=2` si detecta forwarding IPv4; no combines un generador de iptables con Shorewall.
-
-La opción `--allow-risky` no sustituye una revisión de cambios ni garantiza compatibilidad. El orquestador crea respaldos para los archivos que modifica directamente, pero los módulos especializados mantienen sus propios mecanismos y limitaciones de reversión.
-
-
-## Gestión segura de parámetros sysctl (v1.4.0)
-
-Política OrangeBox para estos tres controles: `fs.suid_dumpable` se orienta a `0` y `kernel.dmesg_restrict` a `1`. Para `kernel.kptr_restrict`, el valor activo `1` o `2` se conserva sin tocar ni el estado runtime ni sus archivos persistentes; solo si el valor activo es `0` se propone `1`, siguiendo la confirmación individual habitual del modo `--fix`.
-
-Los scripts que modifican sysctl usan ahora `lib/sysctl-safe.sh` para inventariar definiciones activas antes de cambiar parámetros. Se comprueba el valor activo y se recorren, línea a línea, las asignaciones en:
-
-- `/etc/sysctl.conf`
-- `/etc/sysctl.d/*.conf`
-- `/run/sysctl.d/*.conf`
-- `/usr/local/lib/sysctl.d/*.conf`
-- `/usr/lib/sysctl.d/*.conf`
-- `/lib/sysctl.d/*.conf`
-
-Se ignoran las líneas comentadas y se muestran archivo, número de línea y valor encontrado. Si el valor activo y el persistente ya coinciden con el objetivo, se conserva sin añadir duplicados. Si el valor activo es distinto, o existe una asignación persistente incompatible, muestra los valores, las ubicaciones y una descripción breve del impacto; solicita confirmación individual antes de cambiar el valor. Si no hay terminal interactiva o se responde que no, el parámetro se omite.
-
-Ejemplo de ejecución:
-
-```text
-[SYSCTL][CONFLICTO] net.ipv4.conf.all.secure_redirects ya tiene definiciones persistentes diferentes.
-  Qué cambia: Controla redirecciones ICMP consideradas seguras desde gateways conocidos...
-  Valor activo: 1 | Valor propuesto: 0
-  Definiciones detectadas (los archivos existentes no se modifican):
-    - /etc/sysctl.d/60-gce-network-security.conf:25 = 1
-¿Confirmas aplicar net.ipv4.conf.all.secure_redirects=0 y añadir/actualizar el override...? [s/N]
-```
-
-Los parámetros aprobados se centralizan en `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`, un perfil de alta precedencia compartido por el hardening de kernel, red, CPU y mitigación LPE. El script no edita los perfiles de Google Cloud, cPanel, CloudLinux ni otros proveedores. Excepción: si una asignación conflictiva está en `/etc/sysctl.conf` (que puede procesarse después de `sysctl.d`), solo se actualiza esa asignación después de confirmación explícita y con respaldo. El perfil central existente solo se modifica si contiene el marcador de propiedad OrangeBox. Revise siempre el impacto antes de aceptar; los valores de red pueden afectar routing asimétrico, IPv6, colas TCP o servicios que dependan de ellos.
-
-**Importante:** el modo auditoría sigue sin modificar el sistema. En modo fix, los parámetros que ya estén definidos con el mismo valor no se duplican; los conflictos se consultan por parámetro, no como una aprobación global de todo el bloque.
+Copyright (c) 2025 Felipe Roman - OrangeBox Labs
