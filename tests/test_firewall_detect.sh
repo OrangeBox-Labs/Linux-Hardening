@@ -2,13 +2,38 @@
 # Pruebas aisladas del diagnóstico de backends/reglas de firewall.
 set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
-TMP="$(mktemp -d)"
+fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
+pass() { printf '[PASS] %s\n' "$*"; }
+
+# /tmp and /var/tmp may be mounted noexec on hardened servers. Choose a
+# writable temporary directory only after proving that a generated executable
+# can actually run there; otherwise the mock would resolve in PATH but fail
+# with status 126, which looks like a backend-detection bug.
+create_exec_tempdir() {
+  local base candidate probe
+  for base in "${TMPDIR:-/tmp}" /tmp /var/tmp "${HOME:-/root}" "$ROOT_DIR"; do
+    [ -d "$base" ] || continue
+    candidate="$(mktemp -d "$base/.orangebox-firewall-test.XXXXXX" 2>/dev/null)" || continue
+    probe="$candidate/.exec-test"
+    if ! printf '#!/bin/sh\nexit 0\n' > "$probe" || ! chmod 700 "$probe"; then
+      rm -rf "$candidate"
+      continue
+    fi
+    if "$probe" >/dev/null 2>&1; then
+      rm -f "$probe"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    rm -rf "$candidate"
+  done
+  return 1
+}
+
+TMP="$(create_exec_tempdir)" || fail "no hay un directorio temporal escribible y ejecutable; revisa permisos y montajes noexec"
 trap 'rm -rf "$TMP"' EXIT
 MOCK_BIN="$TMP/bin"
 RULES="$TMP/rules"
 mkdir -p "$MOCK_BIN" "$RULES"
-fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
-pass() { printf '[PASS] %s\n' "$*"; }
 
 for cmd in iptables ip6tables iptables-save iptables-legacy-save ip6tables-save ip6tables-legacy-save; do
   cat > "$MOCK_BIN/$cmd" <<'MOCK_COMMAND'
