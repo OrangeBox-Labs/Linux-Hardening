@@ -74,6 +74,10 @@ sysctl_safe_write_profile() {
   local tmp mode backup
   [ -n "$file" ] || { echo "[SYSCTL][ERROR] No se definió archivo de persistencia."; return 1; }
   mkdir -p "$(dirname "$file")" || return 1
+  if [ "$file" = "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" ] && [ -L "$file" ]; then
+    echo "[SYSCTL][ERROR] $file es un enlace simbólico; no se reemplaza."
+    return 1
+  fi
   if [ "$file" = "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" ] && [ -e "$file" ] && ! grep -Fqx "# OrangeBox managed sysctl overrides" "$file"; then
     echo "[SYSCTL][ERROR] $file ya existe, pero no contiene el marcador de propiedad OrangeBox; no se sobrescribe."
     return 1
