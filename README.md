@@ -130,7 +130,7 @@ La auditoría agregada de módulos se ejecuta con:
 ./linux-hardening-audit.sh
 ```
 
-Este programa consulta las comprobaciones operacionales de los módulos, fuerza `--check` en red, filesystem y mitigación LPE, y nunca pasa `--fix`. No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y no crea backups ni reportes persistentes. Los módulos de preparación, eliminación interactiva de paquetes/servicios, configuración de SELinux sin modo de auditoría garantizado y generación destructiva de reglas de firewall quedan excluidos.
+Este programa consulta las comprobaciones operacionales de los módulos, fuerza `--check` en red, filesystem y mitigación LPE, y nunca pasa `--fix`. No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y no crea backups ni reportes persistentes. Los módulos de preparación, eliminación interactiva de paquetes/servicios y generación destructiva de reglas de firewall quedan excluidos.
 
 ## Benchmark CIS independiente
 
