@@ -186,3 +186,32 @@ El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-harde
 **Para un firewall remoto como un host administrado con Shorewall:** crea un snapshot y confirma acceso por consola fuera de banda. Usa `--fix` interactivo para que kernel/SYN flood soliciten autorización individual, revisa el resumen de cada cambio y comprueba las rutas después de aplicarlo. `--fix --auto` no aplica esos controles delicados. El código preserva `net.ipv4.ip_forward` y usa `rp_filter=2` si detecta forwarding IPv4; no combines un generador de iptables con Shorewall.
 
 La opción `--allow-risky` no sustituye una revisión de cambios ni garantiza compatibilidad. El orquestador crea respaldos para los archivos que modifica directamente, pero los módulos especializados mantienen sus propios mecanismos y limitaciones de reversión.
+
+
+## Gestión segura de parámetros sysctl (v1.4.0)
+
+Los scripts que modifican sysctl usan ahora `lib/sysctl-safe.sh` para inventariar definiciones activas antes de cambiar parámetros. Se comprueba el valor activo y se recorren, línea a línea, las asignaciones en:
+
+- `/etc/sysctl.conf`
+- `/etc/sysctl.d/*.conf`
+- `/run/sysctl.d/*.conf`
+- `/usr/local/lib/sysctl.d/*.conf`
+- `/usr/lib/sysctl.d/*.conf`
+- `/lib/sysctl.d/*.conf`
+
+Se ignoran las líneas comentadas y se muestran archivo, número de línea y valor encontrado. Las definiciones existentes no se editan. Si un parámetro ya está activo y persistido con el valor objetivo, se conserva sin añadir duplicados. Si no está configurado, el script puede agregarlo a su perfil propio. Si detecta una definición existente con un valor distinto, muestra el valor activo, el propuesto y una breve descripción del efecto, y solicita confirmación explícita antes de instalar un override. Si no hay terminal interactiva o se responde que no, el parámetro se omite.
+
+Ejemplo de ejecución:
+
+```text
+[SYSCTL][CONFLICTO] net.ipv4.conf.all.secure_redirects ya tiene definiciones persistentes diferentes.
+  Qué cambia: Controla redirecciones ICMP consideradas seguras desde gateways conocidos...
+  Valor activo: 1 | Valor propuesto: 0
+  Definiciones detectadas (los archivos existentes no se modifican):
+    - /etc/sysctl.d/60-gce-network-security.conf:25 = 1
+¿Confirmas aplicar net.ipv4.conf.all.secure_redirects=0 y añadir/actualizar el override...? [y/N]
+```
+
+Esta confirmación importa en servidores con perfiles administrados por proveedor, cPanel/CloudLinux o herramientas de seguridad. Una respuesta afirmativa no edita el archivo externo: instala el valor acordado en el perfil de OrangeBox y cambia el valor de runtime, con respaldo del archivo OrangeBox antes de modificarlo. Revise el efecto descrito antes de aceptar; los valores de red pueden afectar routing asimétrico, IPv6, colas TCP o servicios que dependan de ellos.
+
+**Importante:** el modo auditoría sigue sin modificar el sistema. En modo fix, los parámetros que ya estén definidos con el mismo valor no se duplican; los conflictos se consultan por parámetro, no como una aprobación global de todo el bloque.
