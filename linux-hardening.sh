@@ -542,7 +542,7 @@ orangebox_pre_prompt() {
   orangebox_set_prompt
 }
 case ";${PROMPT_COMMAND:-};" in
-  *";orangebox_pre_prompt;"*) ;;
+  *";orangebox_pre_prompt;"*|*"; orangebox_pre_prompt;"*) ;;
   *)
     if [ -n "${PROMPT_COMMAND:-}" ]; then
       PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_pre_prompt"
