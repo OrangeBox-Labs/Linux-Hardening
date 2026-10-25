@@ -10,6 +10,15 @@
 #              NO cambia reglas de firewall existentes
 # ==============================================
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$SCRIPT_DIR/lib/sysctl-safe.sh" ]; then
+  # shellcheck source=lib/sysctl-safe.sh
+  source "$SCRIPT_DIR/lib/sysctl-safe.sh"
+else
+  echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -81,102 +90,16 @@ make_backup() {
 # FUNCION PARA CONFIGURAR SYSCTL (maneja comentados)
 # ==============================================
 set_sysctl() {
-  local param="$1"
-  local value="$2"
-  local description="${3:-$param}"
-  local current configured tmp
-
-  current=$(sysctl -n "$param" 2>/dev/null || true)
-  if [ -z "$current" ]; then
-    echo -e "${YELLOW}[!] $description no existe en este kernel${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 0
+  local param="$1" value="$2" description="${3:-}"
+  if [ -z "$description" ] || [ "$description" = "$param" ]; then
+    description="$(sysctl_safe_description "$param")"
   fi
-
-  configured=$(awk -v key="$param" '
-    {
-      line=$0
-      if (line ~ /^[[:space:]]*#/) next
-      if (index(line, "=")) {
-        lhs=line
-        sub(/=.*/, "", lhs)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
-        if (lhs == key) {
-          val=line
-          sub(/^[^=]*=/, "", val)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-          found=val
-        }
-      }
-    }
-    END { print found }
-  ' "$SYSCTL_FILE" 2>/dev/null || true)
-
-  if [ "$current" = "$value" ] && [ "$configured" = "$value" ]; then
-    echo -e "${GREEN}[✓] $description = $value (runtime y persistente)${NC}"
-    return 0
-  fi
-
-  if [ "$AUTO_FIX" != true ]; then
-    echo -e "${RED}[!] $description: runtime=$current persistencia=${configured:-no definida}; recomendado=$value${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  echo -e "${BLUE}[i] $description: runtime=$current persistencia=${configured:-no definida}; se aplicará=$value${NC}"
-
-  mkdir -p /etc/sysctl.d || {
-    echo -e "${YELLOW}[!] No se pudo crear /etc/sysctl.d${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  }
-  tmp=$(mktemp "${SYSCTL_FILE}.XXXXXX") || {
-    echo -e "${YELLOW}[!] No se pudo crear temporal para $param${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  }
-  if [ -f "$SYSCTL_FILE" ]; then
-    awk -v key="$param" '
-      {
-        line=$0
-        sub(/^[[:space:]]*#[[:space:]]*/, "", line)
-        if (index(line, "=")) {
-          lhs=line
-          sub(/=.*/, "", lhs)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
-          if (lhs == key) next
-        }
-        print
-      }
-    ' "$SYSCTL_FILE" > "$tmp" || {
-      rm -f "$tmp"
-      echo -e "${YELLOW}[!] No se pudo leer $SYSCTL_FILE${NC}"
-      WARNINGS=$((WARNINGS + 1))
-      return 1
-    }
-  fi
-  printf '%s = %s\n' "$param" "$value" >> "$tmp" || {
-    rm -f "$tmp"
-    echo -e "${YELLOW}[!] No se pudo escribir $param${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  }
-  chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
-  if ! mv "$tmp" "$SYSCTL_FILE"; then
-    rm -f "$tmp"
-    echo -e "${YELLOW}[!] No se pudo instalar persistencia de $param${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-
-  if sysctl -w "$param=$value" >/dev/null 2>&1 && [ "$(sysctl -n "$param" 2>/dev/null || true)" = "$value" ]; then
-    echo -e "${GREEN}[✓] $description aplicado y persistido: $value${NC}"
-    FIXED=$((FIXED + 1))
+  if sysctl_safe_apply "$param" "$value" "$description" "$SYSCTL_FILE" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}[!] No se pudo aplicar/verificar $param; revisar $SYSCTL_FILE${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
-
 
 # ==============================================
 # FUNCION PARA DESHABILITAR MODULO (maneja comentados)
