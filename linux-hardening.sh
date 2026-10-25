@@ -105,26 +105,28 @@ ssh_effective(){ sshd -T 2>/dev/null|awk -v k="$1" '$1==k{$1="";sub(/^ /,"");pri
 # sshd -T parses the effective configuration from disk; no daemon reload is done.
 SSH_DROPIN=/etc/ssh/sshd_config.d/49-orangebox-hardening.conf
 SSH_EXPECTED_SETTINGS=(
-  "ignorerhosts yes"
-  "hostbasedauthentication no"
-  "permituserenvironment no"
-  "permitemptypasswords no"
-  "maxauthtries 6"
-  "logingracetime 60"
-  "clientaliveinterval 300"
-  "clientalivecountmax 2"
-  "loglevel INFO"
+  "ignorerhosts|yes|IgnoreRhosts"
+  "hostbasedauthentication|no|HostbasedAuthentication"
+  "permituserenvironment|no|PermitUserEnvironment"
+  "permitemptypasswords|no|PermitEmptyPasswords"
+  "maxauthtries|6|MaxAuthTries"
+  "logingracetime|60|LoginGraceTime"
+  "clientaliveinterval|300|ClientAliveInterval"
+  "clientalivecountmax|2|ClientAliveCountMax"
+  "loglevel|INFO|LogLevel"
 )
+SSH_PENDING_DIRECTIVES=()
 
 # Return codes: 0 = compliant; 1 = settings differ; 2 = cannot verify safely.
 # Optional report mode prints pending values before the confirmation prompt or during audit.
 ssh_state_status() {
-  local report="${1:-quiet}" output setting key desired actual status=0
+  local report="${1:-quiet}" output setting key desired directive actual status=0 rest
+  SSH_PENDING_DIRECTIVES=()
 
   if [ ! -f /etc/ssh/sshd_config ] || ! command -v sshd >/dev/null 2>&1; then
     case "$report" in
       preflight) info "No se puede verificar SSH (sshd_config o sshd ausente); se omite aplicación automática." ;;
-      audit) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
+      audit|apply) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
     esac
     return 2
   fi
@@ -132,34 +134,34 @@ ssh_state_status() {
   output="$(sshd -T 2>/dev/null)" || {
     case "$report" in
       preflight) info "sshd -T no pudo interpretar la configuración; no se aplicará SSH automáticamente." ;;
-      audit) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
+      audit|apply) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
     esac
     return 2
   }
   [ -n "$output" ] || {
     case "$report" in
       preflight) info "sshd -T no devolvió valores; no se aplicará SSH automáticamente." ;;
-      audit) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
+      audit|apply) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
     esac
     return 2
   }
 
   for setting in "${SSH_EXPECTED_SETTINGS[@]}"; do
-    key="${setting%% *}"
-    desired="${setting#* }"
+    key="${setting%%|*}"
+    rest="${setting#*|}"
+    desired="${rest%%|*}"
+    directive="${rest#*|}"
     actual="$(awk -v k="$key" '$1==k{$1="";sub(/^ /,"");print;exit}' <<< "$output")"
-    if [ -z "$actual" ]; then
-      status=2
+
+    if [ -z "$actual" ] || [ "$actual" != "$desired" ]; then
+      status=1
+      SSH_PENDING_DIRECTIVES+=("$directive $desired")
       case "$report" in
-        preflight) info "No se pudo leer el parámetro SSH '$key'; se omite la aplicación automática." ;;
-        audit) warn "No se pudo leer el parámetro SSH '$key'." ;;
+        preflight) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+        audit|apply) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
       esac
-    elif [ "$actual" != "$desired" ]; then
-      [ "$status" -eq 2 ] || status=1
-      case "$report" in
-        preflight) info "SSH pendiente: $key actual='$actual'; objetivo='$desired'." ;;
-        audit) warn "SSH pendiente: $key actual='$actual'; objetivo='$desired'." ;;
-      esac
+    elif [ "$report" = "audit" ] || [ "$report" = "apply" ]; then
+      ok "SSH $directive=$actual"
     fi
   done
   return "$status"
@@ -197,13 +199,19 @@ ssh_module(){
       warn "$drop ya existe; no se sobrescribe para preservar configuración existente"
     else
       tmp=$(mktemp "$drop.XXXXXX") || { warn "No se pudo crear SSH temporal"; return; }
-      { echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"; echo "IgnoreRhosts yes"; echo "HostbasedAuthentication no"; echo "PermitEmptyPasswords no"; echo "PermitUserEnvironment no"; echo "MaxAuthTries 6"; echo "LoginGraceTime 60"; echo "ClientAliveInterval 300"; echo "ClientAliveCountMax 2"; echo "LogLevel INFO"; } > "$tmp"
+      {
+        echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"
+        local directive
+        for directive in "${SSH_PENDING_DIRECTIVES[@]}"; do
+          printf '%s\n' "$directive"
+        done
+      } > "$tmp"
       chmod 600 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$drop"
-      if sshd -t >/dev/null 2>&1 && ssh_state_status; then
-        ok "sshd -t válido y los nueve controles SSH efectivos fueron verificados"
+      if sshd -t >/dev/null 2>&1 && ssh_state_status apply; then
+        ok "sshd -t válido; se verificaron los controles modificados y los demás permanecen intactos"
         FIXED=$((FIXED+1))
       else
-        bad "La configuración SSH no dejó efectivos todos los controles esperados; se elimina el drop-in recién creado"
+        bad "Los controles SSH pendientes no quedaron efectivos; se elimina el drop-in recién creado"
         rm -f "$drop"
       fi
     fi
