@@ -131,7 +131,7 @@ sudo_module() {
     *) info "use_pty rechazado/no confirmado; se conserva la configuración actual"; return ;;
   esac
 
-  printf '%s\\n' 'Defaults use_pty' > "$f" || { warn "No se pudo preparar $f"; return; }
+  printf '%s\n' 'Defaults use_pty' > "$f" || { warn "No se pudo preparar $f"; return; }
   chmod 440 "$f" && chown root:root "$f" || { rm -f "$f"; warn "No se pudieron fijar los permisos de $f"; return; }
   if visudo -cf /etc/sudoers >/dev/null 2>&1; then
     ok "use_pty habilitado y sudoers validado"
@@ -771,7 +771,7 @@ risk_description() {
     password|password-full) echo "cambia política de contraseñas o valores por defecto. No se editará PAM a ciegas, pero podría afectar autenticación o futuras contraseñas." ;;
     filesystem|filesystem-full) echo "puede restringir montajes, ocultar procesos con hidepid, bloquear módulos o deshabilitar autofs; podría afectar monitoreo y aplicaciones." ;;
     cron|cron-full) echo "puede cambiar permisos de cron/at y crear listas allow limitadas a root, impidiendo tareas de usuarios o de hosting/cPanel." ;;
-    selinux|selinux-setup) echo "cambia configuración/etiquetas de SELinux y puede relabelar árboles grandes; servicios con contextos personalizados podrían dejar de funcionar." ;;
+    selinux|selinux-setup) echo "solo informa el estado actual; SELinux no se modifica desde este repositorio." ;;
     grub|grub-full) echo "cambia parámetros del arranque y regenera grub.cfg; el efecto pleno requiere reinicio y un error puede impedir arrancar." ;;
     kernel-full|lpe-2026) echo "cambia mitigaciones de kernel/sysctl o bloquea módulos/namespaces; puede afectar contenedores, VPN y requiere reinicio para algunos efectos." ;;
     auditd|auditd-full) echo "modifica reglas y servicio de auditoría; puede incrementar volumen de eventos y afectar configuración de auditd existente." ;;
