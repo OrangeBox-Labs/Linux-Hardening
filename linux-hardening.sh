@@ -227,7 +227,14 @@ ssh_module(){
       chmod 600 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$drop"
       if sshd -t >/dev/null 2>&1; then ok "sshd -t válido después del hardening"; FIXED=$((FIXED+1)); else bad "sshd -t falló; se elimina el drop-in recién creado"; rm -f "$drop"; fi
     fi
-  elif $AUTO_FIX; then warn "RHEL <8: no se edita sshd_config automáticamente; se evita riesgo de perder acceso"
+  elif $AUTO_FIX; then
+    if [ "$OS_VERSION" -lt 8 ]; then
+      warn "RHEL/CentOS <8: no se edita sshd_config automáticamente para evitar riesgo de perder acceso"
+    elif [ ! -d /etc/ssh/sshd_config.d ]; then
+      warn "/etc/ssh/sshd_config.d no existe; no se modifica sshd_config automáticamente para evitar riesgo de perder acceso"
+    else
+      warn "No se cumplen las condiciones para instalar el drop-in SSH; no se modifica sshd_config automáticamente"
+    fi
   fi
   warn "No se fuerza PasswordAuthentication, PubkeyAuthentication, PermitRootLogin, AllowUsers/AllowGroups, forwarding, GSSAPI/Kerberos ni crypto algorithms: esos cambios requieren inventario de clientes/integraciones para no romper accesos."
 }
@@ -949,8 +956,8 @@ main() {
     echo
     echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    warn "MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
-    warn "Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
+    echo -e "$BLUE[INFO]$NC Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
     run_module banners
     run_module bash
 
