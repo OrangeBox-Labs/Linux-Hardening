@@ -60,7 +60,7 @@ Para una instalación segura de Linux puedes revisar nuestros materiales:
 | `generate-iptables-rules.sh` | Firewall |
 | `configure-time-sync.sh` | Sincronización horaria |
 
-La auditoría de sockets identifica TCP y UDP por proceso y dirección de escucha, sin sugerir eliminar paquetes a partir del puerto. El diagnóstico de red compara los frontends iptables y revisa rulesets seleccionados y legacy para detectar integración de Imunify360. Ambos controles son de solo lectura; no editan reglas del firewall.
+La auditoría de sockets identifica TCP y UDP por proceso y dirección de escucha, sin sugerir eliminar paquetes a partir del puerto. En modo `./network-hardening.sh --check`, el diagnóstico compara los frontends iptables y revisa rulesets seleccionados y legacy para detectar integración de Imunify360; esas comprobaciones son de solo lectura y no editan reglas del firewall. El modo `--fix` del módulo de red aplica sus controles de kernel/protocolos, pero tampoco administra reglas del firewall.
 
 ## Uso básico
 
