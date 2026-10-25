@@ -226,22 +226,52 @@ install_repos() {
 # CONFIGURAR SELINUX A PERMISIVO
 # ==============================================
 configure_selinux() {
-  echo -e "\n${BLUE}[*] Configurando SELinux a modo permisivo...${NC}"
+  echo -e "\n${BLUE}[*] Verificando/configurando SELinux a modo permisivo...${NC}"
 
-  if getenforce 2>/dev/null | grep -q "Permissive"; then
-    echo -e "${GREEN}[✓] SELinux ya esta en modo permisivo${NC}"
-  else
-    setenforce 0
-    echo -e "${GREEN}[✓] SELinux cambiado a permisivo en caliente${NC}"
-    FIXED=$((FIXED + 1))
-  fi
+  local runtime_mode
+  runtime_mode=$(getenforce 2>/dev/null || echo "Desconocido")
 
-  if grep -q "^SELINUX=enforcing" /etc/selinux/config 2>/dev/null; then
-    sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
-    echo -e "${GREEN}[✓] SELinux configurado como permisivo en /etc/selinux/config${NC}"
-    FIXED=$((FIXED + 1))
+  case "$runtime_mode" in
+    Permissive)
+      echo -e "${GREEN}[✓] SELinux ya está en modo permisivo en tiempo de ejecución${NC}"
+      ;;
+    Enforcing)
+      if setenforce 0 2>/dev/null && [ "$(getenforce 2>/dev/null)" = "Permissive" ]; then
+        echo -e "${GREEN}[✓] SELinux cambiado a permisivo en caliente${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${YELLOW}[!] No se pudo cambiar SELinux a permisivo en caliente${NC}"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+      ;;
+    Disabled)
+      echo -e "${YELLOW}[!] SELinux está Disabled en tiempo de ejecución; no se puede cambiar a permisivo en caliente. No se modificará su configuración de arranque automáticamente${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 0
+      ;;
+    *)
+      echo -e "${YELLOW}[!] No se pudo determinar el estado de SELinux ('$runtime_mode'); no se modificará su configuración${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 0
+      ;;
+  esac
+
+  if grep -q "^[[:space:]]*SELINUX=enforcing[[:space:]]*$" /etc/selinux/config 2>/dev/null; then
+    if sed -i 's/^[[:space:]]*SELINUX=enforcing[[:space:]]*$/SELINUX=permissive/' /etc/selinux/config; then
+      echo -e "${GREEN}[✓] SELinux configurado como permisivo en /etc/selinux/config${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${YELLOW}[!] No se pudo actualizar /etc/selinux/config${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  elif grep -q "^[[:space:]]*SELINUX=permissive[[:space:]]*$" /etc/selinux/config 2>/dev/null; then
+    echo -e "${GREEN}[✓] SELinux ya está configurado como permisivo en disco${NC}"
+  elif grep -q "^[[:space:]]*SELINUX=disabled[[:space:]]*$" /etc/selinux/config 2>/dev/null; then
+    echo -e "${YELLOW}[!] SELINUX=disabled está configurado en disco; no se cambiará automáticamente${NC}"
+    WARNINGS=$((WARNINGS + 1))
   else
-    echo -e "${GREEN}[✓] SELinux ya esta configurado como permisivo en disco${NC}"
+    echo -e "${YELLOW}[!] No se encontró una configuración SELINUX reconocida en /etc/selinux/config${NC}"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
