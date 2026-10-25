@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# OrangeBox Linux Hardening - auditoría agregada estrictamente de solo lectura.
-# Este script únicamente invoca los modos de verificación de los módulos.
+# OrangeBox Linux Hardening - auditoría agregada de módulos, estrictamente de solo lectura.
+# Evalúa los módulos de hardening; el benchmark CIS se ejecuta de forma independiente.
 # No crea backups, no instala paquetes y no aplica correcciones.
 # Sin 'set -u': mantiene compatibilidad con Bash 4.4 (CentOS/RHEL 8)
 # al expandir arrays vacíos de argumentos de auditoría.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.3.0"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -32,8 +32,8 @@ Uso:
   $0 --help      Muestra esta ayuda.
 
 Este programa NO aplica hardening ni ejecuta opciones --fix.
-No crea backups ni reportes persistentes. El informe CIS se muestra
-por pantalla y su salida de archivo se dirige a /dev/null.
+No crea backups ni reportes persistentes. No ejecuta el benchmark CIS ni calcula
+su porcentaje de cumplimiento; para eso usa ./cis-benchmark-check.sh.
 
 No se ejecutan módulos que instalan/eliminan paquetes, preparan hosts,
 modifican SELinux sin un modo de verificación garantizado o generan
@@ -41,14 +41,6 @@ reglas de firewall destructivas.
 EOF
 }
 
-CIS_SEEN=false
-CIS_PASS_COUNT=0
-CIS_FAIL_COUNT=0
-CIS_WARN_COUNT=0
-CIS_TOTAL_COUNT=0
-CIS_SCORE="N/D"
-declare -a CIS_CRITICAL_FINDINGS=()
-declare -a CIS_WARNING_FINDINGS=()
 declare -a SUPPLEMENTAL_CRITICAL=()
 declare -a SUPPLEMENTAL_FINDINGS=()
 
@@ -71,67 +63,8 @@ append_unique() {
   fi
 }
 
-collect_cis_summary() {
-  local output="$1" clean tenths whole decimal
-  clean="$(printf '%s\n' "$output" | strip_ansi)"
-
-  CIS_PASS_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests PASADOS:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
-  CIS_FAIL_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests FALLADOS \(CRITICOS\):[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
-  CIS_WARN_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests WARNING:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
-  CIS_TOTAL_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Total tests:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
-
-  [ -n "$CIS_PASS_COUNT" ] || CIS_PASS_COUNT=0
-  [ -n "$CIS_FAIL_COUNT" ] || CIS_FAIL_COUNT=0
-  [ -n "$CIS_WARN_COUNT" ] || CIS_WARN_COUNT=0
-  [ -n "$CIS_TOTAL_COUNT" ] || CIS_TOTAL_COUNT=$((CIS_PASS_COUNT + CIS_FAIL_COUNT + CIS_WARN_COUNT))
-  CIS_SEEN=true
-
-  if [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
-    tenths=$(((CIS_PASS_COUNT * 1000 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))
-    whole=$((tenths / 10))
-    decimal=$((tenths % 10))
-    CIS_SCORE="${whole},${decimal}%"
-  else
-    CIS_SCORE="N/D"
-  fi
-
-  mapfile -t CIS_CRITICAL_FINDINGS < <(
-    printf '%s\n' "$clean" | awk '
-      /\[FAIL\] / {
-        title=$0
-        sub(/^.*\[FAIL\] /, "", title)
-        getline
-        detail=$0
-        gsub(/[[:space:]]+/, " ", title)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", detail)
-        gsub(/[[:space:]]+/, " ", detail)
-        if (title != "") {
-          if (detail != "") print title " — " detail
-          else print title
-        }
-      }'
-  )
-  mapfile -t CIS_WARNING_FINDINGS < <(
-    printf '%s\n' "$clean" | awk '
-      /\[WARN\] [0-9]/ {
-        title=$0
-        sub(/^.*\[WARN\] /, "", title)
-        getline
-        detail=$0
-        gsub(/[[:space:]]+/, " ", title)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", detail)
-        gsub(/[[:space:]]+/, " ", detail)
-        if (title != "") {
-          if (detail != "") print title " — " detail
-          else print title
-        }
-      }'
-  )
-}
-
 collect_supplemental_findings() {
   local name="$1" output="$2" clean line finding lower
-  [ "$name" = "cis" ] && return 0
   clean="$(printf '%s\n' "$output" | strip_ansi)"
 
   while IFS= read -r line; do
@@ -185,8 +118,7 @@ collect_supplemental_findings() {
         ;;
     esac
 
-    # El fin de soporte de la distribución es un riesgo crítico independiente
-    # del score CIS. Otros hallazgos no-CIS se muestran aparte sin severidad CIS.
+    # El fin de soporte de la distribución es un riesgo crítico del módulo.
     if [ "$name" = "lpe-2026" ] && [[ "$lower" == *"fuera de soporte"* ]]; then
       append_unique critical "$name: $finding"
     else
@@ -196,7 +128,7 @@ collect_supplemental_findings() {
 }
 
 run_audit_module() {
-  local name="$1" script="" report_cis=false output="" rc=0
+  local name="$1" script="" output="" rc=0
   shift
   local -a args=("$@")
 
@@ -205,7 +137,6 @@ run_audit_module() {
     audit-listeners)   script="audit-listening-services.sh" ;;
     auditd-full)       script="auditd-hardening.sh" ;;
     bash-full)         script="bash-hardening.sh" ;;
-    cis)               script="cis-benchmark-check.sh"; report_cis=true ;;
     time-sync)         script="configure-time-sync.sh" ;;
     cpu-full)          script="cpu-hardening.sh" ;;
     cron-full)         script="cron-hardening.sh" ;;
@@ -239,26 +170,15 @@ run_audit_module() {
   echo "========== AUDITORÍA: $name ($script) =========="
   MODULES_RUN=$((MODULES_RUN + 1))
 
-  # Capturar cada ejecución en memoria permite generar un resumen consolidado
-  # sin crear archivos temporales ni reportes persistentes.
-  if [ "$report_cis" = true ]; then
-    if output="$(ORANGEBOX_CIS_REPORT_FILE=/dev/null bash "$SCRIPT_DIR/$script" "${args[@]}" 2>&1)"; then
-      rc=0
-    else
-      rc=$?
-    fi
+  # Capturar cada ejecución en memoria permite consolidar solo los hallazgos
+  # de los módulos, sin crear archivos temporales ni reportes persistentes.
+  if output="$(bash "$SCRIPT_DIR/$script" "${args[@]}" 2>&1)"; then
+    rc=0
   else
-    if output="$(bash "$SCRIPT_DIR/$script" "${args[@]}" 2>&1)"; then
-      rc=0
-    else
-      rc=$?
-    fi
+    rc=$?
   fi
 
   printf '%s\n' "$output"
-  if [ "$report_cis" = true ]; then
-    collect_cis_summary "$output"
-  fi
   collect_supplemental_findings "$name" "$output"
 
   if [ "$rc" -eq 0 ]; then
@@ -270,17 +190,17 @@ run_audit_module() {
 }
 
 print_final_summary() {
-  local pending=0 rounded_percentage=0 item
+  local item
 
   echo
   echo -e "${BLUE}============================================================${NC}"
-  echo -e "${BLUE} RESUMEN DE HALLAZGOS DE SEGURIDAD${NC}"
+  echo -e "${BLUE} RESUMEN DE AUDITORÍA DE MÓDULOS DE HARDENING${NC}"
   echo -e "${BLUE}============================================================${NC}"
   echo "Módulos ejecutados: $MODULES_RUN"
   echo "Errores de ejecución del auditor: $ERRORS"
 
   echo
-  echo "HALLAZGOS CRÍTICOS ADICIONALES FUERA DEL CIS (${#SUPPLEMENTAL_CRITICAL[@]}):"
+  echo "HALLAZGOS CRÍTICOS DE MÓDULOS (${#SUPPLEMENTAL_CRITICAL[@]}):"
   if [ "${#SUPPLEMENTAL_CRITICAL[@]}" -eq 0 ]; then
     echo "  - Ninguno reportado."
   else
@@ -290,46 +210,14 @@ print_final_summary() {
   fi
 
   echo
-  echo "CONTROLES CIS CRÍTICOS / FAIL PENDIENTES (${#CIS_CRITICAL_FINDINGS[@]}):"
-  if [ "${#CIS_CRITICAL_FINDINGS[@]}" -eq 0 ]; then
-    echo "  - Ninguno reportado."
-  else
-    for item in "${CIS_CRITICAL_FINDINGS[@]}"; do
-      echo "  - $item"
-    done
-  fi
-
+  echo "HALLAZGOS NO CRÍTICOS DE MÓDULOS: ${#SUPPLEMENTAL_FINDINGS[@]}"
   echo
-  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
-    pending=$((CIS_FAIL_COUNT + CIS_WARN_COUNT))
-    rounded_percentage=$(((CIS_PASS_COUNT * 100 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))
-    echo "PENDIENTES MENORES (solo cantidades; sin listar cada hallazgo):"
-    echo "  Controles CIS WARNING no cumplidos: $CIS_WARN_COUNT"
-    echo "  Hallazgos complementarios no críticos: ${#SUPPLEMENTAL_FINDINGS[@]}"
-    echo "  Total de controles CIS pendientes (FAIL + WARNING): $pending"
-  else
-    echo "No se pudo obtener un resumen CIS válido."
-    echo "Hallazgos complementarios no críticos: ${#SUPPLEMENTAL_FINDINGS[@]}"
-  fi
-
+  echo "El benchmark CIS no se ejecutó ni forma parte de estos conteos."
+  echo "Para evaluar exclusivamente el benchmark CIS, ejecuta: ./cis-benchmark-check.sh"
   echo
   echo "Auditoría de solo lectura: no se aplicaron correcciones ni se crearon backups."
   echo -e "${BLUE}============================================================${NC}"
-  echo
-
-  # Mantener las métricas consolidadas al final absoluto de la salida.
-  echo "============== RESULTADO FINAL CIS =============="
-  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
-    echo "Controles aprobados: $CIS_PASS_COUNT"
-    echo "Controles críticos FAIL: $CIS_FAIL_COUNT"
-    echo "Controles menores WARNING: $CIS_WARN_COUNT"
-    echo "Total de controles: $CIS_TOTAL_COUNT"
-    echo "Porcentaje de cumplimiento CIS: $CIS_SCORE (redondeado: ${rounded_percentage}%)"
-  else
-    echo "Porcentaje de cumplimiento CIS: N/D"
-  fi
 }
-
 
 main() {
   require_root
@@ -355,7 +243,7 @@ main() {
 
   local name
   for name in \
-    aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full \
+    aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full \
     usb-storage grub-full kernel-full lpe-2026 network-full password-full \
     gui-remove xinetd-remove rsyslog-full ssh-cis ssh-complete sudo-full filesystem-full
   do
