@@ -72,7 +72,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -103,8 +103,21 @@ echo "Usuario: $USER"
 echo "Fecha/Hora: $(date '+%Y-%m-%d %H:%M:%S')"
 echo ""
 
-# Prompt personalizado: [HORA] usuario@hostname directorio $
-export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;32m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] $ "
+# Resolver hostname FQDN una vez por shell para mostrarlo en el prompt.
+ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
+case "$ORANGEBOX_PROMPT_HOST" in
+    ""|localhost|localhost.localdomain) ORANGEBOX_PROMPT_HOST="$(hostname 2>/dev/null || true)" ;;
+esac
+[ -n "$ORANGEBOX_PROMPT_HOST" ] || ORANGEBOX_PROMPT_HOST=unknown
+
+orangebox_set_prompt() {
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@'"$ORANGEBOX_PROMPT_HOST"'\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # '
+    else
+        PS1='\[\e[2m\]\A\[\e[0m\] \[\e[1;32m\]\u@'"$ORANGEBOX_PROMPT_HOST"'\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] $ '
+    fi
+}
+orangebox_set_prompt
 
 # Historial con fecha y hora y sin límite de líneas.
 export HISTTIMEFORMAT="%F %T "
@@ -153,6 +166,10 @@ orangebox_history_guard() {
     esac
     export HISTSIZE HISTFILESIZE HISTFILE
     history -a
+    set -o emacs 2>/dev/null || true
+    bind '"\C-a": beginning-of-line' 2>/dev/null || true
+    bind '"\C-e": end-of-line' 2>/dev/null || true
+    orangebox_set_prompt
 }
 case ";${PROMPT_COMMAND:-};" in
     *";orangebox_history_guard;"*|*"; orangebox_history_guard;"*) ;;
@@ -377,7 +394,7 @@ EOF
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
-  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V3 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
+  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V4 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
     echo -e "${GREEN}[✓] /root/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -390,8 +407,8 @@ configure_root_bashrc() {
     if [ -f "$BASHRC_ROOT" ]; then
       tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /root/.bashrc${NC}"; return; }
       awk '
-        /^# ORANGEBOX BASH ROOT CONFIG V2 BEGIN$/ { skip_v2=1; next }
-        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V2 END$/ { skip_v2=0; next }
+        /^# ORANGEBOX BASH ROOT CONFIG V[23] BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V[23] END$/ { skip_v2=0; next }
         skip_v2 { next }
         /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
         /^PROMPT_COMMAND="orangebox_history_guard; / { next }
@@ -409,7 +426,7 @@ configure_root_bashrc() {
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH ROOT CONFIG V3 BEGIN
+# ORANGEBOX BASH ROOT CONFIG V4 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -455,7 +472,8 @@ bind '"\C-e": end-of-line' 2>/dev/null || true
 # Historial habilitado e ilimitado.
 
 # Prompt personalizado para root (en rojo)
-export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@\H\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # "
+ORANGEBOX_PROMPT_HOST="${ORANGEBOX_PROMPT_HOST:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)}"
+export PS1="\[\e[2m\]\A\[\e[0m\] \[\e[1;31m\]\u@${ORANGEBOX_PROMPT_HOST}\[\e[0m\] \[\e[1;34m\]\W\[\e[0m\] # "
 
 # Timeout más estricto para root (10 minutos) - solo si no está definido
 if [ -z "$TMOUT" ]; then
@@ -473,7 +491,7 @@ alias mv='mv -i'
 alias vi='vim'
 alias reboot='echo "Use shutdown -r now to reboot"'
 alias poweroff='echo "Use shutdown -h now to poweroff"'
-# ORANGEBOX BASH ROOT CONFIG V3 END
+# ORANGEBOX BASH ROOT CONFIG V4 END
 EOF
     echo -e "${GREEN}[✓] /root/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
@@ -507,7 +525,7 @@ show_reboot_warning() {
 configure_skel() {
   echo -e "\n${BLUE}[*] Configurando /etc/skel para nuevos usuarios...${NC}"
 
-  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V3 BEGIN' "$SKEL_BASHRC"; then
+  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V4 BEGIN' "$SKEL_BASHRC"; then
     echo -e "${GREEN}[✓] /etc/skel/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -519,8 +537,8 @@ configure_skel() {
     if [ -f "$SKEL_BASHRC" ]; then
       tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /etc/skel/.bashrc${NC}"; return; }
       awk '
-        /^# ORANGEBOX BASH DEFAULTS V2 BEGIN$/ { skip_v2=1; next }
-        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V2 END$/ { skip_v2=0; next }
+        /^# ORANGEBOX BASH DEFAULTS V[23] BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V[23] END$/ { skip_v2=0; next }
         skip_v2 { next }
         { print }
       ' "$SKEL_BASHRC" > "$tmp" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo leer /etc/skel/.bashrc${NC}"; return; }
@@ -533,7 +551,7 @@ configure_skel() {
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH DEFAULTS V3 BEGIN
+# ORANGEBOX BASH DEFAULTS V4 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -587,7 +605,7 @@ umask 027
 alias rm='rm -i'
 alias cp='cp -i'
 alias mv='mv -i'
-# ORANGEBOX BASH DEFAULTS V3 END
+# ORANGEBOX BASH DEFAULTS V4 END
 EOF
     echo -e "${GREEN}[✓] /etc/skel/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))

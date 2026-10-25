@@ -24,3 +24,5 @@ jobs:
             | xargs -0 -r -n1 bash -n
       - name: Test Bash history deletion guard
         run: bash tests/test_bash_history_guard.sh
+      - name: Test Bash FQDN prompt and Readline bindings
+        run: bash tests/test_bash_prompt_fqdn.sh

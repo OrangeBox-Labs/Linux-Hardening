@@ -554,16 +554,28 @@ set -o emacs 2>/dev/null || true
 bind '"\C-a": beginning-of-line' 2>/dev/null || true
 bind '"\C-e": end-of-line' 2>/dev/null || true
 
+# Resolver hostname FQDN una vez por shell; evitar consultas en cada prompt.
+ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
+case "$ORANGEBOX_PROMPT_HOST" in
+  ""|localhost|localhost.localdomain) ORANGEBOX_PROMPT_HOST="$(hostname 2>/dev/null || true)" ;;
+esac
+[ -n "$ORANGEBOX_PROMPT_HOST" ] || ORANGEBOX_PROMPT_HOST=unknown
+
 # Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@\H \w #\[\e[0m\] '
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w #\[\e[0m\] '
   else
-    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@\H \w $\[\e[0m\] '
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w $\[\e[0m\] '
   fi
 }
 
 orangebox_pre_prompt() {
+  # /root/.bashrc puede activar "set -o vi" después de cargar este perfil.
+  # Reafirmar el modo Emacs y las teclas antes de presentar cada prompt.
+  set -o emacs 2>/dev/null || true
+  bind '"\C-a": beginning-of-line' 2>/dev/null || true
+  bind '"\C-e": end-of-line' 2>/dev/null || true
   orangebox_history_guard
   history -a
   orangebox_set_prompt
