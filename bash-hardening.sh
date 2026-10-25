@@ -130,7 +130,7 @@ history() {
                 opts="${arg#-}"
                 case "$opts" in
                     *c*|*d*|*w*)
-                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
                         return 2
                         ;;
                 esac
@@ -419,7 +419,7 @@ history() {
                 opts="${arg#-}"
                 case "$opts" in
                     *c*|*d*|*w*)
-                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
                         return 2
                         ;;
                 esac
@@ -530,7 +530,7 @@ history() {
                 opts="${arg#-}"
                 case "$opts" in
                     *c*|*d*|*w*)
-                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
                         return 2
                         ;;
                 esac
