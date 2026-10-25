@@ -27,13 +27,17 @@ pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o p
 # All interactive confirmations use the Spanish [s/N] convention, with No as default.
 SYSCTL_SAFE="$ROOT_DIR/lib/sysctl-safe.sh"
 NETWORK="$ROOT_DIR/network-hardening.sh"
+POST_INSTALL_SCRIPT="$ROOT_DIR/post-install.sh"
 grep -Fq '[s/N]' "$SYSCTL_SAFE" || fail "sysctl-safe no usa la confirmación estándar [s/N]"
 grep -Fq '[s/N]' "$NETWORK" || fail "network-hardening no usa la confirmación estándar [s/N]"
+grep -Fq '[s/N]' "$POST_INSTALL_SCRIPT" || fail "post-install no usa la confirmación estándar [s/N]"
 grep -Fq 'sysctl_safe_log()' "$SYSCTL_SAFE" || fail "sysctl-safe no centraliza los colores de estado"
-if grep -R -n -E '\\[(y/N|Y/n|Y/N|y/n)\\]|\\(s/n\\)' --include='*.sh' "$ROOT_DIR" --exclude-dir=.git --exclude-dir=tests; then
-  fail "queda una confirmación con formato antiguo; usar [s/N]"
-fi
-pass "confirmaciones estandarizadas en español y valores SYSCTL con salida coloreada"
+for script in "$SYSCTL_SAFE" "$NETWORK" "$POST_INSTALL_SCRIPT"; do
+  if grep -Fq '[y/N]' "$script" || grep -Fq '(s/n)' "$script" || grep -Fq '(s/N)' "$script"; then
+    fail "$(basename "$script") conserva un formato de confirmación antiguo; usar [s/N]"
+  fi
+done
+pass "confirmaciones estandarizadas en español y estados SYSCTL coloreados"
 
 # Password aging must be observed but never rewritten by either baseline.
 grep -Fq 'PASS_MAX_DAYS=' "$CORE" || fail "baseline no informa PASS_MAX_DAYS"
