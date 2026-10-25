@@ -16,9 +16,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Validate modified hardening scripts
+      - name: Validate all Bash scripts
         run: |
-          bash -n linux-hardening.sh
-          bash -n network-hardening.sh
-          bash -n generate-iptables-rules.sh
-          bash -n configure-login-banners.sh
+          find . -path './.git' -prune -o -type f -name '*.sh' -print0 \
+            | xargs -0 -r -n1 bash -n
