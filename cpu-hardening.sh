@@ -11,6 +11,15 @@
 # ==============================================
 
 # Colores para output
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$SCRIPT_DIR/lib/sysctl-safe.sh" ]; then
+  # shellcheck source=lib/sysctl-safe.sh
+  source "$SCRIPT_DIR/lib/sysctl-safe.sh"
+else
+  echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -114,24 +123,20 @@ check_nx_support() {
 # 2. VERIFICAR KERNEL EXEC-SHIELD
 # ==============================================
 check_exec_shield() {
-  echo -e "\n${YELLOW}[*] Verificando Exec-Shield (proteccion adicional)...${NC}"
-
+  echo -e "\n${YELLOW}[*] Verificando Exec-Shield (protección adicional)...${NC}"
   if [ -f /proc/sys/kernel/exec-shield ]; then
-    exec_shield=$(cat /proc/sys/kernel/exec-shield 2>/dev/null)
-    if [ "$exec_shield" = "1" ] || [ "$exec_shield" = "2" ]; then
-      echo -e "${GREEN}[✓] Exec-Shield activo (valor: $exec_shield)${NC}"
-    else
-      echo -e "${RED}[!] Exec-Shield desactivado (valor: $exec_shield)${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        echo "kernel.exec-shield = 1" >/etc/sysctl.d/99-exec-shield.conf
-        sysctl -w kernel.exec-shield=1
-        echo -e "${GREEN}[✓] Exec-Shield activado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        echo -e "${YELLOW}    Recomendacion: sysctl -w kernel.exec-shield=1${NC}"
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
+    local exec_shield
+    exec_shield="$(sysctl -n kernel.exec-shield 2>/dev/null || cat /proc/sys/kernel/exec-shield 2>/dev/null || true)"
+    case "$exec_shield" in
+      1|2) echo -e "${GREEN}[✓] Exec-Shield activo (valor: $exec_shield)${NC}" ;;
+      *)
+        if sysctl_safe_apply "kernel.exec-shield" "1" "Exec-Shield: activa la protección NX/XD heredada cuando el kernel la soporta." "/etc/sysctl.d/99-exec-shield.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+          [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
+        else
+          WARNINGS=$((WARNINGS + 1))
+        fi
+        ;;
+    esac
   else
     echo -e "${YELLOW}[!] Exec-Shield no disponible (sistemas modernos usan NX/XD)${NC}"
   fi
@@ -142,75 +147,47 @@ check_exec_shield() {
 # ==============================================
 check_aslr() {
   echo -e "\n${YELLOW}[*] Verificando ASLR (Address Space Layout Randomization)...${NC}"
-
-  aslr_value=$(cat /proc/sys/kernel/randomize_va_space 2>/dev/null)
-
-  case $aslr_value in
-  0)
-    echo -e "${RED}[!] ASLR desactivado (valor: 0)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo "kernel.randomize_va_space = 2" >>/etc/sysctl.d/99-cis-hardening.conf 2>/dev/null
-      sysctl -w kernel.randomize_va_space=2
-      echo -e "${GREEN}[✓] ASLR activado (valor: 2)${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: sysctl -w kernel.randomize_va_space=2${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    ;;
-  1)
-    echo -e "${YELLOW}[!] ASLR parcial (valor: 1) - recomendado 2${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo "kernel.randomize_va_space = 2" >>/etc/sysctl.d/99-cis-hardening.conf 2>/dev/null
-      sysctl -w kernel.randomize_va_space=2
-      echo -e "${GREEN}[✓] ASLR mejorado (valor: 2)${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: sysctl -w kernel.randomize_va_space=2${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    ;;
-  2)
+  local aslr_value
+  aslr_value="$(sysctl -n kernel.randomize_va_space 2>/dev/null || true)"
+  if [ -z "$aslr_value" ]; then
+    echo -e "${YELLOW}[!] kernel.randomize_va_space no disponible${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return
+  fi
+  if [ "$aslr_value" = 2 ]; then
     echo -e "${GREEN}[✓] ASLR completo (valor: 2)${NC}"
-    ;;
-  esac
+    return
+  fi
+  if sysctl_safe_apply "kernel.randomize_va_space" "2" "ASLR: aleatoriza el espacio de direcciones de procesos y librerías." "/etc/sysctl.d/99-cis-hardening.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
+  fi
 }
 
 # ==============================================
 # 4. VERIFICAR RESTRICCION DE KERNEL PTRACE
 # ==============================================
 check_ptrace_scope() {
-  echo -e "\n${YELLOW}[*] Verificando restriccion ptrace...${NC}"
-
-  ptrace_value=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null)
-
+  echo -e "\n${YELLOW}[*] Verificando restricción ptrace...${NC}"
+  local ptrace_value
+  ptrace_value="$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null || true)"
   if [ -z "$ptrace_value" ]; then
     echo -e "${YELLOW}[!] Yama ptrace no disponible (kernel sin soporte)${NC}"
     return
   fi
-
-  case $ptrace_value in
-  0)
-    echo -e "${RED}[!] ptrace sin restricciones (valor: 0)${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo "kernel.yama.ptrace_scope = 1" >>/etc/sysctl.d/99-cis-hardening.conf 2>/dev/null
-      sysctl -w kernel.yama.ptrace_scope=1
-      echo -e "${GREEN}[✓] ptrace restringido (valor: 1)${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: sysctl -w kernel.yama.ptrace_scope=1${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    ;;
-  1)
-    echo -e "${GREEN}[✓] ptrace restringido a procesos hijos (valor: 1)${NC}"
-    ;;
-  2)
-    echo -e "${GREEN}[✓] ptrace restringido a root (valor: 2)${NC}"
-    ;;
-  3)
-    echo -e "${GREEN}[✓] ptrace completamente restringido (valor: 3)${NC}"
-    ;;
+  case "$ptrace_value" in
+    0)
+      if sysctl_safe_apply "kernel.yama.ptrace_scope" "1" "Restringe ptrace a procesos permitidos; puede afectar depuración, gdb/strace y ciertos monitores." "/etc/sysctl.d/99-cis-hardening.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+        [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
+      else
+        WARNINGS=$((WARNINGS + 1))
+      fi
+      ;;
+    1) echo -e "${GREEN}[✓] ptrace restringido a procesos hijos (valor: 1)${NC}" ;;
+    2) echo -e "${GREEN}[✓] ptrace restringido a root (valor: 2)${NC}" ;;
+    3) echo -e "${GREEN}[✓] ptrace completamente restringido (valor: 3)${NC}" ;;
+    *) echo -e "${YELLOW}[!] Valor ptrace_scope inesperado: $ptrace_value${NC}"; WARNINGS=$((WARNINGS + 1)) ;;
   esac
 }
 
