@@ -72,7 +72,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -377,7 +377,7 @@ EOF
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
-  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V2 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
+  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V3 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
     echo -e "${GREEN}[✓] /root/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -390,6 +390,9 @@ configure_root_bashrc() {
     if [ -f "$BASHRC_ROOT" ]; then
       tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /root/.bashrc${NC}"; return; }
       awk '
+        /^# ORANGEBOX BASH ROOT CONFIG V2 BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V2 END$/ { skip_v2=0; next }
+        skip_v2 { next }
         /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
         /^PROMPT_COMMAND="orangebox_history_guard; / { next }
         /^orangebox_history_guard\(\) \{$/ { skip=1; next }
@@ -406,7 +409,7 @@ configure_root_bashrc() {
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH ROOT CONFIG V2 BEGIN
+# ORANGEBOX BASH ROOT CONFIG V3 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -470,7 +473,7 @@ alias mv='mv -i'
 alias vi='vim'
 alias reboot='echo "Use shutdown -r now to reboot"'
 alias poweroff='echo "Use shutdown -h now to poweroff"'
-# ORANGEBOX BASH ROOT CONFIG V2 END
+# ORANGEBOX BASH ROOT CONFIG V3 END
 EOF
     echo -e "${GREEN}[✓] /root/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
@@ -504,7 +507,7 @@ show_reboot_warning() {
 configure_skel() {
   echo -e "\n${BLUE}[*] Configurando /etc/skel para nuevos usuarios...${NC}"
 
-  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V2 BEGIN' "$SKEL_BASHRC"; then
+  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V3 BEGIN' "$SKEL_BASHRC"; then
     echo -e "${GREEN}[✓] /etc/skel/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -512,12 +515,25 @@ configure_skel() {
   echo -e "${RED}[!] /etc/skel/.bashrc NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
+    # Remove only the previous OrangeBox-managed block before installing V3.
+    if [ -f "$SKEL_BASHRC" ]; then
+      tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /etc/skel/.bashrc${NC}"; return; }
+      awk '
+        /^# ORANGEBOX BASH DEFAULTS V2 BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V2 END$/ { skip_v2=0; next }
+        skip_v2 { next }
+        { print }
+      ' "$SKEL_BASHRC" > "$tmp" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo leer /etc/skel/.bashrc${NC}"; return; }
+      chmod --reference="$SKEL_BASHRC" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+      chown --reference="$SKEL_BASHRC" "$tmp" 2>/dev/null || chown root:root "$tmp"
+      mv "$tmp" "$SKEL_BASHRC" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo actualizar /etc/skel/.bashrc${NC}"; return; }
+    fi
     cat >>"$SKEL_BASHRC" <<'EOF'
 
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH DEFAULTS V2 BEGIN
+# ORANGEBOX BASH DEFAULTS V3 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -571,7 +587,7 @@ umask 027
 alias rm='rm -i'
 alias cp='cp -i'
 alias mv='mv -i'
-# ORANGEBOX BASH DEFAULTS V2 END
+# ORANGEBOX BASH DEFAULTS V3 END
 EOF
     echo -e "${GREEN}[✓] /etc/skel/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
