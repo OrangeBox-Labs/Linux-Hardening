@@ -159,12 +159,16 @@ En ese caso el script **no intenta escribir un sysctl inexistente**. Reporta que
 
 Esto es importante para soportar hosts CentOS 6 sin que `--fix` termine por error simplemente porque no existe el parametro sysctl.
 
+## Gestión segura del parámetro sysctl
+
+`user.max_user_namespaces=0` se gestiona mediante `lib/sysctl-safe.sh` y el perfil compartido `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`. Si el valor activo o persistente es diferente, el script presenta las asignaciones encontradas y el impacto sobre contenedores rootless, sandboxes y aplicaciones, y solicita confirmación antes de cambiarlo. Si no hay terminal interactiva, no aplica el cambio.
+
 ## Archivos modificados
 
 Con --fix puede crear:
 
 ~~~
-/etc/sysctl.d/99-orangebox-kernel-lpe-2026.conf
+/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
 /etc/modprobe.d/orangebox-kernel-lpe-2026.conf
 ~~~
 
