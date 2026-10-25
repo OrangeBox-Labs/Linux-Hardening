@@ -16,7 +16,7 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-REPORT_FILE="reporte_orangebox_cis_benchmark.log"
+REPORT_FILE="${ORANGEBOX_CIS_REPORT_FILE:-reporte_orangebox_cis_benchmark.log}"
 TOTAL_TESTS=0
 PASSED=0
 FAILED=0
