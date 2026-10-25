@@ -82,6 +82,27 @@ RULES
 assert_state CONTROLLED "$(lfa_nft_text_state "$nft_drop" ipv4 tcp 20201)" "política DROP en nft inet para IPv4"
 assert_state CONTROLLED "$(lfa_nft_text_state "$nft_drop" ipv6 udp 1514)" "política DROP en nft inet para IPv6"
 
+nft_ipv4_drop=$(cat <<'RULES'
+table ip filter {
+ chain INPUT {
+  type filter hook input priority filter; policy drop;
+ }
+}
+RULES
+)
+assert_state CONTROLLED "$(lfa_nft_text_state "$nft_ipv4_drop" ipv4 tcp 20201)" "política DROP en tabla nft ip"
+assert_state UNKNOWN "$(lfa_nft_text_state "$nft_ipv4_drop" ipv6 tcp 20201)" "no confundir tabla ip con IPv6"
+
+nft_ipv6_drop=$(cat <<'RULES'
+table ip6 filter {
+ chain INPUT {
+  type filter hook input priority filter; policy drop;
+ }
+}
+RULES
+)
+assert_state CONTROLLED "$(lfa_nft_text_state "$nft_ipv6_drop" ipv6 tcp 20201)" "política DROP en tabla nft ip6"
+
 nft_port=$(cat <<'RULES'
 table inet orangebox {
  chain input {
