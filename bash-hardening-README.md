@@ -25,7 +25,7 @@ Script de hardening para Bash que fortalece la seguridad del shell y el entorno 
 - Backup automático - guarda copia de seguridad antes de modificar
 - Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
 - Auditoría de comandos - envía todos los comandos a syslog
-- Historial por usuario - almacena historial segregado en /var/log/bash_history
+- Historial por usuario - guarda ~/.bash_history con permisos 0600; la auditoría central por syslog es independiente
 - Timeout de sesión - cierra sesiones inactivas
 - Prompt personalizado - muestra hora, usuario, hostname y directorio
 
@@ -102,7 +102,7 @@ sudo ./bash-hardening.sh
 - Activa HISTTIMEFORMAT para historial con fecha/hora
 - Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
 - Establece umask segura (027)
-- Hace el historial inmutable con readonly HISTFILE
+- Mantiene el historial habilitado y sin límite de líneas; no marca `HISTFILE` como `readonly` para no romper su configuración
 
 ### 2. Alias Avanzados (/etc/profile.d/aliases.sh)
 
@@ -119,23 +119,26 @@ sudo ./bash-hardening.sh
 
 ### 3. Auditoría a Syslog (/etc/profile.d/syslog_history.sh)
 
-- Captura todos los comandos ejecutados por cualquier usuario
-- Envía cada comando a syslog con nivel local1.notice
-- Registra usuario, directorio de trabajo y comando ejecutado
-- Configura /var/log/bash_commands.log para almacenar los logs
+- Envía eventos de comandos a syslog con nivel `local1.notice`
+- Registra usuario, directorio de trabajo y el texto de `BASH_COMMAND`
+- Configura `/var/log/bash_commands.log` para almacenar los eventos
+- **Advertencia:** `BASH_COMMAND` puede contener argumentos sensibles (tokens, contraseñas u otros secretos). No pases secretos como argumentos de línea de comandos si esta captura está habilitada; root también puede modificar los logs, por lo que no sustituyen una auditoría inmutable
 
 ### 4. Historial Seguro por Usuario (/etc/profile.d/history_secure.sh)
 
-- Crea archivos de historial individuales en /var/log/bash_history/
-- Formato: /var/log/bash_history/NOMBRE_USUARIO.history
-- Permisos seguros (640) para evitar acceso no autorizado
-- Separa el historial de root del de usuarios regulares
+- Usa un historial independiente para cada cuenta: `$HOME/.bash_history`
+- Crea el archivo con `umask 077` y ajusta a permisos `0600` cuando pertenece al usuario
+- Evita ubicar historiales de usuarios normales en `/var/log/bash_history`, cuyo directorio root:root 0750 impide que ellos creen/escriban sus propios archivos
+- `HISTTIMEFORMAT` guarda marcas de tiempo; `histappend` evita sobrescribir el archivo al cerrar una sesión
+- La shell bloquea de mejor esfuerzo `history -c`, `history -d` y `history -w` mediante una función; el hardening no limpia ni trunca el historial existente
+- **Limitación:** no es una garantía antimanipulación. Un usuario puede eludir el wrapper con `builtin history -c`, desactivar la función o editar el archivo. Para una auditoría resistente a alteraciones se necesita logging remoto/controlado (por ejemplo, auditd y syslog remoto con permisos y retención adecuados)
+- La auditoría central por syslog se configura por separado y tiene una advertencia de privacidad (ver más abajo)
 
 ### 5. Configuración de Root (/root/.bashrc)
 
 - Prompt en color rojo para identificar fácilmente sesiones root
 - Timeout más estricto (10 minutos)
-- Tamaños de historial aumentados (20000 en memoria, 100000 en disco)
+- Historial ilimitado (`HISTSIZE=-1`, `HISTFILESIZE=-1`) y archivo `~/.bash_history` protegido con permisos `0600`
 - Alias con confirmaciones obligatorias
 
 ### 6. Configuración para Nuevos Usuarios (/etc/skel/.bashrc)
@@ -190,7 +193,7 @@ bash-hardening.sh
 | /root/.bashrc | Configuración específica para root |
 | /etc/skel/.bashrc | Configuración para nuevos usuarios |
 | /etc/rsyslog.d/30-bash.conf | Configuración de logging |
-| /var/log/bash_history/ | Directorio de historiales por usuario |
+| `$HOME/.bash_history` | Historial individual por usuario, protegido con permisos `0600` |
 | /var/log/bash_commands.log | Log de comandos ejecutados |
 
 ## Personalización
@@ -213,19 +216,24 @@ Para usuario root: TMOUT=600 (10 minutos)
 
 ### Tamaños de historial
 
-Usuarios regulares: HISTSIZE=10000, HISTFILESIZE=50000
-Usuario root: HISTSIZE=20000, HISTFILESIZE=100000
+Todos los usuarios: `HISTSIZE=-1`, `HISTFILESIZE=-1` (sin límite de líneas). El archivo puede crecer indefinidamente; conviene definir una política de retención/rotación si se necesita limitar el uso de disco.
 
 ## Solución de Problemas
 
 ### Los cambios no se ven en la sesión actual
 
-```
-Aplicar los cambios manualmente:
+Abrir una nueva sesión interactiva o aplicar manualmente:
+
+```bash
+set -o emacs
+bind '"\C-a": beginning-of-line'
+bind '"\C-e": end-of-line'
 source /etc/profile.d/orangebox.sh
 source /etc/profile.d/aliases.sh
 source ~/.bashrc
 ```
+
+El modo Emacs asigna `Ctrl+A` al inicio de la línea y `Ctrl+E` al final. El hardening configura estas asociaciones en las sesiones interactivas.
 
 ### Los comandos no se registran en syslog
 

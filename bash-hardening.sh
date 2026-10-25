@@ -72,7 +72,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -118,21 +118,62 @@ unset HISTIGNORE
 set -o history
 shopt -s histappend
 
+# Protección de mejor esfuerzo contra borrado o sobrescritura del historial.
+# No es una frontera de seguridad: builtin history y la edición directa del
+# archivo pueden eludir esta función.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
+
 orangebox_history_guard() {
     set -o history
     HISTSIZE=-1
     HISTFILESIZE=-1
-    if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then
-        HISTFILE="$HOME/.bash_history"
-    fi
+    case "${HISTFILE:-}" in
+        ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="$HOME/.bash_history" ;;
+    esac
     export HISTSIZE HISTFILESIZE HISTFILE
     history -a
 }
 case ";${PROMPT_COMMAND:-};" in
-    *";orangebox_history_guard;"*) ;;
-    *) PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND:-}" ;;
+    *";orangebox_history_guard;"*|*"; orangebox_history_guard;"*) ;;
+    *)
+        if [ -n "${PROMPT_COMMAND:-}" ]; then
+            PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_history_guard"
+        else
+            PROMPT_COMMAND="orangebox_history_guard"
+        fi
+        ;;
 esac
 export PROMPT_COMMAND
+
+# Readline interactivo: comportamiento Bash estándar para edición de comandos.
+case $- in
+  *i*)
+    set -o emacs 2>/dev/null || true
+    bind '"\C-a": beginning-of-line' 2>/dev/null || true
+    bind '"\C-e": end-of-line' 2>/dev/null || true
+    ;;
+esac
 
 # Timeout de sesión inactiva (15 minutos) - solo si no está definido
 if [ -z "$TMOUT" ]; then
@@ -295,7 +336,7 @@ EOF
 configure_secure_history() {
   echo -e "\n${BLUE}[*] Configurando historial seguro por usuario...${NC}"
 
-  if [ -f "$HISTORY_SECURE" ] && grep -q "OrangeBox" "$HISTORY_SECURE" 2>/dev/null; then
+  if [ -f "$HISTORY_SECURE" ] && grep -q "OrangeBox" "$HISTORY_SECURE" 2>/dev/null && grep -Fq 'HISTFILE="$HOME/.bash_history"' "$HISTORY_SECURE"; then
     echo -e "${GREEN}[✓] Historial seguro ya configurado${NC}"
     return 0
   fi
@@ -303,25 +344,25 @@ configure_secure_history() {
   echo -e "${RED}[!] Historial seguro NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
-    # Crear directorio para historial
-    mkdir -p /var/log/bash_history
-    chmod 750 /var/log/bash_history
-    chown root:root /var/log/bash_history
-
     cat >"$HISTORY_SECURE" <<'EOF'
 # ==============================================
 # Historial seguro por usuario - OrangeBox Labs
 # ==============================================
 
-# Crear archivo de historial por usuario en /var/log/bash_history
-if [ ! -d "/var/log/bash_history" ]; then
-    mkdir -p /var/log/bash_history
-    chmod 750 /var/log/bash_history
-fi
+# Guardar el historial en el home propio de cada usuario.
+# /var/log/bash_history root:root 0750 impide que los usuarios creen
+# allí sus propios historiales y provocaba pérdida de historial.
+case $- in
+    *i*) ;;
+    *) return 0 ;;
+esac
 
-HISTORY_FILE="/var/log/bash_history/${USER}.history"
-touch "$HISTORY_FILE" 2>/dev/null && chmod 640 "$HISTORY_FILE" 2>/dev/null
-export HISTFILE="$HISTORY_FILE"
+if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+    HISTFILE="$HOME/.bash_history"
+    export HISTFILE
+    if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+    if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+fi
 EOF
     echo -e "${GREEN}[✓] Historial seguro configurado${NC}"
     FIXED=$((FIXED + 1))
@@ -336,7 +377,7 @@ EOF
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
-  if grep -q "OrangeBox" "$BASHRC_ROOT" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$BASHRC_ROOT" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$BASHRC_ROOT" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$BASHRC_ROOT"; then
+  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V3 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
     echo -e "${GREEN}[✓] /root/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -344,30 +385,71 @@ configure_root_bashrc() {
   echo -e "${RED}[!] /root/.bashrc NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
+    # Remove only the legacy OrangeBox history reload that cleared/re-read the
+    # whole history at every prompt, preserving unrelated user configuration.
+    if [ -f "$BASHRC_ROOT" ]; then
+      tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /root/.bashrc${NC}"; return; }
+      awk '
+        /^# ORANGEBOX BASH ROOT CONFIG V2 BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V2 END$/ { skip_v2=0; next }
+        skip_v2 { next }
+        /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
+        /^PROMPT_COMMAND="orangebox_history_guard; / { next }
+        /^orangebox_history_guard\(\) \{$/ { skip=1; next }
+        skip && /^\}$/ { skip=0; next }
+        skip { next }
+        { print }
+      ' "$BASHRC_ROOT" > "$tmp" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo leer /root/.bashrc${NC}"; return; }
+      chmod --reference="$BASHRC_ROOT" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+      chown --reference="$BASHRC_ROOT" "$tmp" 2>/dev/null || chown root:root "$tmp"
+      mv "$tmp" "$BASHRC_ROOT" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo actualizar /root/.bashrc${NC}"; return; }
+    fi
     cat >>"$BASHRC_ROOT" <<'EOF'
 
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
+# ORANGEBOX BASH ROOT CONFIG V3 BEGIN
+
+# Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
+# No impide el uso explícito de "builtin history" ni la edición directa del archivo.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
 
 # Historial mejorado
 export HISTTIMEFORMAT="%F %T "
 export HISTSIZE=-1
 export HISTFILESIZE=-1
 export HISTCONTROL=
-if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then export HISTFILE="$HOME/.bash_history"; fi
+export HISTFILE="$HOME/.bash_history"
 unset HISTIGNORE
 set -o history
 shopt -s histappend
-export PROMPT_COMMAND="history -a; history -c; history -r; ${PROMPT_COMMAND:-}"
-orangebox_history_guard() {
-    set -o history
-    HISTSIZE=-1
-    HISTFILESIZE=-1
-    if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then HISTFILE="$HOME/.bash_history"; fi
-    export HISTSIZE HISTFILESIZE HISTFILE
-}
-PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND}"
+if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+set -o emacs 2>/dev/null || true
+bind '"\C-a": beginning-of-line' 2>/dev/null || true
+bind '"\C-e": end-of-line' 2>/dev/null || true
 
 
 # Historial habilitado e ilimitado.
@@ -391,6 +473,7 @@ alias mv='mv -i'
 alias vi='vim'
 alias reboot='echo "Use shutdown -r now to reboot"'
 alias poweroff='echo "Use shutdown -h now to poweroff"'
+# ORANGEBOX BASH ROOT CONFIG V3 END
 EOF
     echo -e "${GREEN}[✓] /root/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
@@ -424,7 +507,7 @@ show_reboot_warning() {
 configure_skel() {
   echo -e "\n${BLUE}[*] Configurando /etc/skel para nuevos usuarios...${NC}"
 
-  if [ -f "$SKEL_BASHRC" ] && grep -q "OrangeBox" "$SKEL_BASHRC" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$SKEL_BASHRC" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$SKEL_BASHRC"; then
+  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V3 BEGIN' "$SKEL_BASHRC"; then
     echo -e "${GREEN}[✓] /etc/skel/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -432,20 +515,68 @@ configure_skel() {
   echo -e "${RED}[!] /etc/skel/.bashrc NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
+    # Remove only the previous OrangeBox-managed block before installing V3.
+    if [ -f "$SKEL_BASHRC" ]; then
+      tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /etc/skel/.bashrc${NC}"; return; }
+      awk '
+        /^# ORANGEBOX BASH DEFAULTS V2 BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V2 END$/ { skip_v2=0; next }
+        skip_v2 { next }
+        { print }
+      ' "$SKEL_BASHRC" > "$tmp" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo leer /etc/skel/.bashrc${NC}"; return; }
+      chmod --reference="$SKEL_BASHRC" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+      chown --reference="$SKEL_BASHRC" "$tmp" 2>/dev/null || chown root:root "$tmp"
+      mv "$tmp" "$SKEL_BASHRC" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo actualizar /etc/skel/.bashrc${NC}"; return; }
+    fi
     cat >>"$SKEL_BASHRC" <<'EOF'
 
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
+# ORANGEBOX BASH DEFAULTS V3 BEGIN
+
+# Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
+# No impide el uso explícito de "builtin history" ni la edición directa del archivo.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
 
 export HISTTIMEFORMAT="%F %T "
 export HISTSIZE=-1
 export HISTFILESIZE=-1
 export HISTCONTROL=
-if [ -z "${HISTFILE:-}" ] || [ "$HISTFILE" = /dev/null ] || [ "$HISTFILE" = /dev/zero ]; then export HISTFILE="$HOME/.bash_history"; fi
+export HISTFILE="$HOME/.bash_history"
 unset HISTIGNORE
 set -o history
 shopt -s histappend
+if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+case $- in
+  *i*)
+    set -o emacs 2>/dev/null || true
+    bind '"\C-a": beginning-of-line' 2>/dev/null || true
+    bind '"\C-e": end-of-line' 2>/dev/null || true
+    ;;
+esac
 
 if [ -z "$TMOUT" ]; then
     export TMOUT=900
@@ -456,6 +587,7 @@ umask 027
 alias rm='rm -i'
 alias cp='cp -i'
 alias mv='mv -i'
+# ORANGEBOX BASH DEFAULTS V3 END
 EOF
     echo -e "${GREEN}[✓] /etc/skel/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))

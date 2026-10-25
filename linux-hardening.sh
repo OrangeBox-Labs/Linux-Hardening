@@ -422,7 +422,8 @@ normalize_history_dotfile() {
   if grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
      grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&
      grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file" &&
-     ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file"; then
+     ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file" &&
+     ! grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
     ok "$file: historial habilitado y sin límite"
     return 0
   fi
@@ -437,6 +438,12 @@ normalize_history_dotfile() {
     $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
     $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
     skip { next }
+    # Remove legacy code that clears/reloads all history on every prompt.
+    /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
+    /^PROMPT_COMMAND="orangebox_history_guard; / { next }
+    /^orangebox_history_guard\(\) \{$/ { skip_guard=1; next }
+    skip_guard && /^\}$/ { skip_guard=0; next }
+    skip_guard { next }
     /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
     { print }
   ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
@@ -449,7 +456,7 @@ export HISTFILESIZE=-1
 export HISTCONTROL=
 unset HISTIGNORE
 case "${HISTFILE:-}" in
-  ""|/dev/null|/dev/zero) export HISTFILE="$HOME/.bash_history" ;;
+  ""|/dev/null|/dev/zero|/var/log/bash_history/*) export HISTFILE="$HOME/.bash_history" ;;
 esac
 shopt -s histappend
 # ORANGEBOX UNLIMITED HISTORY END
@@ -488,12 +495,39 @@ case $- in
   *) return 0 ;;
 esac
 
+# Protección de mejor esfuerzo: impedir borrado/sobrescritura accidental por
+# los comandos comunes "history -c", "history -d" y "history -w".
+# No es una frontera de seguridad: "builtin history", edición del archivo o
+# modificación de la shell pueden eludir este wrapper.
+history() {
+  local arg opts
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -?*)
+        opts="${arg#-}"
+        case "$opts" in
+          *c*|*d*|*w*)
+            printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+            return 2
+            ;;
+        esac
+        case "$opts" in
+          *p*|*s*) break ;;
+        esac
+        ;;
+      *) break ;;
+    esac
+  done
+  builtin history "$@"
+}
+
 orangebox_history_guard() {
   set -o history 2>/dev/null || true
   HISTSIZE=-1
   HISTFILESIZE=-1
   case "${HISTFILE:-}" in
-    ""|/dev/null|/dev/zero) HISTFILE="${HOME}/.bash_history" ;;
+    ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="${HOME}/.bash_history" ;;
   esac
   export HISTSIZE HISTFILESIZE HISTFILE
   HISTCONTROL=
@@ -504,6 +538,21 @@ orangebox_history_guard() {
 
 export HISTTIMEFORMAT='%F %T '
 orangebox_history_guard
+
+orangebox_secure_history_file() {
+  [ -n "${HOME:-}" ] && [ -d "$HOME" ] || return 0
+  [ "$HISTFILE" = "$HOME/.bash_history" ] || return 0
+  if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+  if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+}
+orangebox_secure_history_file
+
+# Normalizar la edición de línea en Bash para administración.
+# Ctrl+A = inicio de línea; Ctrl+E = final de línea.
+# No depender de un ~/.inputrc o /etc/inputrc personalizado.
+set -o emacs 2>/dev/null || true
+bind '"\C-a": beginning-of-line' 2>/dev/null || true
+bind '"\C-e": end-of-line' 2>/dev/null || true
 
 # Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
@@ -520,10 +569,10 @@ orangebox_pre_prompt() {
   orangebox_set_prompt
 }
 case ";${PROMPT_COMMAND:-};" in
-  *";orangebox_pre_prompt;"*) ;;
+  *";orangebox_pre_prompt;"*|*"; orangebox_pre_prompt;"*) ;;
   *)
     if [ -n "${PROMPT_COMMAND:-}" ]; then
-      PROMPT_COMMAND="orangebox_pre_prompt; ${PROMPT_COMMAND}"
+      PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_pre_prompt"
     else
       PROMPT_COMMAND="orangebox_pre_prompt"
     fi
