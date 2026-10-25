@@ -30,12 +30,21 @@ MOCK_COMMAND
   chmod 755 "$MOCK_BIN/$cmd"
 done
 
+# Do not allow inherited aliases/functions to shadow the mocks. Bash can import
+# exported functions from the parent shell (for example through BASH_FUNC_*).
+for cmd in iptables ip6tables iptables-save iptables-legacy-save ip6tables-save ip6tables-legacy-save; do
+  unset -f "$cmd" 2>/dev/null || :
+  unalias "$cmd" 2>/dev/null || :
+done
+
 export PATH="$MOCK_BIN:$PATH"
 export FAKE_RULES_DIR="$RULES"
 # Clear Bash's command hash so tests always execute the mocks just created.
 hash -r
-[ "$(command -v iptables)" = "$MOCK_BIN/iptables" ] || fail "el mock de iptables no está primero en PATH"
-[ "$(command -v iptables-save)" = "$MOCK_BIN/iptables-save" ] || fail "el mock de iptables-save no está primero en PATH"
+resolved_iptables="$(type -P iptables 2>/dev/null || true)"
+resolved_iptables_save="$(type -P iptables-save 2>/dev/null || true)"
+[ "$resolved_iptables" = "$MOCK_BIN/iptables" ] || fail "el mock de iptables no se resuelve desde PATH (type -P=$resolved_iptables; command -v=$(command -v iptables 2>/dev/null || true))"
+[ "$resolved_iptables_save" = "$MOCK_BIN/iptables-save" ] || fail "el mock de iptables-save no se resuelve desde PATH (type -P=$resolved_iptables_save; command -v=$(command -v iptables-save 2>/dev/null || true))"
 printf '%s\n' 'iptables v1.8.10 (nf_tables)' > "$RULES/iptables.version"
 [ "$(firewall_frontend_backend iptables)" = nf_tables ] || fail "no detectó backend nf_tables"
 printf '%s\n' 'iptables v1.8.10 (legacy)' > "$RULES/iptables.version"
