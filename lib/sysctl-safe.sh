@@ -119,7 +119,11 @@ sysctl_safe_write_profile() {
         END {exit(found?0:1)}
       ' "$tmp" || { rm -f "$tmp"; echo "[SYSCTL][ERROR] No se pudo actualizar $key dentro del bloque gestionado."; return 1; }
     else
-      { echo "# OrangeBox managed sysctl profile"; echo "$begin"; echo "$key = $value"; echo "$end"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+      if [ "$begin" = "# BEGIN ORANGEBOX SYNFLOOD" ]; then
+        { echo "# OrangeBox managed SYN flood profile"; echo "$begin"; echo "$key = $value"; echo "$end"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+      else
+        { echo "# OrangeBox managed sysctl profile"; echo "$begin"; echo "$key = $value"; echo "$end"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+      fi
     fi
   else
     if [ -f "$file" ]; then
