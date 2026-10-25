@@ -118,20 +118,20 @@ Impacto: El sistema descarta paquetes que llegan por una interfaz que no es la c
 
 ⚠️ ADVERTENCIA: Puede causar problemas si su red utiliza enrutamiento asimetrico (BGP, OSPF). En ese caso, mantener rp_filter = 0 o 2.
 
-### 3.3.8 - Habilitar SYN Cookies
+### 3.3.8 - Habilitar SYN Cookies y revisar las colas TCP
 
-Parametros modificados:
+Parametros que propone el baseline:
 ```
   net.ipv4.tcp_syncookies = 1
   net.ipv4.tcp_max_syn_backlog = 4096
   net.core.somaxconn = 4096
-  net.ipv4.tcp_synack_retries = 3
-  net.ipv4.tcp_syn_retries = 5
 ```
 
-Que previene: Ataques de denial of service por inundacion SYN (SYN flood). El atacante envia muchas solicitudes de conexion sin completarlas, agotando la cola del sistema.
+El baseline **no modifica automáticamente** `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`. Estos parámetros controlan los reintentos TCP y su valor adecuado depende de la tolerancia a pérdida/latencia, del patrón de conexiones y de la política del proveedor (por ejemplo, cPanel/CloudLinux). Se preservan los valores existentes; cualquier ajuste debe tratarse como tuning independiente, respaldado por métricas y validación operativa.
 
-Impacto: Cuando la cola de conexiones pendientes se llena, el kernel usa SYN cookies para seguir aceptando conexiones legitimas. No afecta el rendimiento normal.
+Que previene: `tcp_syncookies=1` permite al kernel usar SYN cookies cuando la cola de conexiones pendientes se desborda; los parámetros de backlog ajustan las colas de conexiones pendientes y completadas.
+
+Impacto: No se debe asumir que un valor de backlog es óptimo para todas las cargas. Revise contadores TCP, límites de las aplicaciones y uso de recursos antes de cambiar valores. SYN cookies son un mecanismo de respaldo ante el desbordamiento de la cola, no un sustituto de diagnosticar una sobrecarga causada por tráfico legítimo.
 
 ### 3.3.9 - Deshabilitar anuncios de router IPv6
 
