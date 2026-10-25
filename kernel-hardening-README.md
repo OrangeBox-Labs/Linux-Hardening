@@ -106,12 +106,16 @@ maxlogins: rango 3-100, valor recomendado 10
 core: rango 0-unlimited, valor recomendado 0
 ```
 
+## Gestión segura de sysctl
+
+El script utiliza `lib/sysctl-safe.sh` y el perfil compartido `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`. En modo `--fix`, cualquier cambio de valor activo requiere confirmación individual; el mensaje incluye las definiciones existentes por archivo y línea, el valor propuesto y su impacto. Los perfiles gestionados por Google Cloud, cPanel y CloudLinux no se editan. Para parámetros definidos en `/etc/sysctl.conf`, la asignación conflictiva solo se actualiza después de confirmar y se respalda. No añadas duplicados manualmente sin revisar primero `sysctl_safe_inventory`/`sysctl` y el orden de precedencia.
+
 ## Como modificar parametros
 
 ### Opcion A: Editar el archivo generado por el script
 
 ```
-vim /etc/sysctl.d/99-cis-hardening.conf
+vim /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
 ```
 
 ### Opcion B: Cambiar un parametro especifico temporalmente
@@ -123,8 +127,8 @@ sysctl -w kernel.dmesg_restrict=0
 ### Opcion C: Cambiar un parametro permanentemente
 
 ```
-echo "kernel.dmesg_restrict = 0" >> /etc/sysctl.d/99-cis-hardening.conf
-sysctl -p /etc/sysctl.d/99-cis-hardening.conf
+echo "kernel.dmesg_restrict = 0" >> /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+sysctl -p /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
 ```
 
 ### Opcion D: Cambiar limites de recursos
