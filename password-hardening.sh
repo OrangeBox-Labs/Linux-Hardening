@@ -18,6 +18,7 @@ SU_PAM=/etc/pam.d/su
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok(){ echo -e "$GREEN[OK]$NC $*"; }
+info(){ echo -e "$BLUE[INFO]$NC $*"; }
 warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }
 bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }
 die(){ echo -e "$RED[ERROR]$NC $*"; exit 1; }
@@ -51,7 +52,7 @@ pwquality_module(){
   set_conf_value "$PWQUALITY_CONF" usercheck 1
   set_conf_value "$PWQUALITY_CONF" maxrepeat 3
   set_conf_value "$PWQUALITY_CONF" maxsequence 3
-  warn "No se agrega pam_pwquality.so a password-auth/system-auth: RHEL recomienda gestionar PAM mediante authselect y la edición manual puede romper autenticación."
+  info "No se agrega pam_pwquality.so a password-auth/system-auth: se debe gestionar PAM mediante authselect; la edición manual puede romper autenticación."
 }
 
 password_aging_module(){
@@ -61,7 +62,7 @@ password_aging_module(){
   set_conf_value "$LOGIN_DEFS" PASS_MAX_DAYS -1
   set_conf_value "$LOGIN_DEFS" PASS_MIN_DAYS 0
   set_conf_value "$LOGIN_DEFS" PASS_WARN_AGE -1
-  warn "IMPORTANTE: login.defs solo define defaults; no cambia el aging ya grabado en cuentas existentes. Se auditan abajo y NO se ejecuta chage masivo automáticamente."
+  info "login.defs solo define defaults; no cambia el aging de cuentas existentes. Se auditan abajo y no se ejecuta chage masivo automáticamente."
 
   if command -v chage >/dev/null 2>&1; then
     local found=0 line user max
@@ -93,7 +94,7 @@ pam_audit_module(){
     [ -f "$f" ] || continue
     grep -q 'pam_faillock.so' "$f" && ok "$f: pam_faillock ya presente" || warn "$f: pam_faillock no configurado"
   done
-  warn "No se inserta pam_faillock automáticamente. El orden de PAM es crítico y una modificación incorrecta puede bloquear todos los accesos."
+  info "No se inserta pam_faillock automáticamente. El orden de PAM es crítico y una modificación incorrecta puede bloquear todos los accesos."
 }
 
 su_wheel_module(){
@@ -123,7 +124,7 @@ file_permissions_module(){
     local p; p=$(stat -c %a "$f" 2>/dev/null || true)
     case "$f" in
       /etc/passwd|/etc/group) [ "$p" -le 644 ] 2>/dev/null && ok "$f=$p" || warn "$f=$p";;
-      *) [ "$p" = 600 ] || [ "$p" = 640 ] || [ "$p" = 000 ] && ok "$f=$p" || warn "$f=$p; no se fuerza a 000 porque puede romper herramientas/backup";;
+      *) [ "$p" = 600 ] || [ "$p" = 640 ] || [ "$p" = 0 ] || [ "$p" = 000 ] && ok "$f=$p" || warn "$f=$p; no se fuerza a 000 porque puede romper herramientas/backup";;
     esac
   done
 }
@@ -135,7 +136,7 @@ encrypt_method_module(){
     warn "ENCRYPT_METHOD no configurado; SHA-512 es preferible para nuevos hashes"
     $AUTO_FIX && { backup_once "$LOGIN_DEFS"; printf '\nENCRYPT_METHOD SHA512\n' >> "$LOGIN_DEFS"; FIXED=$((FIXED+1)); }
   else warn "ENCRYPT_METHOD=$current; no se modifica automáticamente si la plataforma/autenticación externa puede depender de otra configuración"; fi
-  warn "No se modifica pam_unix.so mediante sed y no se reescribe system-auth/password-auth."
+  info "No se modifica pam_unix.so mediante sed ni se reescriben system-auth/password-auth automáticamente."
 }
 
 main(){
