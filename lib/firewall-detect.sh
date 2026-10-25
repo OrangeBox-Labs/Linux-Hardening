@@ -39,7 +39,10 @@ firewall_print_backend_diagnostics() {
 
   echo "  Volcados de reglas disponibles:"
   for save_cmd in iptables-save iptables-legacy-save ip6tables-save ip6tables-legacy-save; do
-    command -v "$save_cmd" >/dev/null 2>&1 || continue
+    if ! command -v "$save_cmd" >/dev/null 2>&1; then
+      printf '    %s: NO DISPONIBLE (no se puede verificar este ruleset con la herramienta instalada)\n' "$save_cmd"
+      continue
+    fi
     rc=0
     output="$("$save_cmd" 2>/dev/null)" || rc=$?
     if [ "$rc" -eq 0 ]; then
@@ -49,7 +52,7 @@ firewall_print_backend_diagnostics() {
         printf '      [INFO] Hay referencias a Imunify360 en este ruleset.\n'
       fi
     else
-      printf '    %s: existe pero no pudo consultar las reglas (rc=%s)\n' "$save_cmd" "$rc"
+      printf '    %s: no se pudo consultar las reglas (rc=%s); resultado indeterminado\n' "$save_cmd" "$rc"
     fi
   done
 }
