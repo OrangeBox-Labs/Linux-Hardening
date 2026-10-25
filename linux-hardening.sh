@@ -977,10 +977,18 @@ run_internal_module_with_confirmation() {
         # skips use_pty on cPanel hosts. A generic prompt here is redundant.
         info "Sudo se comprueba primero; solo su control específico puede solicitar confirmación."
         ;;
-      kernel|synflood)
+      kernel)
         # sysctl_safe_apply verifies each live and persistent value before it
         # asks. A module-wide prompt is redundant and must never precede checks.
-        info "Se comprobarán los parámetros uno por uno; solo los que falten o difieran solicitarán confirmación."
+        info "Se comprobarán los parámetros del kernel uno por uno; solo los que falten o difieran solicitarán confirmación."
+        ;;
+      synflood)
+        # The same rule applies to SYN cookies/backlog: ask per setting only.
+        if synflood_state_compliant; then
+          info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
+        else
+          info "SYN cookies/backlog: se revisará cada parámetro; solo los que falten o difieran solicitarán confirmación."
+        fi
         ;;
       rsyslog)
         rsyslog_state_status
@@ -1194,8 +1202,8 @@ main() {
     echo
     echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
-    echo -e "$BLUE[INFO]$NC Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; los módulos verifican primero el estado y preguntan solo por cambios pendientes."
+    echo -e "$BLUE[INFO]$NC Los controles sysctl preguntan por parámetro; si ya cumplen, solo muestran [OK] y no se modifican."
     run_module banners
     run_module bash
 
