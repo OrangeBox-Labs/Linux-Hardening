@@ -264,14 +264,16 @@ check_mount_options() {
   echo -e "    Opciones actuales: ${current_opts}"
   echo -e "    Opciones requeridas: ${required_opts}"
 
-  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-    local new_opts="$current_opts"
-    for opt in "${required_array[@]}"; do
-      if [[ ! "$new_opts" == *"$opt"* ]]; then
-        new_opts="$new_opts,$opt"
-      fi
-    done
+  # Construir las opciones faltantes en ambos modos para que el comando
+  # sugerido en auditoría nunca use una variable vacía.
+  local new_opts="$current_opts"
+  for opt in "${required_array[@]}"; do
+    if [[ ! "$new_opts" == *"$opt"* ]]; then
+      new_opts="$new_opts,$opt"
+    fi
+  done
 
+  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
     echo -e "${YELLOW}[*] Aplicando nuevas opciones...${NC}"
     if mount -o remount,"$new_opts" "$mount_point" 2>/dev/null; then
       echo -e "${GREEN}[✓] ${mount_point} remontado con exito${NC}"
