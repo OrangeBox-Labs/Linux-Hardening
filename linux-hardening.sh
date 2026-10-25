@@ -15,6 +15,14 @@ else
   echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
   exit 1
 fi
+if [ -r "$SCRIPT_DIR/lib/listener-firewall-audit.sh" ]; then
+  # Auditoría INPUT vs listeners: estrictamente de solo lectura.
+  # shellcheck source=lib/listener-firewall-audit.sh
+  source "$SCRIPT_DIR/lib/listener-firewall-audit.sh"
+else
+  echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 SCRIPT_VERSION=1.4.1
 AUTO_FIX=false
 AUTO_MODE=false
@@ -430,48 +438,12 @@ ORANGEBOX_MOTD
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
 grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"; }
 firewall_module() {
-  echo -e "\n$BLUE### FIREWALL ###$NC"
-  local status rules
-  if command -v shorewall >/dev/null 2>&1; then
-    status="$(systemctl is-active shorewall 2>/dev/null || true)"
-    if [ "$status" = "active" ]; then
-      ok "Shorewall activo (firewall detectado)"
-    else
-      status="$(shorewall status 2>&1 || true)"
-      if printf '%s\n' "$status" | grep -Eiq 'not running|stopped|inactive|is down'; then
-        warn "Shorewall está instalado pero el estado indica que no está activo"
-        printf '%s\n' "$status" | head -n 5
-      elif printf '%s\n' "$status" | grep -Eiq 'running|active|started'; then
-        ok "Shorewall activo (según shorewall status)"
-      else
-        ok "Shorewall detectado; verificar estado con: shorewall status"
-        printf '%s\n' "$status" | head -n 5
-      fi
-    fi
-    if command -v iptables-save >/dev/null 2>&1; then
-      rules="$(iptables-save 2>/dev/null || true)"
-      if printf '%s\n' "$rules" | grep -q '^-A '; then
-        ok "Se detectan reglas de filtrado en iptables"
-      else
-        warn "Shorewall detectado, pero iptables-save no mostró reglas -A; revisar backend y estado de Shorewall"
-      fi
-    elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q .; then
-      ok "Se detectan reglas de filtrado en nftables"
-    else
-      warn "No se pudo inspeccionar el ruleset efectivo; no se modifica el firewall"
-    fi
-  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -q running; then
-    ok "firewalld activo"
-  elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -q .; then
-    ok "nftables tiene un ruleset cargado"
-  elif command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null | grep -q '^-A '; then
-    ok "iptables tiene reglas de filtrado cargadas"
-  elif command -v firewall-cmd >/dev/null 2>&1; then
-    warn "firewalld no activo y no se pudo confirmar otro ruleset mediante las comprobaciones básicas"
-  else
-    warn "No se detectó un backend de firewall con ruleset verificable"
-  fi
-  info "No se aplican reglas DROP automáticamente; el firewall debe revisarse y modificarse por separado"
+  echo -e "\\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
+  # Auditoría exclusivamente de lectura: nunca administrar el firewall desde
+  # este baseline. Solo se advierte un listener no loopback si la cobertura
+  # INPUT es verificablemente inexistente para su familia/protocolo/puerto.
+  lfa_audit_listener_firewall
+  WARNINGS=$((WARNINGS + LFA_WARNINGS))
 }
 fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
