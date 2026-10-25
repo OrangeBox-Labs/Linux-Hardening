@@ -62,12 +62,12 @@ ask_yes_no() {
   fi
 
   while true; do
-    echo -e -n "${YELLOW}$question (s/n): ${NC}"
+    echo -e -n "${YELLOW}$question [s/N]: ${NC}"
     read -r answer
     case "$answer" in
-    s | S | si | Si | SI | yes | Yes | YES) return 0 ;;
-    n | N | no | No | NO) return 1 ;;
-    *) echo -e "${RED}Responda s o n${NC}" ;;
+      s|S|si|Si|SI|sí|Sí|SÍ|y|Y|yes|Yes|YES) return 0 ;;
+      ""|n|N|no|No|NO) return 1 ;;
+      *) echo -e "${RED}Responda s o n; Enter equivale a No.${NC}" ;;
     esac
   done
 }
@@ -97,9 +97,9 @@ check_lvm() {
       echo -e "${YELLOW}[!] Modo override activado. Continuando a pesar de la advertencia...${NC}"
       return 0
     else
-      echo -e -n "${YELLOW}¿Quieres continuar igualmente? (s/N): ${NC}"
+      echo -e -n "${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
-      if [[ ! "$answer" =~ ^[Ss]$ ]]; then
+      if [[ ! "$answer" =~ ^([Ss]|[Ss][Ii]|[Ss][Íí])$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con LVM.${NC}"
         exit 1
       fi
@@ -154,9 +154,9 @@ check_separated_partitions() {
     if [ "$OVERRIDE" = true ]; then
       echo -e "\n${YELLOW}[!] Modo override activado. Continuando a pesar de la advertencia...${NC}"
     else
-      echo -e -n "\n${YELLOW}¿Quieres continuar igualmente? (s/N): ${NC}"
+      echo -e -n "\n${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
-      if [[ ! "$answer" =~ ^[Ss]$ ]]; then
+      if [[ ! "$answer" =~ ^([Ss]|[Ss][Ii]|[Ss][Íí])$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con las particiones separadas.${NC}"
         exit 1
       fi

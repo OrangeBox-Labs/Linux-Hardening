@@ -229,7 +229,7 @@ Ejemplo de ejecución:
   Valor activo: 1 | Valor propuesto: 0
   Definiciones detectadas (los archivos existentes no se modifican):
     - /etc/sysctl.d/60-gce-network-security.conf:25 = 1
-¿Confirmas aplicar net.ipv4.conf.all.secure_redirects=0 y añadir/actualizar el override...? [y/N]
+¿Confirmas aplicar net.ipv4.conf.all.secure_redirects=0 y añadir/actualizar el override...? [s/N]
 ```
 
 Los parámetros aprobados se centralizan en `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`, un perfil de alta precedencia compartido por el hardening de kernel, red, CPU y mitigación LPE. El script no edita los perfiles de Google Cloud, cPanel, CloudLinux ni otros proveedores. Excepción: si una asignación conflictiva está en `/etc/sysctl.conf` (que puede procesarse después de `sysctl.d`), solo se actualiza esa asignación después de confirmación explícita y con respaldo. El perfil central existente solo se modifica si contiene el marcador de propiedad OrangeBox. Revise siempre el impacto antes de aceptar; los valores de red pueden afectar routing asimétrico, IPv6, colas TCP o servicios que dependan de ellos.

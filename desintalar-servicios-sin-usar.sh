@@ -125,7 +125,7 @@ ask_and_remove() {
   fi
 
   # Preguntar si quiere eliminar
-  echo -e "\n${YELLOW}¿Desea eliminar $package? (s/N): ${NC}"
+  echo -e "\n${YELLOW}¿Desea eliminar $package? [s/N]: ${NC}"
   read -r confirm
 
   if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
@@ -154,7 +154,7 @@ ask_and_remove() {
   fi
 
   # Preguntar confirmacion final
-  echo -e "\n${RED}¿Confirma la eliminacion de $package y todas sus dependencias? (s/N): ${NC}"
+  echo -e "\n${RED}¿Confirma la eliminacion de $package y todas sus dependencias? [s/N]: ${NC}"
   read -r confirm_final
 
   if [[ ! "$confirm_final" =~ ^[Ss]$ ]]; then
@@ -205,7 +205,7 @@ ask_x11() {
   echo -e "${RED}[!] Paquetes encontrados:${NC}"
   echo "$X11_PACKAGES" | sed 's/^/  - /'
 
-  echo -e "\n${YELLOW}¿Desea eliminar todos los paquetes X11? (s/N): ${NC}"
+  echo -e "\n${YELLOW}¿Desea eliminar todos los paquetes X11? [s/N]: ${NC}"
   read -r confirm
 
   if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
@@ -235,7 +235,7 @@ ask_x11() {
     echo -e "${YELLOW}[!] No se detectaron dependencias adicionales${NC}"
   fi
 
-  echo -e "\n${RED}¿Confirma la eliminacion de todos los paquetes X11? (s/N): ${NC}"
+  echo -e "\n${RED}¿Confirma la eliminacion de todos los paquetes X11? [s/N]: ${NC}"
   read -r confirm_final
 
   if [[ ! "$confirm_final" =~ ^[Ss]$ ]]; then
@@ -261,7 +261,7 @@ check_mta_local() {
     echo -e "${RED}[!] MTA esta escuchando en puertos de red (25,465,587)${NC}"
 
     if rpm -q postfix &>/dev/null; then
-      echo -e "${YELLOW}¿Desea configurar Postfix para solo localhost? (s/N): ${NC}"
+      echo -e "${YELLOW}¿Desea configurar Postfix para solo localhost? [s/N]: ${NC}"
       read -r confirm
       if [[ "$confirm" =~ ^[Ss]$ ]]; then
         cp /etc/postfix/main.cf /etc/postfix/main.cf.bak

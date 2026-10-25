@@ -24,6 +24,21 @@ if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr
 fi
 pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o propone 0->1"
 
+# All interactive confirmations use the Spanish [s/N] convention, with No as default.
+SYSCTL_SAFE="$ROOT_DIR/lib/sysctl-safe.sh"
+NETWORK="$ROOT_DIR/network-hardening.sh"
+POST_INSTALL_SCRIPT="$ROOT_DIR/post-install.sh"
+grep -Fq '[s/N]' "$SYSCTL_SAFE" || fail "sysctl-safe no usa la confirmación estándar [s/N]"
+grep -Fq '[s/N]' "$NETWORK" || fail "network-hardening no usa la confirmación estándar [s/N]"
+grep -Fq '[s/N]' "$POST_INSTALL_SCRIPT" || fail "post-install no usa la confirmación estándar [s/N]"
+grep -Fq 'sysctl_safe_log()' "$SYSCTL_SAFE" || fail "sysctl-safe no centraliza los colores de estado"
+legacy_prompts="$(find "$ROOT_DIR" -type f -name '*.sh' ! -path "$ROOT_DIR/tests/*" -print0 | xargs -0 grep -n -F -e '[y/N]' -e '[Y/n]' -e '[Y/N]' -e '[y/n]' -e '(s/n)' -e '(s/N)' 2>/dev/null || true)"
+if [ -n "$legacy_prompts" ]; then
+  printf '%s\n' "$legacy_prompts" >&2
+  fail "quedan prompts con formatos antiguos; usar [s/N]"
+fi
+pass "confirmaciones estandarizadas en español y estados SYSCTL coloreados"
+
 # Password aging must be observed but never rewritten by either baseline.
 grep -Fq 'PASS_MAX_DAYS=' "$CORE" || fail "baseline no informa PASS_MAX_DAYS"
 grep -Fq 'PASS_MAX_DAYS=' "$PASSWORD" || fail "password-hardening no documenta/conserva PASS_MAX_DAYS"

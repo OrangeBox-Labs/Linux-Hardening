@@ -51,7 +51,7 @@ detect_listening_ports() {
     return 0
   fi
 
-  echo -e "\n${YELLOW}¿Desea permitir todos estos puertos en el firewall? (s/N): ${NC}"
+  echo -e "\n${YELLOW}¿Desea permitir todos estos puertos en el firewall? [s/N]: ${NC}"
   read -r confirm_all
 
   if [[ "$confirm_all" =~ ^[Ss]$ ]]; then

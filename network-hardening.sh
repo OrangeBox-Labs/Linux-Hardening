@@ -136,7 +136,7 @@ confirm_module_disable() {
   else
     echo "    El módulo no está cargado actualmente."
   fi
-  printf '¿Confirmas deshabilitar %s? [y/N] ' "$module" > /dev/tty
+  printf '¿Confirmas deshabilitar %s? [s/N] ' "$module" > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   case "$answer" in
     y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) return 0 ;;

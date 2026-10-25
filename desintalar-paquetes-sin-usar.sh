@@ -87,7 +87,7 @@ ask_and_remove() {
   echo -e "${YELLOW}========================================${NC}"
 
   # Preguntar si quiere eliminar
-  echo -e "\n${YELLOW}¿Desea eliminar $package? (s/N): ${NC}"
+  echo -e "\n${YELLOW}¿Desea eliminar $package? [s/N]: ${NC}"
   read -r confirm
 
   if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
@@ -115,7 +115,7 @@ ask_and_remove() {
   fi
 
   # Preguntar confirmacion final
-  echo -e "\n${RED}¿Confirma la eliminacion de $package y todas sus dependencias? (s/N): ${NC}"
+  echo -e "\n${RED}¿Confirma la eliminacion de $package y todas sus dependencias? [s/N]: ${NC}"
   read -r confirm_final
 
   if [[ ! "$confirm_final" =~ ^[Ss]$ ]]; then

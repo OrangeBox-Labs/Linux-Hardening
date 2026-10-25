@@ -279,7 +279,7 @@ show_warning() {
   echo ""
   echo "Backup de configuraciones en: $BACKUP_DIR"
   echo ""
-  echo -e "${RED}¿Esta seguro que desea continuar? (s/N): ${NC}"
+  echo -e "${RED}¿Esta seguro que desea continuar? [s/N]: ${NC}"
   read -r confirm
 
   if [[ ! "$confirm" =~ ^[Ss]$ ]]; then
