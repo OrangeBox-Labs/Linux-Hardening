@@ -18,6 +18,42 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+AIDE_SETUP_SKIPPED=false
+
+# ==============================================
+# CONFIRMAR INSTALACION / CONFIGURACION DE AIDE
+# ==============================================
+confirm_aide_setup() {
+  echo
+  echo -e "${YELLOW}AIDE no está instalado.${NC}"
+  echo "AIDE (Advanced Intrusion Detection Environment) mantiene una base de referencia"
+  echo "de archivos y compara sus atributos/checksums para detectar modificaciones."
+  echo "La inicialización consume CPU/espacio y la revisión periódica genera carga de lectura."
+  echo
+  echo -e "${YELLOW}Nota sobre Wazuh:${NC} si Wazuh FIM ya monitoriza los mismos archivos y genera alertas,"
+  echo "AIDE puede resultar redundante. AIDE sigue siendo un control independiente y puede"
+  echo "ser necesario si buscas cumplir estrictamente los controles CIS 1.3.1 y 1.3.2."
+  echo
+  echo "Si aceptas, se instalará AIDE, se inicializará su base de referencia si falta"
+  echo "y se configurará una comprobación diaria a las 05:00 mediante cron."
+  echo
+
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "${YELLOW}[!] No hay terminal interactiva; por seguridad no se instalará ni configurará AIDE.${NC}"
+    return 1
+  fi
+
+  local answer
+  printf '¿Deseas instalar y configurar AIDE? [s/N]: ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *)
+      echo -e "${YELLOW}[!] AIDE rechazado. No se instalará, no se creará su base y no se añadirá cron.${NC}"
+      return 1
+      ;;
+  esac
+}
 
 # ==============================================
 # DETECTAR GESTOR DE PAQUETES
@@ -135,11 +171,26 @@ main() {
   echo -e "${GREEN}  CIS 1.3.1 - 1.3.2${NC}"
   echo -e "${GREEN}============================================${NC}"
 
-  if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+  if [ "${1:-}" = "--fix" ] || [ "${1:-}" = "-f" ]; then
     AUTO_FIX=true
-    echo -e "${YELLOW}[!] Modo automatico: se aplicaran correcciones sin preguntar${NC}"
-    echo -e "${YELLOW}[!] 3 segundos para cancelar (Ctrl+C)...${NC}"
-    sleep 3
+    echo -e "${YELLOW}[!] Modo FIX: la instalación de AIDE requiere confirmación explícita.${NC}"
+    sleep 1
+
+    if ! rpm -q aide &>/dev/null; then
+      if ! confirm_aide_setup; then
+        AIDE_SETUP_SKIPPED=true
+        WARNINGS=$((WARNINGS + 1))
+        echo -e "${YELLOW}[!] Se omite toda modificación relacionada con AIDE.${NC}"
+        echo -e "\n${GREEN}============================================${NC}"
+        echo -e "${GREEN}  RESUMEN${NC}"
+        echo -e "${GREEN}============================================${NC}"
+        echo -e "  • Configuraciones corregidas: ${GREEN}$FIXED${NC}"
+        echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
+        echo -e "${YELLOW}  • AIDE no fue instalado ni configurado.${NC}"
+        echo -e "${GREEN}============================================${NC}"
+        return 0
+      fi
+    fi
   fi
 
   install_aide
