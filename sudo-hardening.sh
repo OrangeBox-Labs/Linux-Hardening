@@ -133,13 +133,18 @@ cpanel_host_detected() {
 check_sudo_pty() {
   echo -e "\n${BLUE}[*] CIS 5.2.2 - Verificando uso de pseudo-terminal (pty) en sudo...${NC}"
 
-  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' "$SUDOERS_FILE" "$SUDOERS_D_DIR" 2>/dev/null; then
-    echo -e "${GREEN}[✓] sudo usa pseudo-terminal (pty)${NC}"
+  if cpanel_host_detected; then
+    if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' "$SUDOERS_FILE" "$SUDOERS_D_DIR" 2>/dev/null; then
+      echo -e "${YELLOW}[!] cPanel detectado y use_pty ya está configurado; puede afectar funcionalidades. No se modifica automáticamente.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    else
+      echo -e "${BLUE}[i] cPanel detectado: se omite use_pty porque puede romper funcionalidades/automatizaciones del hosting.${NC}"
+    fi
     return 0
   fi
 
-  if cpanel_host_detected; then
-    echo -e "${BLUE}[i] cPanel detectado: se omite use_pty porque puede romper funcionalidades/automatizaciones del hosting.${NC}"
+  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' "$SUDOERS_FILE" "$SUDOERS_D_DIR" 2>/dev/null; then
+    echo -e "${GREEN}[✓] sudo usa pseudo-terminal (pty)${NC}"
     return 0
   fi
 
