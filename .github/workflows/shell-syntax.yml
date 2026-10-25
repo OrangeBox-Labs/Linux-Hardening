@@ -30,6 +30,8 @@ jobs:
         run: bash tests/test_audit_listening_services.sh
       - name: Test firewall backend and Imunify detection
         run: bash tests/test_firewall_detect.sh
+      - name: Test listener firewall coverage audit
+        run: bash tests/test_listener_firewall_audit.sh
       - name: Test SYN flood baseline policy
         run: bash tests/test_synflood_defaults.sh
       - name: Test operational policy guards
@@ -84,5 +86,6 @@ jobs:
               fi
               /bin/bash tests/test_audit_listening_services.sh
               /bin/bash tests/test_firewall_detect.sh
+              /bin/bash tests/test_listener_firewall_audit.sh
               /bin/bash tests/test_synflood_defaults.sh
             '

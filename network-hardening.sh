@@ -25,6 +25,14 @@ else
   echo "[ERROR] Falta lib/firewall-detect.sh; actualice el repositorio completo." >&2
   exit 1
 fi
+if [ -r "$SCRIPT_DIR/lib/listener-firewall-audit.sh" ]; then
+  # Auditoría de sockets vs cobertura INPUT, sin cambios de firewall.
+  # shellcheck source=lib/listener-firewall-audit.sh
+  source "$SCRIPT_DIR/lib/listener-firewall-audit.sh"
+else
+  echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -244,7 +252,7 @@ csf_rules_active() {
 }
 
 check_firewall_conflicts() {
-  echo -e "\n${BLUE}[*] Verificando gestores y backend de firewall...${NC}"
+  echo -e "\n${BLUE}[*] Auditoría de solo lectura: firewall y sockets en escucha...${NC}"
 
   local shorewall_installed=false shorewall_active=false
   local csf_installed=false csf_active=false
@@ -257,12 +265,8 @@ check_firewall_conflicts() {
   shorewall_is_active && shorewall_active=true
   command -v csf >/dev/null 2>&1 && csf_installed=true
   csf_rules_active && csf_active=true
-
   firewall_print_backend_diagnostics
-  if firewall_has_imunify360_rules; then
-    imunify360_rules=true
-  fi
-
+  firewall_has_imunify360_rules && imunify360_rules=true
   if rpm -q firewalld &>/dev/null; then
     firewalld_installed=true
     systemctl is-active --quiet firewalld 2>/dev/null && firewalld_active=true
@@ -276,43 +280,21 @@ check_firewall_conflicts() {
     systemctl is-active --quiet iptables 2>/dev/null && iptables_active=true
   fi
 
-  echo -e "  shorewall: instalado=$shorewall_installed activo=$shorewall_active"
-  echo -e "  csf: instalado=$csf_installed reglas_activas=$csf_active"
-  echo -e "  firewalld: instalado=$firewalld_installed activo=$firewalld_active"
-  echo -e "  nftables: instalado=$nftables_installed activo=$nftables_active"
-  echo -e "  iptables-services: instalado=$iptables_installed activo=$iptables_active"
-  [ "$imunify360_rules" = true ] && echo -e "  [INFO] Se detectan cadenas de integración de Imunify360 en iptables."
+  echo "  shorewall: instalado=$shorewall_installed activo=$shorewall_active"
+  echo "  csf: instalado=$csf_installed reglas_activas=$csf_active"
+  echo "  firewalld: instalado=$firewalld_installed activo=$firewalld_active"
+  echo "  nftables: instalado=$nftables_installed activo=$nftables_active"
+  echo "  iptables-services: instalado=$iptables_installed activo=$iptables_active"
+  [ "$imunify360_rules" = true ] && echo "  [INFO] Se detectan cadenas de integración de Imunify360 en iptables."
 
-  if [ "$shorewall_active" = true ]; then
-    echo -e "${GREEN}[✓] Shorewall está activo y se reconoce como gestor principal del firewall${NC}"
-    if [ "$firewalld_active" = true ] || [ "$csf_active" = true ]; then
-      echo -e "${RED}[!] Shorewall y otro gestor de firewall aparecen activos; revisar posible doble gestión${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    if [ "$AUTO_FIX" = true ] && [ "$ALLOW_SHOREWALL" != true ]; then
-      echo -e "${RED}[!] Aplicación bloqueada: Shorewall está activo. Se requiere --allow-shorewall explícitamente.${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 0
+  # Coexistencia o ausencia de gestores no genera WARN por sí sola. En
+  # producción solo alertamos por listeners remotos sin control INPUT probado.
+  if [ "$shorewall_active" = true ] && { [ "$firewalld_active" = true ] || [ "$csf_active" = true ] || [ "$nftables_active" = true ] || [ "$iptables_active" = true ]; }; then
+    echo "[INFO] Hay otros gestores/backend instalados o activos junto a Shorewall; se conserva toda la configuración."
   fi
 
-  local active_managers=0
-  [ "$firewalld_active" = true ] && active_managers=$((active_managers + 1))
-  [ "$nftables_active" = true ] && active_managers=$((active_managers + 1))
-  [ "$iptables_active" = true ] && active_managers=$((active_managers + 1))
-  [ "$csf_active" = true ] && active_managers=$((active_managers + 1))
-
-  if [ "$active_managers" -gt 1 ]; then
-    echo -e "${RED}[!] Varios gestores/backends de firewall aparecen activos ($active_managers); revisar integración y reglas antes de cambiar configuración${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  elif [ "$active_managers" -eq 0 ]; then
-    echo -e "${YELLOW}[!] No se pudo confirmar un gestor de firewall activo (incluidos Shorewall y CSF)${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  elif [ "$csf_active" = true ]; then
-    echo -e "${GREEN}[✓] CSF reporta reglas activas en iptables; se reconoce como gestor del firewall${NC}"
-  else
-    echo -e "${GREEN}[✓] Un gestor/backend de firewall está activo${NC}"
-  fi
+  lfa_audit_listener_firewall
+  WARNINGS=$((WARNINGS + LFA_WARNINGS))
 }
 # ==============================================
 # FUNCION PARA FLUSH ROUTES
