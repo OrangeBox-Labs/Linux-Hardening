@@ -2010,9 +2010,13 @@ show_final_summary() {
     echo -e "\n${YELLOW}RECOMENDACIONES GENERALES:${NC}"
     echo -e "  • Los tests en ${RED}ROJO${NC} requieren atencion inmediata - representan riesgos de seguridad"
     echo -e "  • Los tests en ${YELLOW}AMARILLO${NC} son mejorables - implementar segun politica"
-    echo -e "  • Revise el reporte completo en: ${REPORT_FILE}"
+    if [ "${REPORT_FILE}" = "/dev/null" ]; then
+      echo -e "  • Reporte persistente deshabilitado para auditoría de solo lectura"
+    else
+      echo -e "  • Revise el reporte completo en: ${REPORT_FILE}"
+      echo -e "${GREEN}  Reporte guardado en: ${REPORT_FILE}${NC}"
+    fi
     echo -e "\n${GREEN}============================================${NC}"
-    echo -e "${GREEN}  Reporte guardado en: ${REPORT_FILE}${NC}"
     echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
     echo -e "${GREEN}  📺 https://www.youtube.com/@OrangeBoxLinux${NC}"
     echo -e "${GREEN}============================================${NC}"
