@@ -315,6 +315,24 @@ sysctl_safe_apply() {
     fi
   fi
 
+  # If runtime already matches but no persistent definition exists, persistence
+  # is still a change: require per-parameter consent rather than silently writing it.
+  if [ "$need_persist" = true ] && [ "$current" = "$expected" ] && [ "$any_defs" = false ]; then
+    sysctl_safe_log "CAMBIO PROPUESTO" "$key=$expected ya está activo, pero falta persistencia."
+    echo "  Qué cambia: añadir una definición persistente en $target; el valor activo se conserva."
+    if [ "$fix_mode" != true ]; then
+      sysctl_safe_log "WARN" "Auditoría: no se cambia la persistencia de $key."
+      return 1
+    fi
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+      sysctl_safe_log "WARN" "No hay terminal interactiva; se omite la persistencia de $key por seguridad."
+      return 1
+    fi
+    printf '¿Confirmas persistir %s=%s en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+    IFS= read -r answer < /dev/tty || answer=""
+    case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó la persistencia de $key."; return 1 ;; esac
+  fi
+
   if [ "$need_persist" = true ]; then
     if ! sysctl_safe_write_profile "$key" "$expected" "$target" "$backup_dir" "$begin" "$end"; then
       sysctl_safe_log "ERROR" "No se pudo persistir $key en $target; no se aplica en runtime."
