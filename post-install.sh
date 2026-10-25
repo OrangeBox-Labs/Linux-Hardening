@@ -97,7 +97,7 @@ check_lvm() {
       echo -e "${YELLOW}[!] Modo override activado. Continuando a pesar de la advertencia...${NC}"
       return 0
     else
-      echo -e -n "${YELLOW}¿Quieres continuar igualmente? (s/N): ${NC}"
+      echo -e -n "${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
       if [[ ! "$answer" =~ ^[Ss]$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con LVM.${NC}"
@@ -154,7 +154,7 @@ check_separated_partitions() {
     if [ "$OVERRIDE" = true ]; then
       echo -e "\n${YELLOW}[!] Modo override activado. Continuando a pesar de la advertencia...${NC}"
     else
-      echo -e -n "\n${YELLOW}¿Quieres continuar igualmente? (s/N): ${NC}"
+      echo -e -n "\n${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
       if [[ ! "$answer" =~ ^[Ss]$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con las particiones separadas.${NC}"
