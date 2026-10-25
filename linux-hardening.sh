@@ -283,7 +283,31 @@ kernel_module(){
     fi
   fi
 }
-filesystem_module(){ echo -e "\n$BLUE### FILESYSTEM ###$NC"; for f in /etc/passwd /etc/group /etc/shadow /etc/gshadow; do [ -f "$f" ]||continue; local p; p=$(stat -c %a "$f"); case "$f" in /etc/passwd|/etc/group) [ "$p" -le 644 ]&&ok "$f=$p"||warn "$f=$p";; *) [ "$p" = 600 ]||[ "$p" = 640 ]||[ "$p" = 000 ]&&ok "$f=$p"||warn "$f=$p; no se fuerza";; esac; done; }
+filesystem_module(){
+  echo -e "\n$BLUE### FILESYSTEM ###$NC"
+  local f p
+  for f in /etc/passwd /etc/group /etc/shadow /etc/gshadow; do
+    [ -f "$f" ] || continue
+    p=$(stat -c %a "$f" 2>/dev/null || true)
+    case "$f" in
+      /etc/passwd|/etc/group)
+        if [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -le 644 ]; then
+          ok "$f=$p"
+        else
+          warn "$f=$p"
+        fi
+        ;;
+      *)
+        # GNU stat prints mode 000 as "0", not "000".
+        if [ "$p" = 600 ] || [ "$p" = 640 ] || [ "$p" = 0 ] || [ "$p" = 000 ]; then
+          ok "$f=$p"
+        else
+          warn "$f=$p; no se fuerza"
+        fi
+        ;;
+    esac
+  done
+}
 auditd_module(){ echo -e "\n$BLUE### AUDITD ###$NC"; command -v auditctl >/dev/null 2>&1&&systemctl is-active auditd >/dev/null 2>&1&&ok "auditd activo"||warn "auditd ausente/inactivo"; [ -d /etc/audit/rules.d ]&&ok "rules.d disponible"||warn "rules.d no existe"; }
 rsyslog_module(){ echo -e "\n$BLUE### JOURNAL ###$NC"; [ -d /var/log/journal ]&&ok "journal persistente"||warn "journal no persistente"; if $AUTO_FIX&&[ -f /etc/systemd/journald.conf ]; then backup_once /etc/systemd/journald.conf; grep -Eq '^[[:space:]]*Storage=' /etc/systemd/journald.conf&&sed -ri 's/^[[:space:]]*Storage=.*/Storage=persistent/' /etc/systemd/journald.conf||echo 'Storage=persistent'>>/etc/systemd/journald.conf; mkdir -p /var/log/journal; systemctl restart systemd-journald >/dev/null 2>&1||warn "journald no reinició"; FIXED=$((FIXED+1)); fi; }
 selinux_module(){ echo -e "\n$BLUE### SELINUX ###$NC"; command -v getenforce >/dev/null 2>&1||{ warn "SELinux no disponible"; return; }; local mode; mode=$(getenforce); [ "$mode" = Enforcing ]&&ok "SELinux Enforcing"||warn "SELinux=$mode; NO se modifica por política OrangeBox"; }
