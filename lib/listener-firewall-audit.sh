@@ -93,26 +93,64 @@ lfa_nft_text_state() {
     }'
 }
 
+lfa_load_firewall_snapshots() {
+  LFA_FIREWALL_SNAPSHOT_LOADED=true
+  LFA_IPV4_RULES_AVAILABLE=false
+  LFA_IPV6_RULES_AVAILABLE=false
+  LFA_NFT_RULES_AVAILABLE=false
+  LFA_IPV4_RULES=""
+  LFA_IPV6_RULES=""
+  LFA_NFT_RULES=""
+
+  local version save_cmd dump
+  if command -v iptables >/dev/null 2>&1; then
+    version="$(iptables -V 2>/dev/null || true)"
+    case "$version" in *"(legacy)"*) save_cmd=iptables-legacy-save ;; *) save_cmd=iptables-save ;; esac
+    if ! command -v "$save_cmd" >/dev/null 2>&1; then save_cmd=iptables-save; fi
+    if command -v "$save_cmd" >/dev/null 2>&1 && dump="$("$save_cmd" 2>/dev/null)"; then
+      LFA_IPV4_RULES="$dump"
+      LFA_IPV4_RULES_AVAILABLE=true
+    fi
+  fi
+  if command -v ip6tables >/dev/null 2>&1; then
+    version="$(ip6tables -V 2>/dev/null || true)"
+    case "$version" in *"(legacy)"*) save_cmd=ip6tables-legacy-save ;; *) save_cmd=ip6tables-save ;; esac
+    if ! command -v "$save_cmd" >/dev/null 2>&1; then save_cmd=ip6tables-save; fi
+    if command -v "$save_cmd" >/dev/null 2>&1 && dump="$("$save_cmd" 2>/dev/null)"; then
+      LFA_IPV6_RULES="$dump"
+      LFA_IPV6_RULES_AVAILABLE=true
+    fi
+  fi
+  if command -v nft >/dev/null 2>&1 && dump="$(nft list ruleset 2>/dev/null)"; then
+    LFA_NFT_RULES="$dump"
+    LFA_NFT_RULES_AVAILABLE=true
+  fi
+}
+
 lfa_family_port_state() {
   local family="$1" protocol="$2" port="$3"
-  local frontend save_cmd version dump ip_state=UNKNOWN nft_dump nft_state=UNKNOWN
-  case "$family" in ipv4) frontend=iptables ;; ipv6) frontend=ip6tables ;; *) printf '%s\n' UNKNOWN;return 0 ;; esac
-  if command -v "$frontend" >/dev/null 2>&1; then
-    version="$("$frontend" -V 2>/dev/null || true)"
-    case "$version" in *"(legacy)"*) save_cmd="${frontend}-legacy-save" ;; *) save_cmd="${frontend}-save" ;; esac
-    if ! command -v "$save_cmd" >/dev/null 2>&1; then
-      case "$frontend" in iptables) save_cmd=iptables-save ;; ip6tables) save_cmd=ip6tables-save ;; esac
-    fi
-    if command -v "$save_cmd" >/dev/null 2>&1 && dump="$("$save_cmd" 2>/dev/null)"; then
-      ip_state="$(lfa_iptables_text_state "$dump" "$protocol" "$port")"
-    fi
+  local ip_state=UNKNOWN nft_state=UNKNOWN ip_rules=""
+  if [ "${LFA_FIREWALL_SNAPSHOT_LOADED:-false}" != true ]; then
+    lfa_load_firewall_snapshots
   fi
-  if command -v nft >/dev/null 2>&1 && nft_dump="$(nft list ruleset 2>/dev/null)"; then
-    nft_state="$(lfa_nft_text_state "$nft_dump" "$family" "$protocol" "$port")"
+  case "$family" in
+    ipv4) [ "$LFA_IPV4_RULES_AVAILABLE" = true ] && ip_rules="$LFA_IPV4_RULES" ;;
+    ipv6) [ "$LFA_IPV6_RULES_AVAILABLE" = true ] && ip_rules="$LFA_IPV6_RULES" ;;
+    *) printf '%s\n' UNKNOWN; return 0 ;;
+  esac
+  if [ -n "$ip_rules" ]; then
+    ip_state="$(lfa_iptables_text_state "$ip_rules" "$protocol" "$port")"
   fi
-  if [ "$ip_state" = CONTROLLED ] || [ "$nft_state" = CONTROLLED ]; then printf '%s\n' CONTROLLED
-  elif [ "$ip_state" = UNCONTROLLED ] || [ "$nft_state" = UNCONTROLLED ]; then printf '%s\n' UNCONTROLLED
-  else printf '%s\n' UNKNOWN; fi
+  if [ "$LFA_NFT_RULES_AVAILABLE" = true ]; then
+    nft_state="$(lfa_nft_text_state "$LFA_NFT_RULES" "$family" "$protocol" "$port")"
+  fi
+  if [ "$ip_state" = CONTROLLED ] || [ "$nft_state" = CONTROLLED ]; then
+    printf '%s\n' CONTROLLED
+  elif [ "$ip_state" = UNCONTROLLED ] || [ "$nft_state" = UNCONTROLLED ]; then
+    printf '%s\n' UNCONTROLLED
+  else
+    printf '%s\n' UNKNOWN
+  fi
 }
 
 lfa_audit_listener_firewall() {
@@ -128,6 +166,7 @@ lfa_audit_listener_firewall() {
     echo "[INFO] No se pudo consultar ss; no se puede verificar la cobertura INPUT. Firewall intacto."
     return 0
   fi
+  lfa_load_firewall_snapshots
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     IFS=' ' read -r protocol state recvq sendq local_addr peer rest <<< "$line"
