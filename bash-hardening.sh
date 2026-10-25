@@ -129,7 +129,7 @@ orangebox_history_guard() {
     history -a
 }
 case ";${PROMPT_COMMAND:-};" in
-    *";orangebox_history_guard;"*) ;;
+    *";orangebox_history_guard;"*|*"; orangebox_history_guard;"*) ;;
     *)
         if [ -n "${PROMPT_COMMAND:-}" ]; then
             PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_history_guard"
