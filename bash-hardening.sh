@@ -118,6 +118,32 @@ unset HISTIGNORE
 set -o history
 shopt -s histappend
 
+# Protección de mejor esfuerzo contra borrado o sobrescritura del historial.
+# No es una frontera de seguridad: builtin history y la edición directa del
+# archivo pueden eludir esta función.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
+
 orangebox_history_guard() {
     set -o history
     HISTSIZE=-1
@@ -382,6 +408,31 @@ configure_root_bashrc() {
 # ==============================================
 # ORANGEBOX BASH ROOT CONFIG V2 BEGIN
 
+# Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
+# No impide el uso explícito de "builtin history" ni la edición directa del archivo.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
+
 # Historial mejorado
 export HISTTIMEFORMAT="%F %T "
 export HISTSIZE=-1
@@ -467,6 +518,31 @@ configure_skel() {
 # Hardening Bash - OrangeBox Labs
 # ==============================================
 # ORANGEBOX BASH DEFAULTS V2 BEGIN
+
+# Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
+# No impide el uso explícito de "builtin history" ni la edición directa del archivo.
+history() {
+    local arg opts
+    for arg in "$@"; do
+        case "$arg" in
+            --) break ;;
+            -?*)
+                opts="${arg#-}"
+                case "$opts" in
+                    *c*|*d*|*w*)
+                        printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+                        return 2
+                        ;;
+                esac
+                case "$opts" in
+                    *p*|*s*) break ;;
+                esac
+                ;;
+            *) break ;;
+        esac
+    done
+    builtin history "$@"
+}
 
 export HISTTIMEFORMAT="%F %T "
 export HISTSIZE=-1
