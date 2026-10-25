@@ -79,10 +79,11 @@ lfa_nft_text_state() {
     /^[[:space:]]*}[[:space:]]*$/ {ck="";next}
     ck!="" {
       if(tf!=wf&&tf!="inet")next
-      if($0~/hook[[:space:]]+input/){input_seen=1;base[ck]=1;if($0~/policy[[:space:]]+(drop|reject)([[:space:];]|$)/){print "CONTROLLED";exit}}
+      if($0~/hook[[:space:]]+input/){input_seen=1;base[ck]=1;if($0~/policy[[:space:]]+(drop|reject)([[:space:];]|$)/){found_control=1;exit}}
       else{nr++;rules[nr]=$0;rc[nr]=ck}
     }
     END{
+      if(found_control){print "CONTROLLED";exit}
       if(!input_seen){print "UNKNOWN";exit}
       for(c in base)reachable[c]=1
       for(pass=1;pass<=nr;pass++)for(i=1;i<=nr;i++)if(reachable[rc[i]]){t=target(rules[i]);nc=ctable[rc[i]] ":" t;if(t!=""&&jump_uncond(rules[i])&&exists[nc])reachable[nc]=1}
