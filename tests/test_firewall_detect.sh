@@ -32,10 +32,18 @@ done
 
 export PATH="$MOCK_BIN:$PATH"
 export FAKE_RULES_DIR="$RULES"
+# Clear Bash's command hash so tests always execute the mocks just created.
+hash -r
+[ "$(command -v iptables)" = "$MOCK_BIN/iptables" ] || fail "el mock de iptables no está primero en PATH"
+[ "$(command -v iptables-save)" = "$MOCK_BIN/iptables-save" ] || fail "el mock de iptables-save no está primero en PATH"
 printf '%s\n' 'iptables v1.8.10 (nf_tables)' > "$RULES/iptables.version"
 [ "$(firewall_frontend_backend iptables)" = nf_tables ] || fail "no detectó backend nf_tables"
 printf '%s\n' 'iptables v1.8.10 (legacy)' > "$RULES/iptables.version"
-[ "$(firewall_frontend_backend iptables)" = legacy ] || fail "no detectó backend legacy"
+hash -r
+legacy_output="$(iptables -V 2>/dev/null)" || fail "no se pudo consultar el mock de iptables"
+[ "$legacy_output" = 'iptables v1.8.10 (legacy)' ] || fail "el mock no devolvió la versión legacy: $legacy_output"
+detected_backend="$(firewall_frontend_backend iptables)"
+[ "$detected_backend" = legacy ] || fail "no detectó backend legacy (obtuvo: $detected_backend; version=$legacy_output)"
 
 for cmd in iptables-save iptables-legacy-save ip6tables-save ip6tables-legacy-save; do
   printf '%s\n' '*filter' COMMIT > "$RULES/$cmd.rules"
