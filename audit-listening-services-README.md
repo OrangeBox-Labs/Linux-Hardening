@@ -16,7 +16,7 @@ Requiere root para intentar mostrar los procesos propietarios. No instala ni eli
 - Categoría orientativa derivada primero del proceso real y no solamente del número de puerto.
 - Alcance del bind: loopback, todas las interfaces o una IP específica.
 
-La clasificación contempla procesos frecuentes de SSH, FTP, DNS, RPC/NFS, web, correo, bases de datos y monitoreo. Un proceso no reconocido queda como NO_CLASIFICADO; no se sugiere eliminar paquetes basándose en el puerto.
+La clasificación contempla procesos frecuentes de SSH, FTP, DNS, RPC/NFS, web, correo, bases de datos, monitoreo y servicios habituales de cPanel/Imunify. Los sockets propiedad de systemd se señalan como activación por socket cuando corresponde y requieren identificar la unidad de destino. Un proceso no reconocido queda como NO_CLASIFICADO; no se sugiere eliminar paquetes basándose en el puerto.
 
 ## Interpretación y límites
 
