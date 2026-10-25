@@ -162,7 +162,7 @@ Aplicar cambios de forma interactiva:
 ./linux-hardening.sh --fix
 ```
 
-Este modo aplica banners corporativos y la configuración de Bash, y luego explica cada control clasificado como riesgoso y pregunta si se quiere aplicar. Si respondes No, el control no modifica el sistema; cuando hay un modo de auditoría seguro definido, se ejecuta. Si no lo hay, el módulo se omite sin cambios.
+Este modo aplica banners corporativos y la configuración de Bash. Para los controles sensibles, primero comprueba los valores efectivos y persistentes: kernel y SYN flood solicitan confirmación por parámetro, sudo utiliza su propia confirmación específica (y nunca activa `use_pty` en cPanel) y journald solo pregunta si necesita cambiar su configuración. Si los valores ya cumplen, muestra `[OK]` sin pedir autorizaciones redundantes ni reescribirlos. Si no se puede verificar un control de forma segura, se mantiene en auditoría.
 
 Para ejecución automática y conservadora, sin preguntas:
 
@@ -172,11 +172,13 @@ Para ejecución automática y conservadora, sin preguntas:
 
 `--auto` aplica únicamente banners/MOTD y Bash con historial ilimitado. Los controles delicados —incluidos los cambios sysctl de kernel y SYN flood— se revisan en auditoría y no se aplican. En modo interactivo `--fix`, cada control delicado pregunta por separado, explica qué cambiará y qué impacto operacional puede tener; responder No o no disponer de TTY deja ese control sin modificar.
 
-El aviso legal genérico completo se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` muestra un mensaje breve posterior al login para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
+El aviso legal previo al login se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` usa una tarjeta ASCII compacta de OrangeBox posterior al login, distinta del aviso legal previo, para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
 
 Política operacional: `PASS_MAX_DAYS` se informa pero nunca se modifica; `use_pty` requiere confirmación específica y se omite en servidores cPanel; SELinux solo se audita y nunca se cambia; `fapolicyd` no se instala ni se activa. Si se detecta Wazuh, el auditor lo informa y mantiene esta política.
 
 El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfiles reemplacen `PS1`. Muestra la hora en formato `HH:MM:SS`, el usuario, el hostname completo y el directorio; root aparece en rojo con `#` y los usuarios normales en verde con `$`.
+
+Las shells interactivas de usuarios distintos de `root` tienen un timeout por inactividad de 120 segundos (`TMOUT=120`); el perfil elimina el `TMOUT` heredado en shells root. El timeout no se fija en shells no interactivas ni en root.
 
 ### Módulos especializados del repositorio
 

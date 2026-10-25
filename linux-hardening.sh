@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.4 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.5 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.4
+SCRIPT_VERSION=1.4.5
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -419,6 +419,18 @@ rsyslog_module(){
   fi
 }
 
+# Read-only preflight matching the early-return condition in rsyslog_module.
+# 0 = already compliant; 1 = configuration/directory requires a change; 2 = unsafe/unavailable.
+rsyslog_state_status() {
+  local conf=/etc/systemd/journald.conf
+  [ -f "$conf" ] || return 2
+  if [ -d /var/log/journal ] &&
+     grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then
+    return 0
+  fi
+  return 1
+}
+
 selinux_module(){ echo -e "\n$BLUE### SELINUX ###$NC"; command -v getenforce >/dev/null 2>&1||{ warn "SELinux no disponible"; return; }; local mode; mode=$(getenforce); [ "$mode" = Enforcing ]&&ok "SELinux Enforcing"||warn "SELinux=$mode; NO se modifica por política OrangeBox"; }
 cron_module(){ echo -e "\n$BLUE### CRON / AT ###$NC"; [ -e /etc/cron.allow ]&&ok "cron.allow existe"||warn "cron.allow no existe; se deja intacto para no romper cPanel"; [ -e /etc/at.allow ]&&ok "at.allow existe"||warn "at.allow no existe; se deja intacto"; }
 usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; info "USB no se bloquea automáticamente; requiere decisión explícita de política"; }
@@ -519,12 +531,18 @@ ORANGEBOX_LOGIN_BANNER
   # MOTD se presenta después del login: mantenerlo breve para no duplicar
   # la advertencia legal que SSH ya muestra desde /etc/issue.net.
   cat > "$motd_tmp" <<'ORANGEBOX_MOTD'
-*******************************************************************************
-                         ORANGEBOX IT SERVICES
-*******************************************************************************
-Sesion iniciada en un sistema administrado por OrangeBox.
-Respete las politicas de uso de la organizacion.
-*******************************************************************************
++----------------------------------------------------------------------------+
+|                                                                            |
+|                           ORANGEBOX IT SERVICES                            |
+|             LINUX ENTERPRISE  /  INFRAESTRUCTURA  /  SEGURIDAD             |
+|                                                                            |
++----------------------------------------------------------------------------+
+|                                                                            |
+|                    Sistema administrado por OrangeBox.                     |
+|             Utilice esta cuenta solo para tareas autorizadas.              |
+|              Las sesiones pueden ser registradas y auditadas.              |
+|                                                                            |
++----------------------------------------------------------------------------+
 ORANGEBOX_MOTD
 
   for target in /etc/motd /etc/issue /etc/issue.net; do
@@ -662,8 +680,28 @@ bash_module() {
 
   tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
   cat > "$tmp" <<'ORANGEBOX_BASH'
-# OrangeBox Linux Hardening - historial ilimitado y prompt por rol
-# Solo se aplica a shells interactivos.
+# OrangeBox Linux Hardening - historial ilimitado, prompt por rol y timeout
+# Timeout por inactividad: 120 segundos en shells interactivos de usuarios no-root.
+# Limpiar TMOUT heredado evita que una shell root reciba el timeout del usuario.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  unset TMOUT 2>/dev/null || true
+else
+  case $- in
+    *i*)
+      if [ "${TMOUT:-}" != 120 ]; then
+        TMOUT=120 2>/dev/null || true
+      fi
+      if [ "${TMOUT:-}" = 120 ]; then
+        export TMOUT
+        readonly TMOUT 2>/dev/null || true
+      else
+        printf '%s\n' 'OrangeBox: no fue posible fijar TMOUT=120; revise si ya estaba definido como readonly.' >&2
+      fi
+      ;;
+  esac
+fi
+
+# El resto de esta configuracion solo aplica a shells interactivos.
 case $- in
   *i*) ;;
   *) return 0 ;;
@@ -913,39 +951,80 @@ confirm_risky_change() {
 }
 
 run_internal_module_with_confirmation() {
-  local name="$1" previous_fix="$AUTO_FIX" ssh_status=0
+  local name="$1" previous_fix="$AUTO_FIX" ssh_status=0 journal_status=0
   if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
-    if [ "$name" = "ssh" ]; then
-      ssh_state_status preflight
-      ssh_status=$?
-      if [ "$ssh_status" -eq 0 ]; then
-        info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
-      elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
+    case "$name" in
+      ssh)
+        ssh_state_status preflight
+        ssh_status=$?
+        if [ "$ssh_status" -eq 0 ]; then
+          info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+        elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          if [ "$ssh_status" -eq 1 ]; then
+            info "Hay controles SSH pendientes, pero no se puede aplicar sin sobrescribir configuración o fuera de las condiciones admitidas; se mantiene en auditoría."
+          else
+            info "No se pudo verificar el estado efectivo de SSH; se omite la confirmación y no se modifica."
+          fi
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      sudo)
+        # sudo_module owns its parameter-specific confirmation and intentionally
+        # skips use_pty on cPanel hosts. A generic prompt here is redundant.
+        info "Sudo se comprueba primero; solo su control específico puede solicitar confirmación."
+        ;;
+      kernel)
+        # sysctl_safe_apply verifies each live and persistent value before it
+        # asks. A module-wide prompt is redundant and must never precede checks.
+        info "Se comprobarán los parámetros del kernel uno por uno; solo los que falten o difieran solicitarán confirmación."
+        ;;
+      synflood)
+        # The same rule applies to SYN cookies/backlog: ask per setting only.
+        if synflood_state_compliant; then
+          info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
+        else
+          info "SYN cookies/backlog: se revisará cada parámetro; solo los que falten o difieran solicitarán confirmación."
+        fi
+        ;;
+      rsyslog)
+        rsyslog_state_status
+        journal_status=$?
+        if [ "$journal_status" -eq 0 ]; then
+          info "Journald ya tiene Storage=persistent y /var/log/journal; no se solicitará confirmación ni se reiniciará."
+        elif [ "$journal_status" -eq 1 ]; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          info "No se puede verificar journald con seguridad; se omite aplicación automática."
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      *)
         if ! confirm_risky_change "$name"; then
           AUTO_FIX=false
           run_module "$name"
           AUTO_FIX="$previous_fix"
           return 0
         fi
-      else
-        if [ "$ssh_status" -eq 1 ]; then
-          info "Hay controles SSH pendientes, pero no se puede aplicar sin sobrescribir configuración o fuera de las condiciones admitidas; se mantiene en auditoría."
-        else
-          info "No se pudo verificar el estado efectivo de SSH; se omite la confirmación y no se modifica."
-        fi
-        AUTO_FIX=false
-        run_module "$name"
-        AUTO_FIX="$previous_fix"
-        return 0
-      fi
-    elif [ "$name" = "synflood" ] && synflood_state_compliant; then
-      info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; se omite la confirmación porque no hay cambios pendientes."
-    elif ! confirm_risky_change "$name"; then
-      AUTO_FIX=false
-      run_module "$name"
-      AUTO_FIX="$previous_fix"
-      return 0
-    fi
+        ;;
+    esac
   fi
   run_module "$name"
 }
@@ -1129,8 +1208,8 @@ main() {
     echo
     echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; cada módulo delicado pregunta por separado y explica su impacto antes de cambiar el sistema."
-    echo -e "$BLUE[INFO]$NC Si no hay terminal o se responde No, ese módulo no cambia el sistema y se muestra en auditoría."
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; los módulos verifican primero el estado y preguntan solo por cambios pendientes."
+    echo -e "$BLUE[INFO]$NC Los controles sysctl preguntan por parámetro; si ya cumplen, solo muestran [OK] y no se modifican."
     run_module banners
     run_module bash
 
