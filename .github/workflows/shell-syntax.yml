@@ -22,3 +22,5 @@ jobs:
         run: |
           find . -path './.git' -prune -o -type f -name '*.sh' -print0 \
             | xargs -0 -r -n1 bash -n
+      - name: Test Bash history deletion guard
+        run: bash tests/test_bash_history_guard.sh
