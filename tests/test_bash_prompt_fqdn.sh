@@ -55,7 +55,7 @@ run_profile_test() {
   local launcher="$TMP_DIR/$label-launcher.sh"
 
   cat > "$runner" <<'CHECK_PROFILE'
-set -euo pipefail
+set -eo pipefail
 source "$PROFILE_FILE" >/dev/null
 # Simula el set -o vi que aparece al final del .bashrc de srv19.
 set -o vi
