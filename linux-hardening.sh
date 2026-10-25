@@ -183,7 +183,7 @@ ssh_module(){
   [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"; [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"; [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
   # Safe SSH controls only. Existing crypto/auth/forwarding choices are preserved.
   if $AUTO_FIX; then
-    ssh_state_status quiet
+    ssh_state_status apply
   else
     ssh_state_status audit
   fi
