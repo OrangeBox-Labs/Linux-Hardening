@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.1 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.0 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -15,7 +15,7 @@ else
   echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.1
+SCRIPT_VERSION=1.4.0
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -554,19 +554,12 @@ set -o emacs 2>/dev/null || true
 bind '"\C-a": beginning-of-line' 2>/dev/null || true
 bind '"\C-e": end-of-line' 2>/dev/null || true
 
-# Bash \H muestra el nombre del nodo, no garantiza el FQDN resuelto.
-# Resolver hostname -f una vez por shell y usarlo literalmente en PS1.
-ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
-if [ -z "$ORANGEBOX_PROMPT_HOST" ]; then
-  ORANGEBOX_PROMPT_HOST="$(hostname 2>/dev/null || printf 'unknown')"
-fi
-
 # Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@'"${ORANGEBOX_PROMPT_HOST}"' \w #\[\e[0m\] '
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@\H \w #\[\e[0m\] '
   else
-    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@'"${ORANGEBOX_PROMPT_HOST}"' \w $\[\e[0m\] '
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@\H \w $\[\e[0m\] '
   fi
 }
 
@@ -593,11 +586,11 @@ ORANGEBOX_BASH
      [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
      [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
      [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
-    ok "Bash History habilitado e ilimitado; plantilla de prompt FQDN ya configurada"
+    ok "Bash History habilitado e ilimitado; prompt OrangeBox ya configurado"
   elif $AUTO_FIX; then
     [ ! -e "$target" ] || backup_once "$target"
     if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
-      ok "Bash History habilitado sin límite y prompt FQDN por rol aplicado en $target"
+      ok "Bash History habilitado sin límite y prompt por rol aplicado en $target"
       FIXED=$((FIXED+1))
     else
       warn "No se pudo instalar/verificar $target"
@@ -642,7 +635,7 @@ Uso:
   $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
   ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
-  $0 --fix --module bash            Historial con fecha/hora y prompt FQDN por rol
+  $0 --fix --module bash            Historial con fecha/hora y prompt por rol
   $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
   $0 --fix --module network-full --allow-shorewall
                                     Autoriza explícitamente cambios de red con Shorewall
