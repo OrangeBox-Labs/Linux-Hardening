@@ -142,7 +142,7 @@ El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfil
 
 ### Módulos especializados del repositorio
 
-El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `cis-benchmark-check.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `post-install.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada.
+El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `cis-benchmark-check.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`.
 
 ### Controles de alto riesgo
 
@@ -158,7 +158,7 @@ El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-harde
 | `rsyslog-hardening.sh` / `auditd-hardening.sh` | Reinician servicios de logging o amplían la auditoría; hay que revisar destinos, retención, volumen de eventos y reglas personalizadas. |
 | `configure-time-sync.sh` | Puede retirar el paquete NTP, instalar chrony o corregir la hora de golpe. Un salto temporal puede afectar certificados, autenticación y correlación de logs. |
 | `bash-hardening.sh` | Su modo completo añade un trap DEBUG para registrar comandos; puede elevar el volumen de logs y capturar argumentos sensibles. El baseline utiliza una implementación más acotada para historia y prompt. |
-| `post-install.sh` | Está pensado para preparación inicial de sistemas y contiene acciones que no deben ejecutarse ciegamente sobre un servidor existente, incluida la desactivación de SELinux. Desde el orquestador se permite solo auditoría. |
+| `post-install.sh` | Está pensado para preparación inicial; puede instalar paquetes, habilitar servicios y modificar configuración incluso sin `--fix`. Se omite del orquestador y no forma parte de `repo-audit`. |
 | `desintalar-paquetes-sin-usar.sh` / `desintalar-servicios-sin-usar.sh` / `remove-gui-hardening.sh` / `remove-xinetd.sh` | Pueden eliminar paquetes, dependencias o servicios. No deben ejecutarse sin revisar inventario y plan de reversión. |
 
 **Para un firewall remoto como un host administrado con Shorewall:** crea un snapshot y confirma acceso por consola fuera de banda. Usa `--fix` interactivo para que kernel/SYN flood soliciten autorización individual, revisa el resumen de cada cambio y comprueba las rutas después de aplicarlo. `--fix --auto` no aplica esos controles delicados. El código preserva `net.ipv4.ip_forward` y usa `rp_filter=2` si detecta forwarding IPv4; no combines un generador de iptables con Shorewall.
