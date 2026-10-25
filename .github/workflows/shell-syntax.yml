@@ -73,7 +73,11 @@ jobs:
               find . -path "./.git" -prune -o -type f -name "*.sh" -print0 |
                 xargs -0 -r -n1 /bin/bash -n
               /bin/bash tests/test_bash_history_guard.sh
-              /bin/bash tests/test_bash_prompt_fqdn.sh
+              if command -v script >/dev/null 2>&1; then
+                /bin/bash tests/test_bash_prompt_fqdn.sh
+              else
+                echo "[SKIP] La prueba PTY requiere util-linux script, ausente en esta imagen; se ejecuta completa en el job Ubuntu."
+              fi
               /bin/bash tests/test_audit_listening_services.sh
               /bin/bash tests/test_firewall_detect.sh
             '
