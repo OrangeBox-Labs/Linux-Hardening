@@ -53,14 +53,11 @@ check_nx_support() {
   # Verificar mediante cpuinfo
   if grep -qi "nx" /proc/cpuinfo 2>/dev/null; then
     echo -e "${GREEN}[✓] CPU soporta NX/XD (flag nx presente)${NC}"
-    # Verificar si esta activa en el kernel
-    if dmesg 2>/dev/null | grep -qi "NX.*protection.*active\|NX.*active"; then
-      echo -e "${GREEN}[✓] XD/NX protection activa en el kernel${NC}"
-      return 0
-    else
-      echo -e "${RED}[!] CPU soporta NX/XD pero no esta activa en el kernel${NC}"
-      NEED_FIX=1
-    fi
+    # La ausencia del mensaje de arranque no demuestra que NX esté deshabilitado.
+    # El estado se marca como no confirmado en lugar de generar un falso positivo.
+    echo -e "${YELLOW}[!] CPU soporta NX/XD, pero el log del kernel no confirma su estado activo; no se puede concluir que esté desactivado.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    NEED_FIX=0
   else
     echo -e "${RED}[!] CPU no soporta NX/XD o no esta disponible${NC}"
     NEED_FIX=0
