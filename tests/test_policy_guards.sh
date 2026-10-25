@@ -24,6 +24,17 @@ if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr
 fi
 pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o propone 0->1"
 
+# All interactive confirmations use the Spanish [s/N] convention, with No as default.
+SYSCTL_SAFE="$ROOT_DIR/lib/sysctl-safe.sh"
+NETWORK="$ROOT_DIR/network-hardening.sh"
+grep -Fq '[s/N]' "$SYSCTL_SAFE" || fail "sysctl-safe no usa la confirmación estándar [s/N]"
+grep -Fq '[s/N]' "$NETWORK" || fail "network-hardening no usa la confirmación estándar [s/N]"
+grep -Fq 'sysctl_safe_log()' "$SYSCTL_SAFE" || fail "sysctl-safe no centraliza los colores de estado"
+if grep -R -n -E '\\[(y/N|Y/n|Y/N|y/n)\\]|\\(s/n\\)' --include='*.sh' "$ROOT_DIR" --exclude-dir=.git --exclude-dir=tests; then
+  fail "queda una confirmación con formato antiguo; usar [s/N]"
+fi
+pass "confirmaciones estandarizadas en español y valores SYSCTL con salida coloreada"
+
 # Password aging must be observed but never rewritten by either baseline.
 grep -Fq 'PASS_MAX_DAYS=' "$CORE" || fail "baseline no informa PASS_MAX_DAYS"
 grep -Fq 'PASS_MAX_DAYS=' "$PASSWORD" || fail "password-hardening no documenta/conserva PASS_MAX_DAYS"
