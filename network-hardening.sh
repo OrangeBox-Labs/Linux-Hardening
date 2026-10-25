@@ -525,7 +525,11 @@ main() {
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar cambios en sistemas con Shorewall, use --fix --allow-shorewall solo tras revisar el impacto.${NC}"
+    if shorewall_is_active; then
+      echo -e "\n${BLUE}Shorewall está activo. Para aplicar cambios, revise primero el impacto y use --fix --allow-shorewall.${NC}"
+    else
+      echo -e "\n${BLUE}Para aplicar correcciones revisadas, ejecute --fix. La auditoría actual no modificó el sistema.${NC}"
+    fi
   fi
 }
 if [ "$EUID" -ne 0 ]; then
