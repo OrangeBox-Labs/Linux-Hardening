@@ -130,7 +130,13 @@ orangebox_history_guard() {
 }
 case ";${PROMPT_COMMAND:-};" in
     *";orangebox_history_guard;"*) ;;
-    *) PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND:-}" ;;
+    *)
+        if [ -n "${PROMPT_COMMAND:-}" ]; then
+            PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_history_guard"
+        else
+            PROMPT_COMMAND="orangebox_history_guard"
+        fi
+        ;;
 esac
 export PROMPT_COMMAND
 
