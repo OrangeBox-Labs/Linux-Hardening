@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.8 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.9 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.8
+SCRIPT_VERSION=1.3.9
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -743,10 +743,14 @@ Baseline interno:
   usb services banners time grub firewall fapolicyd listening bash all
 
 Módulos adicionales:
-  aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full
+  aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
   packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
   network-full password-full gui-remove xinetd-remove rsyslog-full
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
+
+Evaluaciones independientes:
+  ./cis-benchmark-check.sh       Evalúa exclusivamente el benchmark CIS.
+  ./linux-hardening-audit.sh    Audita los módulos, sin calcular cumplimiento CIS.
 
 Seguridad:
   --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
@@ -756,7 +760,7 @@ Seguridad:
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
   post-install se omite: no tiene una ruta de auditoría de solo lectura.
-  La auditoría agregada de solo lectura se ejecuta con ./linux-hardening-audit.sh.
+  El benchmark CIS no se ejecuta como módulo; utiliza el comando independiente indicado arriba.
 EOF
 }
 
@@ -834,12 +838,14 @@ run_internal_module_with_confirmation() {
 
 run_companion_module() {
   local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  if [ "$name" = "cis" ]; then
+    die "El benchmark CIS es independiente de los módulos de hardening. Ejecuta: ./cis-benchmark-check.sh"
+  fi
   case "$name" in
     aide) script="aide-install.sh"; risky=true ;;
     audit-listeners) script="audit-listening-services.sh"; audit_only=true; fix_arg="" ;;
     auditd-full) script="auditd-hardening.sh"; risky=true ;;
     bash-full) script="bash-hardening.sh"; risky=true ;;
-    cis) script="cis-benchmark-check.sh"; audit_only=true; fix_arg="" ;;
     time-sync) script="configure-time-sync.sh"; risky=true ;;
     cpu-full) script="cpu-hardening.sh"; risky=true ;;
     cron-full) script="cron-hardening.sh"; risky=true ;;
@@ -924,13 +930,7 @@ run_companion_module() {
   fi
   echo
   echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
-  if [ "$name" = "cis" ]; then
-    if ORANGEBOX_CIS_REPORT_FILE="$BACKUP_DIR/reporte_orangebox_cis_benchmark.log" bash "$SCRIPT_DIR/$script" "${args[@]}"; then
-      ok "Módulo $name finalizado"
-    else
-      warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
-    fi
-  elif bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
     ok "Módulo $name finalizado"
   else
     warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
