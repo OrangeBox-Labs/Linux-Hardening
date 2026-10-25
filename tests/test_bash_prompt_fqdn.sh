@@ -51,6 +51,44 @@ bash -n "$TMP_DIR/standalone-profile.sh" || fail "sintaxis del perfil standalone
 run_profile_test() {
   local label="$1" profile="$2" hook="$3"
   local output="$TMP_DIR/$label.out" errors="$TMP_DIR/$label.err"
+  local runner="$TMP_DIR/$label-runner.sh"
+  local launcher="$TMP_DIR/$label-launcher.sh"
+
+  cat > "$runner" <<'CHECK_PROFILE'
+set -euo pipefail
+source "$PROFILE_FILE" >/dev/null
+# Simula el set -o vi que aparece al final del .bashrc de srv19.
+set -o vi
+"$PROMPT_HOOK"
+
+case "$PS1" in
+  *srv19.cloudlatam.cl*) ;;
+  *) printf "FQDN ausente en PS1: %s\\n" "$PS1" >&2; exit 31 ;;
+esac
+
+set -o | grep -Eq "^emacs[[:space:]]+on$" || {
+  echo "La función del prompt no restauró el modo Emacs" >&2
+  exit 32
+}
+bind -q beginning-of-line 2>&1 | grep -Fq "C-a" || {
+  echo "Ctrl+A no está asociado a beginning-of-line" >&2
+  exit 33
+}
+bind -q end-of-line 2>&1 | grep -Fq "C-e" || {
+  echo "Ctrl+E no está asociado a end-of-line" >&2
+  exit 34
+}
+CHECK_PROFILE
+
+  cat > "$launcher" <<'LAUNCH_INTERACTIVE'
+#!/usr/bin/env bash
+exec bash --noprofile --norc -i -c 'source "$RUN_SCRIPT"; exit'
+LAUNCH_INTERACTIVE
+  chmod 755 "$launcher"
+
+  if ! command -v script >/dev/null 2>&1; then
+    fail "no está disponible util-linux script para crear una pseudo-terminal"
+  fi
 
   if ! env \
     PATH="$MOCK_BIN:$PATH" \
@@ -58,31 +96,8 @@ run_profile_test() {
     HISTFILE="$TMP_DIR/$label.history" \
     PROFILE_FILE="$profile" \
     PROMPT_HOOK="$hook" \
-    bash --noprofile --norc -i -c '
-      set -euo pipefail
-      source "$PROFILE_FILE" >/dev/null
-      # Simula el set -o vi que aparece al final del .bashrc de srv19.
-      set -o vi
-      "$PROMPT_HOOK"
-
-      case "$PS1" in
-        *srv19.cloudlatam.cl*) ;;
-        *) printf "FQDN ausente en PS1: %s\\n" "$PS1" >&2; exit 31 ;;
-      esac
-
-      set -o | grep -Eq "^emacs[[:space:]]+on$" || {
-        echo "La función del prompt no restauró el modo Emacs" >&2
-        exit 32
-      }
-      bind -q beginning-of-line 2>&1 | grep -Fq "C-a" || {
-        echo "Ctrl+A no está asociado a beginning-of-line" >&2
-        exit 33
-      }
-      bind -q end-of-line 2>&1 | grep -Fq "C-e" || {
-        echo "Ctrl+E no está asociado a end-of-line" >&2
-        exit 34
-      }
-    ' >"$output" 2>"$errors"; then
+    RUN_SCRIPT="$runner" \
+    script -qec "$launcher" /dev/null >"$output" 2>"$errors"; then
     cat "$output" >&2 || true
     cat "$errors" >&2 || true
     fail "$label: hostname FQDN o modo Emacs/Readline incorrecto"
