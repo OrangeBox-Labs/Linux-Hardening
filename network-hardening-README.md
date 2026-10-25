@@ -196,7 +196,7 @@ No modifica las reglas de firewall. Solo informa si hay conflictos.
 
 Las configuraciones se respaldan en /root/network-backup-fecha/
 
-El perfil administrado se escribe en `/etc/sysctl.d/99zz-orangebox-network-hardening.conf` para que cargue después de archivos estándar como `99-sysctl.conf`.
+Los cambios aprobados de sysctl se centralizan en `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`, compartido con los demás módulos OrangeBox y ordenado para tener alta precedencia. El script inventaría las definiciones existentes y pide confirmación por parámetro si el valor activo o persistente es distinto; los perfiles de Google Cloud, cPanel y CloudLinux se conservan sin editar. Si `/etc/sysctl.conf` contiene una asignación conflictiva, se consulta explícitamente antes de actualizar solo esa asignación.
 
 Para restaurar un backup, copia el archivo correspondiente desde el directorio `/root/network-backup-fecha/` y valida los valores antes de recargar sysctl.
 
