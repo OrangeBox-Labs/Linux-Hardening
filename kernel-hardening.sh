@@ -52,7 +52,7 @@ show_usage() {
 # ==============================================
 check_sysctl_param() {
   local param="$1" expected="$2" description="$3"
-  local SYSCTL_FILE="/etc/sysctl.d/99-cis-hardening.conf"
+  local SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
   if sysctl_safe_apply "$param" "$expected" "$description" "$SYSCTL_FILE" "/var/backups/orangebox-kernel-hardening" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
   else
