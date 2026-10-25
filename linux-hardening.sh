@@ -512,6 +512,14 @@ orangebox_history_guard() {
 export HISTTIMEFORMAT='%F %T '
 orangebox_history_guard
 
+orangebox_secure_history_file() {
+  [ -n "${HOME:-}" ] && [ -d "$HOME" ] || return 0
+  [ "$HISTFILE" = "$HOME/.bash_history" ] || return 0
+  if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+  if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+}
+orangebox_secure_history_file
+
 # Normalizar la edición de línea en Bash para administración.
 # Ctrl+A = inicio de línea; Ctrl+E = final de línea.
 # No depender de un ~/.inputrc o /etc/inputrc personalizado.
