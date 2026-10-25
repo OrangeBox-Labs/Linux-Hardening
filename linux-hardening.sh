@@ -509,8 +509,8 @@ orangebox_history_guard
 # Ctrl+A = inicio de línea; Ctrl+E = final de línea.
 # No depender de un ~/.inputrc o /etc/inputrc personalizado.
 set -o emacs 2>/dev/null || true
-bind '\"\\C-a\": beginning-of-line' 2>/dev/null || true
-bind '\"\\C-e\": end-of-line' 2>/dev/null || true
+bind '"\C-a": beginning-of-line' 2>/dev/null || true
+bind '"\C-e": end-of-line' 2>/dev/null || true
 
 # Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
