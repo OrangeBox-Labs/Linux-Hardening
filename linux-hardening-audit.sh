@@ -53,7 +53,7 @@ declare -a SUPPLEMENTAL_CRITICAL=()
 declare -a SUPPLEMENTAL_FINDINGS=()
 
 strip_ansi() {
-  sed -E 's/\\x1B\\[[0-9;]*[[:alpha:]]//g'
+  sed -E 's/\x1B\[[0-9;]*[[:alpha:]]//g'
 }
 
 append_unique() {
@@ -73,12 +73,12 @@ append_unique() {
 
 collect_cis_summary() {
   local output="$1" clean tenths whole decimal
-  clean="$(printf '%s\\n' "$output" | strip_ansi)"
+  clean="$(printf '%s\n' "$output" | strip_ansi)"
 
-  CIS_PASS_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests PASADOS:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
-  CIS_FAIL_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests FALLADOS \\(CRITICOS\\):[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
-  CIS_WARN_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests WARNING:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
-  CIS_TOTAL_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Total tests:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
+  CIS_PASS_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests PASADOS:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
+  CIS_FAIL_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests FALLADOS \(CRITICOS\):[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
+  CIS_WARN_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Tests WARNING:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
+  CIS_TOTAL_COUNT="$(printf '%s\n' "$clean" | sed -nE 's/.*Total tests:[[:space:]]*([0-9]+).*/\1/p' | tail -n 1)"
 
   [ -n "$CIS_PASS_COUNT" ] || CIS_PASS_COUNT=0
   [ -n "$CIS_FAIL_COUNT" ] || CIS_FAIL_COUNT=0
@@ -96,10 +96,10 @@ collect_cis_summary() {
   fi
 
   mapfile -t CIS_CRITICAL_FINDINGS < <(
-    printf '%s\\n' "$clean" | awk '
-      /\\[FAIL\\] / {
+    printf '%s\n' "$clean" | awk '
+      /\[FAIL\] / {
         title=$0
-        sub(/^.*\\[FAIL\\] /, "", title)
+        sub(/^.*\[FAIL\] /, "", title)
         getline
         detail=$0
         gsub(/[[:space:]]+/, " ", title)
@@ -112,10 +112,10 @@ collect_cis_summary() {
       }'
   )
   mapfile -t CIS_WARNING_FINDINGS < <(
-    printf '%s\\n' "$clean" | awk '
-      /\\[WARN\\] [0-9]/ {
+    printf '%s\n' "$clean" | awk '
+      /\[WARN\] [0-9]/ {
         title=$0
-        sub(/^.*\\[WARN\\] /, "", title)
+        sub(/^.*\[WARN\] /, "", title)
         getline
         detail=$0
         gsub(/[[:space:]]+/, " ", title)
@@ -132,10 +132,10 @@ collect_cis_summary() {
 collect_supplemental_findings() {
   local name="$1" output="$2" clean line finding lower
   [ "$name" = "cis" ] && return 0
-  clean="$(printf '%s\\n' "$output" | strip_ansi)"
+  clean="$(printf '%s\n' "$output" | strip_ansi)"
 
   while IFS= read -r line; do
-    line="${line%$'\\r'}"
+    line="${line%$'\r'}"
     line="${line#"${line%%[![:space:]]*}"}"
     [ -n "$line" ] || continue
 
@@ -255,7 +255,7 @@ run_audit_module() {
     fi
   fi
 
-  printf '%s\\n' "$output"
+  printf '%s\n' "$output"
   if [ "$report_cis" = true ]; then
     collect_cis_summary "$output"
   fi
