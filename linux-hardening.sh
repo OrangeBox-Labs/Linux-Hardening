@@ -659,7 +659,7 @@ Baseline interno:
 Módulos adicionales:
   aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full
   packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
-  network-full password-full post-install gui-remove xinetd-remove rsyslog-full
+  network-full password-full gui-remove xinetd-remove rsyslog-full
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full repo-audit
 
 Seguridad:
