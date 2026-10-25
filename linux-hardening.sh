@@ -107,7 +107,7 @@ SSH_DROPIN=/etc/ssh/sshd_config.d/49-orangebox-hardening.conf
 SSH_EXPECTED_SETTINGS=(
   "ignorerhosts yes"
   "hostbasedauthentication no"
-  "permittuserenvironment no"
+  "permituserenvironment no"
   "permitemptypasswords no"
   "maxauthtries 6"
   "logingracetime 60"
@@ -170,7 +170,7 @@ ssh_state_status() {
 ssh_module_can_apply() {
   [ "${OS_VERSION:-0}" -ge 8 ] &&
     [ -d /etc/ssh/sshd_config.d ] &&
-    [ ! -e "$SSH_DROPIN" ] &&
+    [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
     [ -f /etc/ssh/sshd_config ] &&
     command -v sshd >/dev/null 2>&1
 }
@@ -193,7 +193,7 @@ ssh_module(){
       ok "Los controles SSH ya cumplen los objetivos efectivos; no se crea un drop-in redundante"
     elif [ "$ssh_status" -eq 2 ]; then
       warn "No se puede verificar de forma segura la configuración SSH; no se modifica"
-    elif [ -e "$drop" ]; then
+    elif [ -e "$drop" ] || [ -L "$drop" ]; then
       warn "$drop ya existe; no se sobrescribe para preservar configuración existente"
     else
       tmp=$(mktemp "$drop.XXXXXX") || { warn "No se pudo crear SSH temporal"; return; }
