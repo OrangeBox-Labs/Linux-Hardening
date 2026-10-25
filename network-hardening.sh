@@ -30,7 +30,7 @@ WARNINGS=0
 AUTO_FIX=false
 ALLOW_SHOREWALL=false
 
-SYSCTL_FILE="/etc/sysctl.d/99zz-orangebox-network-hardening.conf"
+SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
 SYSCTL_LEGACY_FILE="/etc/sysctl.d/99-network-hardening.conf"
 BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
 
