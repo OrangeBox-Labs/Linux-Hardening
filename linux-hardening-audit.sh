@@ -6,7 +6,7 @@
 # al expandir arrays vacíos de argumentos de auditoría.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.2.0"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -270,34 +270,24 @@ run_audit_module() {
 }
 
 print_final_summary() {
-  local pending=0 item
+  local pending=0 rounded_percentage=0 item
+
   echo
   echo -e "${BLUE}============================================================${NC}"
-  echo -e "${BLUE} RESUMEN EJECUTIVO DE SEGURIDAD${NC}"
+  echo -e "${BLUE} RESUMEN DE HALLAZGOS DE SEGURIDAD${NC}"
   echo -e "${BLUE}============================================================${NC}"
   echo "Módulos ejecutados: $MODULES_RUN"
   echo "Errores de ejecución del auditor: $ERRORS"
 
-  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
-    pending=$((CIS_FAIL_COUNT + CIS_WARN_COUNT))
-    echo
-    echo "CIS Benchmark:"
-    echo "  Cumplimiento: $CIS_SCORE ($CIS_PASS_COUNT de $CIS_TOTAL_COUNT controles PASS; redondeado: $(((CIS_PASS_COUNT * 100 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))%)"
-    echo "  OK / PASS: $CIS_PASS_COUNT"
-    echo "  CRÍTICOS / FAIL: $CIS_FAIL_COUNT"
-    echo "  WARNING: $CIS_WARN_COUNT"
-    echo "  Total de controles CIS: $CIS_TOTAL_COUNT"
-    echo "  Controles CIS pendientes (FAIL + WARNING): $pending"
-  else
-    echo
-    echo "CIS Benchmark: no se pudo obtener un resumen válido."
-  fi
-
   echo
-  echo "Hallazgos críticos adicionales fuera del score CIS: ${#SUPPLEMENTAL_CRITICAL[@]}"
-  for item in "${SUPPLEMENTAL_CRITICAL[@]}"; do
-    echo "  - $item"
-  done
+  echo "HALLAZGOS CRÍTICOS ADICIONALES FUERA DEL CIS (${#SUPPLEMENTAL_CRITICAL[@]}):"
+  if [ "${#SUPPLEMENTAL_CRITICAL[@]}" -eq 0 ]; then
+    echo "  - Ninguno reportado."
+  else
+    for item in "${SUPPLEMENTAL_CRITICAL[@]}"; do
+      echo "  - $item"
+    done
+  fi
 
   echo
   echo "CONTROLES CIS CRÍTICOS / FAIL PENDIENTES (${#CIS_CRITICAL_FINDINGS[@]}):"
@@ -310,29 +300,34 @@ print_final_summary() {
   fi
 
   echo
-  echo "CONTROLES CIS WARNING PENDIENTES (${#CIS_WARNING_FINDINGS[@]}):"
-  if [ "${#CIS_WARNING_FINDINGS[@]}" -eq 0 ]; then
-    echo "  - Ninguno reportado."
+  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
+    pending=$((CIS_FAIL_COUNT + CIS_WARN_COUNT))
+    rounded_percentage=$(((CIS_PASS_COUNT * 100 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))
+    echo "PENDIENTES MENORES (solo cantidades; sin listar cada hallazgo):"
+    echo "  Controles CIS WARNING no cumplidos: $CIS_WARN_COUNT"
+    echo "  Hallazgos complementarios no críticos: ${#SUPPLEMENTAL_FINDINGS[@]}"
+    echo "  Total de controles CIS pendientes (FAIL + WARNING): $pending"
   else
-    for item in "${CIS_WARNING_FINDINGS[@]}"; do
-      echo "  - $item"
-    done
+    echo "No se pudo obtener un resumen CIS válido."
+    echo "Hallazgos complementarios no críticos: ${#SUPPLEMENTAL_FINDINGS[@]}"
   fi
 
   echo
-  echo "HALLAZGOS COMPLEMENTARIOS DE OTROS MÓDULOS: ${#SUPPLEMENTAL_FINDINGS[@]}"
-  echo "No se suman al score CIS porque los módulos pueden revisar controles solapados o criterios distintos."
-  if [ "${#SUPPLEMENTAL_FINDINGS[@]}" -eq 0 ]; then
-    echo "  - Ninguno reportado."
-  else
-    for item in "${SUPPLEMENTAL_FINDINGS[@]}"; do
-      echo "  - $item"
-    done
-  fi
-
-  echo
-  echo "Solo auditoría: no se aplicaron correcciones ni se creó un backup desde el auditor."
+  echo "Auditoría de solo lectura: no se aplicaron correcciones ni se crearon backups."
   echo -e "${BLUE}============================================================${NC}"
+  echo
+
+  # Mantener las métricas consolidadas al final absoluto de la salida.
+  echo "============== RESULTADO FINAL CIS =============="
+  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
+    echo "Controles aprobados: $CIS_PASS_COUNT"
+    echo "Controles críticos FAIL: $CIS_FAIL_COUNT"
+    echo "Controles menores WARNING: $CIS_WARN_COUNT"
+    echo "Total de controles: $CIS_TOTAL_COUNT"
+    echo "Porcentaje de cumplimiento CIS: $CIS_SCORE (redondeado: ${rounded_percentage}%)"
+  else
+    echo "Porcentaje de cumplimiento CIS: N/D"
+  fi
 }
 
 
