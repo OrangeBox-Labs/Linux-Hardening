@@ -16,7 +16,7 @@ pass() { printf '[PASS] %s\n' "$*"; }
 
 # The shared sysctl status tags must use the same color palette as other modules.
 unset GREEN RED BLUE YELLOW NC
-esc="$(printf '\\033')"
+esc="$(printf '\033')"
 ok_message="$(sysctl_safe_log OK "color-test")"
 warn_message="$(sysctl_safe_log WARN "color-test")"
 case "$ok_message" in *"$esc[0;32m[SYSCTL][OK]$esc[0m"*) ;; *) fail "[SYSCTL][OK] no se muestra en verde" ;; esac
