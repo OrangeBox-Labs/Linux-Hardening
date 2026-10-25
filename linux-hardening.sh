@@ -907,7 +907,9 @@ main() {
   fi
 
   detect_os
-  prepare_backup
+  if [ "$AUTO_FIX" = true ]; then
+    prepare_backup
+  fi
 
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
     warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
@@ -966,7 +968,11 @@ main() {
   echo "Correcciones: $FIXED"
   echo "Advertencias: $WARNINGS"
   echo "Errores: $ERRORS"
-  echo "Backup: $BACKUP_DIR"
+  if [ "$AUTO_FIX" = true ]; then
+    echo "Backup: $BACKUP_DIR"
+  else
+    echo "Backup: no creado (modo auditoría)"
+  fi
   echo -e "$GREEN============================================================$NC"
 }
 main "$@"
