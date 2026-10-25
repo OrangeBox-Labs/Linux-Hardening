@@ -93,9 +93,64 @@ ssh_module(){
   info "No se fuerzan PasswordAuthentication, PubkeyAuthentication, PermitRootLogin, AllowUsers/AllowGroups, forwarding, GSSAPI/Kerberos ni algoritmos criptográficos sin inventario de clientes e integraciones."
 }
 
-sudo_module(){ echo -e "\n$BLUE### SUDO ###$NC"; command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }; visudo -cf /etc/sudoers >/dev/null 2>&1&&ok "sudoers válido"||bad "sudoers inválido"; grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty' /etc/sudoers /etc/sudoers.d 2>/dev/null&&ok "use_pty habilitado"||{ warn "use_pty no configurado"; if $AUTO_FIX; then local f=/etc/sudoers.d/99-orangebox-hardening; echo 'Defaults use_pty'>"$f"; chmod 440 "$f"; chown root:root "$f"; visudo -cf "$f" >/dev/null 2>&1&&{ ok "use_pty habilitado"; FIXED=$((FIXED+1)); }||rm -f "$f"; fi; }
+cpanel_host_detected() {
+  [ -d /usr/local/cpanel ] || [ -f /etc/cpanel/cpanel.config ] || command -v whmapi1 >/dev/null 2>&1
 }
-password_module(){ echo -e "\n$BLUE### PASSWORD / PAM ###$NC"; [ -f /etc/login.defs ]||return; local max; max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' /etc/login.defs); [ "$max" = -1 ]||[ "$max" = 0 ]&&ok "PASS_MAX_DAYS=$max (sin expiración)"||warn "PASS_MAX_DAYS=$max; password-hardening.sh debe corregirlo"; command -v authselect >/dev/null 2>&1&&authselect current >/dev/null 2>&1&&ok "authselect operativo; PAM no se edita a ciegas"||warn "PAM requiere revisión; no se insertan reglas automáticamente"; grep -Rqs 'pam_faillock.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null&&ok "pam_faillock presente"||warn "pam_faillock no presente; se deja en auditoría"; getent group wheel >/dev/null 2>&1&&ok "wheel existe"||warn "wheel no existe"; }
+
+sudo_module() {
+  echo -e "\n$BLUE### SUDO ###$NC"
+  command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }
+  visudo -cf /etc/sudoers >/dev/null 2>&1 && ok "sudoers válido" || bad "sudoers inválido"
+
+  if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
+    ok "use_pty habilitado"
+    return
+  fi
+
+  if cpanel_host_detected; then
+    info "cPanel detectado: por política OrangeBox no se activa use_pty, ya que puede romper funcionalidades o automatizaciones del hosting."
+    return
+  fi
+
+  warn "use_pty no configurado"
+  $AUTO_FIX || return
+
+  local answer f=/etc/sudoers.d/99-orangebox-hardening
+  if [ -e "$f" ]; then
+    warn "$f ya existe; no se sobrescribe para conservar la configuración existente"
+    return
+  fi
+  if [ ! -r /dev/tty ]; then
+    warn "No hay terminal interactiva para confirmar use_pty; no se modifica sudoers"
+    return
+  fi
+  echo "Qué cambia: obliga a sudo a utilizar un pseudo-terminal; puede afectar automatizaciones que dependen de una sesión sin TTY."
+  read -r -p "¿Deseas habilitar Defaults use_pty en este servidor? [s/N]: " answer </dev/tty
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) ;;
+    *) info "use_pty rechazado/no confirmado; se conserva la configuración actual"; return ;;
+  esac
+
+  printf '%s\\n' 'Defaults use_pty' > "$f" || { warn "No se pudo preparar $f"; return; }
+  chmod 440 "$f" && chown root:root "$f" || { rm -f "$f"; warn "No se pudieron fijar los permisos de $f"; return; }
+  if visudo -cf /etc/sudoers >/dev/null 2>&1; then
+    ok "use_pty habilitado y sudoers validado"
+    FIXED=$((FIXED+1))
+  else
+    rm -f "$f"
+    bad "sudoers no validó; se retiró el drop-in recién creado"
+  fi
+}
+password_module() {
+  echo -e "\n$BLUE### PASSWORD / PAM ###$NC"
+  [ -f /etc/login.defs ] || return
+  local max
+  max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' /etc/login.defs)
+  info "PASS_MAX_DAYS=${max:-no definido}; se conserva sin cambios por política operacional para evitar expiraciones que puedan bloquear accesos."
+  command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1 && ok "authselect operativo; PAM no se edita a ciegas" || warn "PAM requiere revisión; no se insertan reglas automáticamente"
+  grep -Rqs 'pam_faillock.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null && ok "pam_faillock presente" || warn "pam_faillock no presente; se deja en auditoría"
+  getent group wheel >/dev/null 2>&1 && ok "wheel existe" || warn "wheel no existe"
+}
 kernel_module(){
   echo -e "\n$BLUE### KERNEL / SYSCTL ###$NC"
   local forwarding rp_filter ipv6_forward
@@ -414,7 +469,24 @@ firewall_module() {
   fi
   info "No se aplican reglas DROP automáticamente; el firewall debe revisarse y modificarse por separado"
 }
-fapolicyd_module(){ echo -e "\n$BLUE### FAPOLICYD ###$NC"; rpm -q fapolicyd >/dev/null 2>&1&&systemctl is-active fapolicyd >/dev/null 2>&1&&ok "fapolicyd activo"||warn "fapolicyd ausente/inactivo; no se habilita automáticamente"; }
+fapolicyd_module() {
+  echo -e "\n$BLUE### FAPOLICYD ###$NC"
+  local installed=false active=false
+  if [ -x /var/ossec/bin/wazuh-control ] || rpm -q wazuh-agent >/dev/null 2>&1 || rpm -q wazuh-manager >/dev/null 2>&1; then
+    info "Wazuh detectado: según la política OrangeBox, el control de seguridad se gestiona con Wazuh; Linux-Hardening no instalará ni activará fapolicyd."
+  fi
+  rpm -q fapolicyd >/dev/null 2>&1 && installed=true
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet fapolicyd 2>/dev/null; then
+    active=true
+  fi
+  if $installed && $active; then
+    info "fapolicyd ya está activo; el baseline no lo modifica ni lo detiene."
+  elif $installed; then
+    info "fapolicyd está instalado pero inactivo; por política no se activa ni modifica."
+  else
+    info "fapolicyd no está instalado; por política no se instala ni se activa desde Linux-Hardening."
+  fi
+}
 listening_module(){ echo -e "\n$BLUE### LISTENING SERVICES ###$NC"; command -v ss >/dev/null 2>&1&&ss -lntup 2>/dev/null||true; }
 normalize_history_dotfile() {
   local file="$1" tmp
@@ -689,7 +761,7 @@ internal_module_requires_risk() {
 risk_description() {
   case "$1" in
     ssh) echo "añade controles a sshd (intentos, tiempos de sesión y autenticación por host). Se valida la sintaxis; aun así, revisa clientes e integraciones SSH." ;;
-    sudo) echo "activa use_pty en sudoers. Mejora auditoría, pero puede alterar automatizaciones que dependen de una sesión sin pseudo-terminal." ;;
+    sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
     synflood) echo "habilita SYN cookies y persiste backlog TCP/reintentos recomendados; no cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
@@ -786,11 +858,13 @@ run_companion_module() {
     xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
     rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
     selinux-setup)
-      if [ "$AUTO_FIX" != true ]; then
-        warn "Se omite selinux-setup: no ofrece auditoría de solo lectura y puede modificar /etc/selinux/config."
-        return 0
+      info "selinux-setup bloqueado por política OrangeBox: SELinux solo se audita; nunca se cambian su modo, configuración, contextos ni se solicita reinicio."
+      if command -v getenforce >/dev/null 2>&1; then
+        info "Estado SELinux actual: $(getenforce 2>/dev/null || echo desconocido)"
+      else
+        warn "getenforce no disponible; no se puede determinar el estado actual de SELinux"
       fi
-      script="selinux-secure-setup.sh"; risky=true
+      return 0
       ;;
     ssh-cis) script="ssh-hardening.sh"; risky=true ;;
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
