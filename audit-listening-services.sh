@@ -18,6 +18,18 @@ classify_listening_process() {
     pure-ftpd|vsftpd|proftpd) printf '%s\n' FTP ;;
     pdns_server|named|dnsmasq|unbound|systemd-resolved) printf '%s\n' DNS ;;
     rpcbind) printf '%s\n' RPC_NFS ;;
+    systemd)
+      # systemd puede ser propietario de un socket activable; no inferir
+      # qué servicio está detrás sin consultar su unidad.
+      case "$port" in 111) printf '%s\n' ACTIVACION_SOCKET ;; *) printf '%s\n' NO_CLASIFICADO ;; esac
+      ;;
+    cpsrvd*|cpdavd*) printf '%s\n' CPANEL ;;
+    cphulkd*|cPhulkd*) printf '%s\n' SEGURIDAD_CPANEL ;;
+    imunify360-webs|imunify-agent-p|imunify-residen|ie-dec-node|ie-quarantine)
+      printf '%s\n' SEGURIDAD ;;
+    ossec-remoted) printf '%s\n' SEGURIDAD_MONITOREO ;;
+    chronyd) printf '%s\n' SINCRONIZACION_HORARIA ;;
+    spamd*) printf '%s\n' FILTRO_CORREO ;;
     httpd|nginx|apache2|lshttpd|openlitespeed) printf '%s\n' WEB ;;
     postfix|dovecot|exim|sendmail) printf '%s\n' CORREO ;;
     master)
@@ -74,7 +86,10 @@ audit_listening_ports() {
       TODAS_INTERFACES) note="Revisar ACL/firewall" ;;
       *) note="Revisar red/ACL" ;;
     esac
-    [ "$category" != NO_CLASIFICADO ] || note="$note; validar propósito"
+    case "$category" in
+      ACTIVACION_SOCKET) note="$note; identificar unidad systemd" ;;
+      NO_CLASIFICADO) note="$note; validar propósito" ;;
+    esac
     printf '%-5s %-8s %-7s %-30.30s %-24.24s %-17s %-18s %s\n' \
       "$proto_upper" "$state" "$port" "$local_addr" "$process" "$category" "$scope" "$note"
     count=$((count + 1))
