@@ -30,6 +30,10 @@ Configura `Defaults env_reset`
 
 **Por que es importante:** Previene que un atacante pueda inyectar variables de entorno maliciosas (como LD_PRELOAD) que podrian ejecutar codigo arbitrario.
 
+## Política de `use_pty`
+
+En servidores con cPanel, `use_pty` se omite porque puede romper funcionalidades o automatizaciones del hosting. En servidores sin cPanel, `--fix` pregunta explícitamente antes de añadir `Defaults use_pty`; sin confirmación, conserva la configuración actual.
+
 ## Verificacion de sintaxis
 
 El script valida la sintaxis de /etc/sudoers con `visudo -c` despues de cada cambio. Si hay errores, restaura el backup automaticamente.
