@@ -942,7 +942,7 @@ main() {
     done
   else
     if [ "$AUTO_FIX" = true ]; then
-      warn "MODO FIX: módulo seleccionado=$MODULE"
+      echo -e "$BLUE[INFO]$NC MODO FIX: módulo seleccionado=$MODULE"
     else
       ok "MODO AUDITORÍA: módulo seleccionado=$MODULE"
     fi
