@@ -476,8 +476,8 @@ enable_syncookies() {
   set_sysctl "net.ipv4.tcp_syncookies" "1" "net.ipv4.tcp_syncookies"
   set_sysctl "net.ipv4.tcp_max_syn_backlog" "4096" "net.ipv4.tcp_max_syn_backlog"
   set_sysctl "net.core.somaxconn" "4096" "net.core.somaxconn"
-  set_sysctl "net.ipv4.tcp_synack_retries" "3" "net.ipv4.tcp_synack_retries"
-  set_sysctl "net.ipv4.tcp_syn_retries" "5" "net.ipv4.tcp_syn_retries"
+  # TCP retry counts are workload/provider tuning, not universal SYN-cookie controls.
+  # Preserve existing OS, cPanel and CloudLinux policy; tune these separately if needed.
   flush_routes
 }
 
