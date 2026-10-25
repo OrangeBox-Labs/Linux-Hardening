@@ -6,7 +6,7 @@
 # al expandir arrays vacíos de argumentos de auditoría.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -41,8 +41,162 @@ reglas de firewall destructivas.
 EOF
 }
 
+CIS_SEEN=false
+CIS_PASS_COUNT=0
+CIS_FAIL_COUNT=0
+CIS_WARN_COUNT=0
+CIS_TOTAL_COUNT=0
+CIS_SCORE="N/D"
+declare -a CIS_CRITICAL_FINDINGS=()
+declare -a CIS_WARNING_FINDINGS=()
+declare -a SUPPLEMENTAL_CRITICAL=()
+declare -a SUPPLEMENTAL_FINDINGS=()
+
+strip_ansi() {
+  sed -E 's/\\x1B\\[[0-9;]*[[:alpha:]]//g'
+}
+
+append_unique() {
+  local target="$1" item="$2" existing
+  if [ "$target" = "critical" ]; then
+    for existing in "${SUPPLEMENTAL_CRITICAL[@]}"; do
+      [ "$existing" = "$item" ] && return 0
+    done
+    SUPPLEMENTAL_CRITICAL+=("$item")
+  else
+    for existing in "${SUPPLEMENTAL_FINDINGS[@]}"; do
+      [ "$existing" = "$item" ] && return 0
+    done
+    SUPPLEMENTAL_FINDINGS+=("$item")
+  fi
+}
+
+collect_cis_summary() {
+  local output="$1" clean tenths whole decimal
+  clean="$(printf '%s\\n' "$output" | strip_ansi)"
+
+  CIS_PASS_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests PASADOS:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
+  CIS_FAIL_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests FALLADOS \\(CRITICOS\\):[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
+  CIS_WARN_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Tests WARNING:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
+  CIS_TOTAL_COUNT="$(printf '%s\\n' "$clean" | sed -nE 's/.*Total tests:[[:space:]]*([0-9]+).*/\\1/p' | tail -n 1)"
+
+  [ -n "$CIS_PASS_COUNT" ] || CIS_PASS_COUNT=0
+  [ -n "$CIS_FAIL_COUNT" ] || CIS_FAIL_COUNT=0
+  [ -n "$CIS_WARN_COUNT" ] || CIS_WARN_COUNT=0
+  [ -n "$CIS_TOTAL_COUNT" ] || CIS_TOTAL_COUNT=$((CIS_PASS_COUNT + CIS_FAIL_COUNT + CIS_WARN_COUNT))
+  CIS_SEEN=true
+
+  if [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
+    tenths=$(((CIS_PASS_COUNT * 1000 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))
+    whole=$((tenths / 10))
+    decimal=$((tenths % 10))
+    CIS_SCORE="${whole},${decimal}%"
+  else
+    CIS_SCORE="N/D"
+  fi
+
+  mapfile -t CIS_CRITICAL_FINDINGS < <(
+    printf '%s\\n' "$clean" | awk '
+      /\\[FAIL\\] / {
+        title=$0
+        sub(/^.*\\[FAIL\\] /, "", title)
+        getline
+        detail=$0
+        gsub(/[[:space:]]+/, " ", title)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", detail)
+        gsub(/[[:space:]]+/, " ", detail)
+        if (title != "") {
+          if (detail != "") print title " — " detail
+          else print title
+        }
+      }'
+  )
+  mapfile -t CIS_WARNING_FINDINGS < <(
+    printf '%s\\n' "$clean" | awk '
+      /\\[WARN\\] [0-9]/ {
+        title=$0
+        sub(/^.*\\[WARN\\] /, "", title)
+        getline
+        detail=$0
+        gsub(/[[:space:]]+/, " ", title)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", detail)
+        gsub(/[[:space:]]+/, " ", detail)
+        if (title != "") {
+          if (detail != "") print title " — " detail
+          else print title
+        }
+      }'
+  )
+}
+
+collect_supplemental_findings() {
+  local name="$1" output="$2" clean line finding lower
+  [ "$name" = "cis" ] && return 0
+  clean="$(printf '%s\\n' "$output" | strip_ansi)"
+
+  while IFS= read -r line; do
+    line="${line%$'\\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -n "$line" ] || continue
+
+    case "$line" in
+      "[WARN] "*)
+        finding="${line#\[WARN\] }"
+        ;;
+      "[FAIL] "*)
+        finding="${line#\[FAIL\] }"
+        append_unique critical "$name: $finding"
+        continue
+        ;;
+      "[ERROR] "*)
+        finding="${line#\[ERROR\] }"
+        append_unique critical "$name: $finding"
+        continue
+        ;;
+      "[!] "*)
+        finding="${line#\[!\] }"
+        case "$finding" in
+          Modo\ verificacion*|Modo\ verificación*|Ejecute\ con\ --fix*|3\ segundos\ para\ cancelar*|Modo\ automatico*|Modo\ automático*|MODO\ FIX*|MODO\ --FIX*|Para\ corregir\ ejecuta*|Para\ aplicar\ las\ correcciones*)
+            continue
+            ;;
+        esac
+        ;;
+      "[✗]"*)
+        finding="${line#\[✗\] }"
+        ;;
+      "✗ "*)
+        finding="${line#✗ }"
+        ;;
+      *)
+        # La tabla de puertos no usa etiquetas [WARN], pero contiene acciones
+        # que necesitan confirmación del administrador, no ejecución automática.
+        if [ "$name" = "audit-listeners" ] &&
+           [[ "$line" =~ ^[0-9]+[[:space:]]+.*[[:space:]](REVISAR|ELIMINAR|CONFIGURAR[[:space:]]+LOCAL|MONITOREO)[[:space:]] ]]; then
+          append_unique finding "$name: Revisar servicio/puerto: $line"
+        fi
+        continue
+        ;;
+    esac
+
+    lower="$(printf '%s' "$finding" | tr '[:upper:]' '[:lower:]')"
+    case "$lower" in
+      *recomendacion:*|*para\ corregir\ ejecuta*|*ejecute\ con\ --fix*|*para\ aplicar\ las\ correcciones*)
+        continue
+        ;;
+    esac
+
+    # El fin de soporte de la distribución es un riesgo crítico independiente
+    # del score CIS. Otros hallazgos no-CIS se muestran aparte sin severidad CIS.
+    if [ "$name" = "lpe-2026" ] && [[ "$lower" == *"fuera de soporte"* ]]; then
+      append_unique critical "$name: $finding"
+    else
+      append_unique finding "$name: $finding"
+    fi
+  done <<< "$clean"
+}
+
 run_audit_module() {
-  local name="$1" script="" report_cis=false
+  local name="$1" script="" report_cis=false output="" rc=0
   shift
   local -a args=("$@")
 
@@ -85,22 +239,102 @@ run_audit_module() {
   echo "========== AUDITORÍA: $name ($script) =========="
   MODULES_RUN=$((MODULES_RUN + 1))
 
-  # CIS normalmente persiste un reporte en el directorio actual. Redirigimos
-  # ese archivo a /dev/null para que la auditoría agregada no escriba archivos.
+  # Capturar cada ejecución en memoria permite generar un resumen consolidado
+  # sin crear archivos temporales ni reportes persistentes.
   if [ "$report_cis" = true ]; then
-    if ORANGEBOX_CIS_REPORT_FILE=/dev/null bash "$SCRIPT_DIR/$script" "${args[@]}"; then
-      ok "Módulo $name finalizado"
+    if output="$(ORANGEBOX_CIS_REPORT_FILE=/dev/null bash "$SCRIPT_DIR/$script" "${args[@]}" 2>&1)"; then
+      rc=0
     else
-      warn "Módulo $name terminó con código distinto de cero; revisar la salida."
-      ERRORS=$((ERRORS + 1))
+      rc=$?
     fi
-  elif bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+  else
+    if output="$(bash "$SCRIPT_DIR/$script" "${args[@]}" 2>&1)"; then
+      rc=0
+    else
+      rc=$?
+    fi
+  fi
+
+  printf '%s\\n' "$output"
+  if [ "$report_cis" = true ]; then
+    collect_cis_summary "$output"
+  fi
+  collect_supplemental_findings "$name" "$output"
+
+  if [ "$rc" -eq 0 ]; then
     ok "Módulo $name finalizado"
   else
-    warn "Módulo $name terminó con código distinto de cero; revisar la salida."
+    warn "Módulo $name terminó con código distinto de cero (rc=$rc); revisar la salida."
     ERRORS=$((ERRORS + 1))
   fi
 }
+
+print_final_summary() {
+  local pending=0 item
+  echo
+  echo -e "${BLUE}============================================================${NC}"
+  echo -e "${BLUE} RESUMEN EJECUTIVO DE SEGURIDAD${NC}"
+  echo -e "${BLUE}============================================================${NC}"
+  echo "Módulos ejecutados: $MODULES_RUN"
+  echo "Errores de ejecución del auditor: $ERRORS"
+
+  if [ "$CIS_SEEN" = true ] && [ "$CIS_TOTAL_COUNT" -gt 0 ]; then
+    pending=$((CIS_FAIL_COUNT + CIS_WARN_COUNT))
+    echo
+    echo "CIS Benchmark:"
+    echo "  Cumplimiento: $CIS_SCORE ($CIS_PASS_COUNT de $CIS_TOTAL_COUNT controles PASS; redondeado: $(((CIS_PASS_COUNT * 100 + CIS_TOTAL_COUNT / 2) / CIS_TOTAL_COUNT))%)"
+    echo "  OK / PASS: $CIS_PASS_COUNT"
+    echo "  CRÍTICOS / FAIL: $CIS_FAIL_COUNT"
+    echo "  WARNING: $CIS_WARN_COUNT"
+    echo "  Total de controles CIS: $CIS_TOTAL_COUNT"
+    echo "  Controles CIS pendientes (FAIL + WARNING): $pending"
+  else
+    echo
+    echo "CIS Benchmark: no se pudo obtener un resumen válido."
+  fi
+
+  echo
+  echo "Hallazgos críticos adicionales fuera del score CIS: ${#SUPPLEMENTAL_CRITICAL[@]}"
+  for item in "${SUPPLEMENTAL_CRITICAL[@]}"; do
+    echo "  - $item"
+  done
+
+  echo
+  echo "CONTROLES CIS CRÍTICOS / FAIL PENDIENTES (${#CIS_CRITICAL_FINDINGS[@]}):"
+  if [ "${#CIS_CRITICAL_FINDINGS[@]}" -eq 0 ]; then
+    echo "  - Ninguno reportado."
+  else
+    for item in "${CIS_CRITICAL_FINDINGS[@]}"; do
+      echo "  - $item"
+    done
+  fi
+
+  echo
+  echo "CONTROLES CIS WARNING PENDIENTES (${#CIS_WARNING_FINDINGS[@]}):"
+  if [ "${#CIS_WARNING_FINDINGS[@]}" -eq 0 ]; then
+    echo "  - Ninguno reportado."
+  else
+    for item in "${CIS_WARNING_FINDINGS[@]}"; do
+      echo "  - $item"
+    done
+  fi
+
+  echo
+  echo "HALLAZGOS COMPLEMENTARIOS DE OTROS MÓDULOS: ${#SUPPLEMENTAL_FINDINGS[@]}"
+  echo "No se suman al score CIS porque los módulos pueden revisar controles solapados o criterios distintos."
+  if [ "${#SUPPLEMENTAL_FINDINGS[@]}" -eq 0 ]; then
+    echo "  - Ninguno reportado."
+  else
+    for item in "${SUPPLEMENTAL_FINDINGS[@]}"; do
+      echo "  - $item"
+    done
+  fi
+
+  echo
+  echo "Solo auditoría: no se aplicaron correcciones ni se creó un backup desde el auditor."
+  echo -e "${BLUE}============================================================${NC}"
+}
+
 
 main() {
   require_root
@@ -133,14 +367,7 @@ main() {
     run_audit_module "$name"
   done
 
-  echo
-  echo -e "${BLUE}============================================================${NC}"
-  echo -e "${BLUE} OrangeBox Linux Hardening Audit - FIN${NC}"
-  echo "Módulos ejecutados: $MODULES_RUN"
-  echo "Errores de ejecución de módulos: $ERRORS"
-  echo "Estos contadores no suman los hallazgos internos; revisar cada resumen."
-  echo "No se aplicaron correcciones ni se creó backup desde este auditor."
-  echo -e "${BLUE}============================================================${NC}"
+  print_final_summary
   [ "$ERRORS" -eq 0 ]
 }
 
