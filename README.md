@@ -166,6 +166,8 @@ El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfil
 
 El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. El benchmark `cis-benchmark-check.sh` se ejecuta por separado y no forma parte del selector de módulos de hardening. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` también se excluye de `linux-hardening-audit.sh` porque su ejecución normal puede modificar `/etc/selinux/config` y pedir un reinicio; solo debe ejecutarse mediante selección explícita y confirmación.
 
+**AIDE es opcional:** en el flujo interactivo `./linux-hardening.sh --fix`, si no está instalado se pregunta antes de instalarlo y configurar la base y la verificación diaria. El mensaje explica que AIDE compara una base de integridad y que puede solaparse con Wazuh FIM. `--fix --auto` no instala AIDE.
+
 ### Controles de alto riesgo
 
 | Módulo/script | Riesgo operacional que debe evaluarse |
