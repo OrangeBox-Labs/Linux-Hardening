@@ -74,6 +74,10 @@ sysctl_safe_write_profile() {
   local tmp mode backup
   [ -n "$file" ] || { echo "[SYSCTL][ERROR] No se definió archivo de persistencia."; return 1; }
   mkdir -p "$(dirname "$file")" || return 1
+  if [ "$file" = "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" ] && [ -e "$file" ] && ! grep -Fqx "# OrangeBox managed sysctl overrides" "$file"; then
+    echo "[SYSCTL][ERROR] $file ya existe, pero no contiene el marcador de propiedad OrangeBox; no se sobrescribe."
+    return 1
+  fi
   if [ -n "$begin" ] && [ -n "$end" ] && [ -e "$file" ]; then
     if ! grep -Fqx "$begin" "$file" || ! grep -Fqx "$end" "$file"; then
       echo "[SYSCTL][ERROR] $file existe pero no contiene el bloque gestionado esperado; no se modifica."
@@ -173,7 +177,10 @@ sysctl_safe_write_profile() {
         END { if (!written) print key " = " value }
       ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
     else
-      printf '%s = %s\n' "$key" "$value" > "$tmp" || { rm -f "$tmp"; return 1; }
+      {
+        printf '# OrangeBox managed sysctl overrides\n'
+        printf '%s = %s\n' "$key" "$value"
+      } > "$tmp" || { rm -f "$tmp"; return 1; }
     fi
   fi
   chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
@@ -253,8 +260,20 @@ sysctl_safe_apply() {
   else
     if [ "$any_defs" = false ]; then need_persist=true; fi
     if [ "$current" != "$expected" ]; then
+      echo
       echo "[SYSCTL][CAMBIO PROPUESTO] $key: activo=$current; propuesto=$expected."
       echo "  Qué cambia: $desc"
+      if [ "$fix_mode" != true ]; then
+        echo "[SYSCTL][WARN] Auditoría: no se cambia $key."
+        return 1
+      fi
+      if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        echo "[SYSCTL][WARN] No hay terminal interactiva; se omite $key por seguridad."
+        return 1
+      fi
+      printf '¿Confirmas cambiar %s de %s a %s y persistirlo cuando corresponda? [y/N] ' "$key" "$current" "$expected" > /dev/tty
+      IFS= read -r answer < /dev/tty || answer=""
+      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) echo "[SYSCTL][OMITIDO] No se modificó $key."; return 1 ;; esac
     fi
   fi
 
