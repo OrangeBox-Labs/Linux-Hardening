@@ -902,12 +902,12 @@ main() {
     warn "--allow-shorewall solo se utiliza con --module network-full."
   fi
 
-  detect_os
-  prepare_backup
-
   if [ "$MODULE" = "repo-audit" ]; then
     die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
   fi
+
+  detect_os
+  prepare_backup
 
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
     warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
