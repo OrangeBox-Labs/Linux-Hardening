@@ -495,6 +495,33 @@ case $- in
   *) return 0 ;;
 esac
 
+# Protección de mejor esfuerzo: impedir borrado/sobrescritura accidental por
+# los comandos comunes "history -c", "history -d" y "history -w".
+# No es una frontera de seguridad: "builtin history", edición del archivo o
+# modificación de la shell pueden eludir este wrapper.
+history() {
+  local arg opts
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -?*)
+        opts="${arg#-}"
+        case "$opts" in
+          *c*|*d*|*w*)
+            printf '%s\\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+            return 2
+            ;;
+        esac
+        case "$opts" in
+          *p*|*s*) break ;;
+        esac
+        ;;
+      *) break ;;
+    esac
+  done
+  builtin history "$@"
+}
+
 orangebox_history_guard() {
   set -o history 2>/dev/null || true
   HISTSIZE=-1
