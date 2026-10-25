@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.3.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.3.8 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -8,7 +8,7 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION=1.3.7
+SCRIPT_VERSION=1.3.8
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -644,7 +644,7 @@ Uso:
   $0                                Auditoría del baseline interno
   $0 --fix                          Modo interactivo: explica los riesgos y pregunta
   $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
-  $0 --module repo-audit            Audita scripts del repositorio en modo solo lectura
+  ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
   $0 --fix --module bash            Historial con fecha/hora y prompt por rol
   $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
@@ -660,7 +660,7 @@ Módulos adicionales:
   aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full
   packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
   network-full password-full gui-remove xinetd-remove rsyslog-full
-  selinux-setup ssh-cis ssh-complete sudo-full filesystem-full repo-audit
+  selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
 
 Seguridad:
   --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
@@ -670,7 +670,7 @@ Seguridad:
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
   post-install se omite: no tiene una ruta de auditoría de solo lectura.
-  selinux-setup se omite de repo-audit porque su ejecución normal puede modificar SELinux.
+  La auditoría agregada de solo lectura se ejecuta con ./linux-hardening-audit.sh.
 EOF
 }
 
@@ -789,7 +789,7 @@ run_companion_module() {
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
     sudo-full) script="sudo-hardening.sh"; risky=true ;;
     filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
-    repo-audit) run_repository_audit; return ;;
+
     *) die "Módulo desconocido: $name" ;;
   esac
 
@@ -851,24 +851,6 @@ run_companion_module() {
   fi
 }
 
-run_repository_audit() {
-  local previous_fix="$AUTO_FIX" name
-  AUTO_FIX=false
-  echo "========== AUDITORÍA DE LOS SCRIPTS DEL REPOSITORIO =========="
-  warn "Se omite post-install: no es una auditoría; puede instalar paquetes y modificar el sistema sin --fix."
-  warn "Se omite selinux-setup: su ejecución normal puede modificar /etc/selinux/config y pedir reinicio."
-  for name in \
-    aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full \
-    usb-storage grub-full kernel-full lpe-2026 network-full password-full \
-    gui-remove xinetd-remove rsyslog-full \
-    ssh-cis ssh-complete sudo-full filesystem-full
-  do
-    run_companion_module "$name"
-  done
-  warn "Se omitieron los módulos interactivos de eliminación de paquetes/servicios y el generador de iptables por seguridad."
-  AUTO_FIX="$previous_fix"
-}
-
 run_module() {
   case "$1" in
     ssh) ssh_module ;;
@@ -922,6 +904,10 @@ main() {
 
   detect_os
   prepare_backup
+
+  if [ "$MODULE" = "repo-audit" ]; then
+    die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
+  fi
 
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
     warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
@@ -977,16 +963,9 @@ main() {
 
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
-  if [ "$MODULE" = "repo-audit" ]; then
-    echo "Correcciones del orquestador: $FIXED"
-    echo "Advertencias del orquestador: $WARNINGS"
-    echo "Errores del orquestador: $ERRORS"
-    echo "NOTA: estos contadores no suman las advertencias/errores de los módulos hijos; revisar sus resúmenes individuales."
-  else
-    echo "Correcciones: $FIXED"
-    echo "Advertencias: $WARNINGS"
-    echo "Errores: $ERRORS"
-  fi
+  echo "Correcciones: $FIXED"
+  echo "Advertencias: $WARNINGS"
+  echo "Errores: $ERRORS"
   echo "Backup: $BACKUP_DIR"
   echo -e "$GREEN============================================================$NC"
 }
