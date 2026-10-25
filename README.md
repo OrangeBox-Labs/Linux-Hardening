@@ -208,6 +208,8 @@ La opción `--allow-risky` no sustituye una revisión de cambios ni garantiza co
 
 ## Gestión segura de parámetros sysctl (v1.4.0)
 
+Política OrangeBox para estos tres controles: `fs.suid_dumpable` se orienta a `0` y `kernel.dmesg_restrict` a `1`. Para `kernel.kptr_restrict`, el valor activo `1` o `2` se conserva sin tocar ni el estado runtime ni sus archivos persistentes; solo si el valor activo es `0` se propone `1`, siguiendo la confirmación individual habitual del modo `--fix`.
+
 Los scripts que modifican sysctl usan ahora `lib/sysctl-safe.sh` para inventariar definiciones activas antes de cambiar parámetros. Se comprueba el valor activo y se recorren, línea a línea, las asignaciones en:
 
 - `/etc/sysctl.conf`

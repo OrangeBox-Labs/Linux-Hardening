@@ -60,6 +60,15 @@ check_sysctl_param() {
   fi
 }
 
+check_kptr_restrict_policy() {
+  local SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
+  if sysctl_safe_apply_kptr_restrict_policy "$SYSCTL_FILE" "/var/backups/orangebox-kernel-hardening" "$AUTO_FIX"; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
 # ==============================================
 # FUNCION PARA VERIFICAR O AGREGAR A LIMITS.CONF
 # ==============================================
@@ -185,7 +194,7 @@ restrict_ptrace() {
 # ==============================================
 hide_kernel_addresses() {
   echo -e "\n${BLUE}[*] Ocultando direcciones del kernel...${NC}"
-  check_sysctl_param "kernel.kptr_restrict" "2" "kernel.kptr_restrict"
+  check_kptr_restrict_policy
 }
 
 # ==============================================

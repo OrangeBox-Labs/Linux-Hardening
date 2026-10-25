@@ -326,3 +326,33 @@ sysctl_safe_apply() {
   fi
   return 0
 }
+
+
+# OrangeBox policy for kernel.kptr_restrict:
+# preserve active values 1 and 2 without touching runtime or persistent files;
+# only route an active value of 0 through the normal individually-confirmed helper.
+sysctl_safe_apply_kptr_restrict_policy() {
+  local target="$1" backup_dir="$2" fix_mode="$3" begin="${4:-}" end="${5:-}"
+  local current
+  SYSCTL_SAFE_CHANGED=false
+  current="$(sysctl -n kernel.kptr_restrict 2>/dev/null || true)"
+
+  case "$current" in
+    1|2)
+      echo "[SYSCTL][OK] kernel.kptr_restrict=$current; la política OrangeBox acepta 1 o 2. Se conserva sin tocar runtime ni persistencia."
+      return 0
+      ;;
+    0)
+      sysctl_safe_apply "kernel.kptr_restrict" "1" "$(sysctl_safe_description kernel.kptr_restrict)" "$target" "$backup_dir" "$fix_mode" "$begin" "$end"
+      return $?
+      ;;
+    "")
+      echo "[SYSCTL][WARN] kernel.kptr_restrict no está disponible en este kernel; no se modifica."
+      return 1
+      ;;
+    *)
+      echo "[SYSCTL][WARN] kernel.kptr_restrict=$current no es un valor contemplado por la política; solo se cambia cuando el valor activo es 0. Se conserva sin cambios."
+      return 1
+      ;;
+  esac
+}

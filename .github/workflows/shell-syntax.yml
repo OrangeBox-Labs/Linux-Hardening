@@ -36,6 +36,8 @@ jobs:
         run: bash tests/test_synflood_defaults.sh
       - name: Test operational policy guards
         run: bash tests/test_policy_guards.sh
+      - name: Test kernel.kptr_restrict policy
+        run: bash tests/test_kptr_restrict_policy.sh
 
   # Syntax/tests on representative RPM-family generations. CentOS 6/7 cover
   # legacy Bash releases; AlmaLinux 8/9/10 cover modern RHEL-compatible userspace.
@@ -88,4 +90,5 @@ jobs:
               /bin/bash tests/test_firewall_detect.sh
               /bin/bash tests/test_listener_firewall_audit.sh
               /bin/bash tests/test_synflood_defaults.sh
+              /bin/bash tests/test_kptr_restrict_policy.sh
             '

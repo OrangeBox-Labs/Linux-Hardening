@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.1 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.2 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.1
+SCRIPT_VERSION=1.4.2
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -49,6 +49,15 @@ backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR
 set_sysctl(){
   local key="$1" value="$2" file=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
   if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
+  else
+    WARNINGS=$((WARNINGS+1))
+  fi
+}
+
+set_kptr_restrict_policy(){
+  local file=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+  if sysctl_safe_apply_kptr_restrict_policy "$file" "$BACKUP_DIR" "$AUTO_FIX"; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
     WARNINGS=$((WARNINGS+1))
@@ -176,7 +185,7 @@ kernel_module(){
 
   set_sysctl fs.suid_dumpable 0
   set_sysctl kernel.dmesg_restrict 1
-  set_sysctl kernel.kptr_restrict 2
+  set_kptr_restrict_policy
   set_sysctl kernel.randomize_va_space 2
   set_sysctl fs.protected_fifos 1
   set_sysctl fs.protected_hardlinks 1

@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
+KERNEL="$ROOT_DIR/kernel-hardening.sh"
 PASSWORD="$ROOT_DIR/password-hardening.sh"
 SUDO="$ROOT_DIR/sudo-hardening.sh"
 SELINUX="$ROOT_DIR/selinux-secure-setup.sh"
@@ -10,6 +11,18 @@ POST_INSTALL="$ROOT_DIR/post-install.sh"
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
+
+# Sysctl policy: fixed target for suid_dumpable/dmesg_restrict and conditional kptr policy.
+grep -Fq 'set_sysctl fs.suid_dumpable 0' "$CORE" || fail "baseline no fuerza fs.suid_dumpable=0 como objetivo"
+grep -Fq 'set_sysctl kernel.dmesg_restrict 1' "$CORE" || fail "baseline no fuerza kernel.dmesg_restrict=1 como objetivo"
+grep -Fq 'check_sysctl_param "fs.suid_dumpable" "0"' "$KERNEL" || fail "kernel-hardening no contempla fs.suid_dumpable=0"
+grep -Fq 'check_sysctl_param "kernel.dmesg_restrict" "1"' "$KERNEL" || fail "kernel-hardening no contempla kernel.dmesg_restrict=1"
+grep -Fq 'set_kptr_restrict_policy' "$CORE" || fail "baseline no utiliza la política condicional de kptr_restrict"
+grep -Fq 'check_kptr_restrict_policy' "$KERNEL" || fail "kernel-hardening no utiliza la política condicional de kptr_restrict"
+if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr_restrict" "2"' "$CORE" "$KERNEL"; then
+  fail "un módulo sigue imponiendo kernel.kptr_restrict=2"
+fi
+pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o propone 0->1"
 
 # Password aging must be observed but never rewritten by either baseline.
 grep -Fq 'PASS_MAX_DAYS=' "$CORE" || fail "baseline no informa PASS_MAX_DAYS"

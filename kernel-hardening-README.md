@@ -41,7 +41,7 @@ sysctl kernel.randomize_va_space
 ### Seguridad del kernel
 
 - kernel.dmesg_restrict = 1: Impide que usuarios no root vean mensajes del kernel que podrian revelar informacion del sistema
-- kernel.kptr_restrict = 2: Oculta direcciones de memoria del kernel, dificultando ataques de explotacion de memoria
+- kernel.kptr_restrict = 1 o 2: Oculta direcciones de memoria del kernel. La política OrangeBox conserva el valor activo si ya es 1 o 2; solo propone cambiarlo de 0 a 1.
 - kernel.randomize_va_space = 2: Activa ASLR (Address Space Layout Randomization), dificulta ataques de desbordamiento de buffer
 - kernel.yama.ptrace_scope = 1: Restringe el uso de ptrace, previene que procesos no autorizados inspeccionen otros procesos
 - vm.mmap_min_addr = 65536: Previene ataques de NULL pointer dereference que podrian ejecutar codigo malicioso
@@ -87,7 +87,7 @@ cat /etc/security/limits.conf | grep -v "^#"
 ```
 fs.suid_dumpable: rango 0-2, valor recomendado 0
 kernel.dmesg_restrict: rango 0-1, valor recomendado 1
-kernel.kptr_restrict: rango 0-2, valor recomendado 2
+kernel.kptr_restrict: rango 0-2; política OrangeBox: conservar 1 o 2; si está en 0, proponer 1
 kernel.randomize_va_space: rango 0-2, valor recomendado 2
 kernel.yama.ptrace_scope: rango 0-3, valor recomendado 1
 vm.mmap_min_addr: rango 0-65536, valor recomendado 65536
