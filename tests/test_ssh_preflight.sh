@@ -29,7 +29,7 @@ grep -Fq 'no se crea un drop-in redundante' "$ORCHESTRATOR" || fail "el módulo 
 grep -Fq 'SSH_PENDING_DIRECTIVES+=("$directive $desired")' "$ORCHESTRATOR" || fail "no se registra solo cada directiva pendiente"
 grep -Fq 'for directive in "${SSH_PENDING_DIRECTIVES[@]}"' "$ORCHESTRATOR" || fail "el drop-in no se limita a los parámetros que requieren corrección"
 grep -Fq 'ok "SSH $directive=$actual"' "$ORCHESTRATOR" || fail "no se informa cuando un parámetro SSH ya está conforme"
-grep -Fq 'if sshd -t >/dev/null 2>&1 && ssh_state_status; then' "$ORCHESTRATOR" || fail "no se valida la sintaxis y los valores efectivos tras el cambio"
+grep -Fq 'if sshd -t >/dev/null 2>&1 && ssh_state_status apply; then' "$ORCHESTRATOR" || fail "no se valida la sintaxis y los valores efectivos tras el cambio"
 grep -Fq '[ ! -L "$SSH_DROPIN" ]' "$ORCHESTRATOR" || fail "no se protege frente a un drop-in SSH que sea un enlace simbólico"
 
 pass "SSH solo pregunta por controles pendientes que se pueden aplicar de forma segura; configuración conforme no genera cambios"
