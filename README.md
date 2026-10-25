@@ -199,7 +199,7 @@ Los scripts que modifican sysctl usan ahora `lib/sysctl-safe.sh` para inventaria
 - `/usr/lib/sysctl.d/*.conf`
 - `/lib/sysctl.d/*.conf`
 
-Se ignoran las líneas comentadas y se muestran archivo, número de línea y valor encontrado. Las definiciones existentes no se editan. Si un parámetro ya está activo y persistido con el valor objetivo, se conserva sin añadir duplicados. Si no está configurado, el script puede agregarlo a su perfil propio. Si detecta una definición existente con un valor distinto, muestra el valor activo, el propuesto y una breve descripción del efecto, y solicita confirmación explícita antes de instalar un override. Si no hay terminal interactiva o se responde que no, el parámetro se omite.
+Se ignoran las líneas comentadas y se muestran archivo, número de línea y valor encontrado. Si el valor activo y el persistente ya coinciden con el objetivo, se conserva sin añadir duplicados. Si el valor activo es distinto, o existe una asignación persistente incompatible, muestra los valores, las ubicaciones y una descripción breve del impacto; solicita confirmación individual antes de cambiar el valor. Si no hay terminal interactiva o se responde que no, el parámetro se omite.
 
 Ejemplo de ejecución:
 
@@ -212,6 +212,6 @@ Ejemplo de ejecución:
 ¿Confirmas aplicar net.ipv4.conf.all.secure_redirects=0 y añadir/actualizar el override...? [y/N]
 ```
 
-Esta confirmación importa en servidores con perfiles administrados por proveedor, cPanel/CloudLinux o herramientas de seguridad. Una respuesta afirmativa no edita el archivo externo: instala el valor acordado en el perfil de OrangeBox y cambia el valor de runtime, con respaldo del archivo OrangeBox antes de modificarlo. Revise el efecto descrito antes de aceptar; los valores de red pueden afectar routing asimétrico, IPv6, colas TCP o servicios que dependan de ellos.
+Los parámetros aprobados se centralizan en `/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf`, un perfil de alta precedencia compartido por el hardening de kernel, red, CPU y mitigación LPE. El script no edita los perfiles de Google Cloud, cPanel, CloudLinux ni otros proveedores. Excepción: si una asignación conflictiva está en `/etc/sysctl.conf` (que puede procesarse después de `sysctl.d`), solo se actualiza esa asignación después de confirmación explícita y con respaldo. El perfil central existente solo se modifica si contiene el marcador de propiedad OrangeBox. Revise siempre el impacto antes de aceptar; los valores de red pueden afectar routing asimétrico, IPv6, colas TCP o servicios que dependan de ellos.
 
 **Importante:** el modo auditoría sigue sin modificar el sistema. En modo fix, los parámetros que ya estén definidos con el mismo valor no se duplican; los conflictos se consultan por parámetro, no como una aprobación global de todo el bloque.
