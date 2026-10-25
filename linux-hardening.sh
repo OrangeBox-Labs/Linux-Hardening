@@ -977,9 +977,16 @@ main() {
 
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
-  echo "Correcciones: $FIXED"
-  echo "Advertencias: $WARNINGS"
-  echo "Errores: $ERRORS"
+  if [ "$MODULE" = "repo-audit" ]; then
+    echo "Correcciones del orquestador: $FIXED"
+    echo "Advertencias del orquestador: $WARNINGS"
+    echo "Errores del orquestador: $ERRORS"
+    echo "NOTA: estos contadores no suman las advertencias/errores de los módulos hijos; revisar sus resúmenes individuales."
+  else
+    echo "Correcciones: $FIXED"
+    echo "Advertencias: $WARNINGS"
+    echo "Errores: $ERRORS"
+  fi
   echo "Backup: $BACKUP_DIR"
   echo -e "$GREEN============================================================$NC"
 }
