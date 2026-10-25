@@ -136,7 +136,7 @@ sudo ./bash-hardening.sh
 
 - Prompt en color rojo para identificar fácilmente sesiones root
 - Timeout más estricto (10 minutos)
-- Tamaños de historial aumentados (20000 en memoria, 100000 en disco)
+- Historial ilimitado (`HISTSIZE=-1`, `HISTFILESIZE=-1`) y archivo `~/.bash_history` protegido con permisos `0600`
 - Alias con confirmaciones obligatorias
 
 ### 6. Configuración para Nuevos Usuarios (/etc/skel/.bashrc)
