@@ -19,11 +19,18 @@ Script para instalar y configurar AIDE (Advanced Intrusion Detection Environment
 ## Que hace este script
 
 - Verifica si AIDE esta instalado
-- Si no esta instalado, lo instala usando yum o dnf
-- Inicializa la base de datos de AIDE con `aide --init`
-- Configura la base de datos definitiva
+- En modo `--fix`, si AIDE no esta instalado, explica su funcion y pide consentimiento antes de instalarlo
+- Advierte que AIDE puede solaparse con Wazuh FIM si ambos monitorizan los mismos archivos
+- Si se acepta, lo instala usando yum o dnf
+- Inicializa la base de datos de AIDE con `aide --init` si falta una base definitiva
 - Activa verificacion periodica via cron (diario a las 5:00 AM)
+- Si se responde No o no hay terminal interactiva, no instala AIDE ni crea la base ni la tarea cron
 - No modifica repositorios ni configura fuentes externas
+
+
+## Confirmacion en modo `--fix`
+
+Antes de instalar AIDE, el script explica que mantiene una base de referencia y compara atributos/checksums para detectar cambios. También avisa que Wazuh FIM puede cubrir una función similar y hacer AIDE redundante, aunque AIDE puede ser necesario para cumplir estrictamente CIS 1.3.1 y 1.3.2. Solo una respuesta afirmativa inicia la instalación y configuración.
 
 ## Controles CIS
 
