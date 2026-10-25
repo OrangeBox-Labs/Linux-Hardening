@@ -669,7 +669,7 @@ Seguridad:
   --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
-  post-install solo se puede ejecutar en auditoría desde este orquestador.
+  post-install se omite desde este orquestador: no tiene una ruta de auditoría de solo lectura.
 EOF
 }
 
@@ -767,7 +767,13 @@ run_companion_module() {
     lpe-2026) script="kernel-lpe-2026-mitigation.sh"; risky=true; audit_arg="--check" ;;
     network-full) script="network-hardening.sh"; risky=true ;;
     password-full) script="password-hardening.sh"; risky=true ;;
-    post-install) script="post-install.sh"; audit_only=true; block_fix=true; fix_arg="" ;;
+    post-install)
+      if [ "$AUTO_FIX" = true ]; then
+        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host."
+      fi
+      warn "Se omite post-install: puede instalar paquetes, cambiar SELinux/GRUB y habilitar servicios incluso sin --fix."
+      return 0
+      ;;
     gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
     xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
     rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
@@ -825,7 +831,13 @@ run_companion_module() {
   fi
   echo
   echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
-  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+  if [ "$name" = "cis" ]; then
+    if ORANGEBOX_CIS_REPORT_FILE="$BACKUP_DIR/reporte_orangebox_cis_benchmark.log" bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+      ok "Módulo $name finalizado"
+    else
+      warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
+    fi
+  elif bash "$SCRIPT_DIR/$script" "${args[@]}"; then
     ok "Módulo $name finalizado"
   else
     warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
@@ -836,10 +848,11 @@ run_repository_audit() {
   local previous_fix="$AUTO_FIX" name
   AUTO_FIX=false
   echo "========== AUDITORÍA DE LOS SCRIPTS DEL REPOSITORIO =========="
+  warn "Se omite post-install: no es una auditoría; puede instalar paquetes y modificar el sistema sin --fix."
   for name in \
     aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full \
     usb-storage grub-full kernel-full lpe-2026 network-full password-full \
-    post-install gui-remove xinetd-remove rsyslog-full selinux-setup \
+    gui-remove xinetd-remove rsyslog-full selinux-setup \
     ssh-cis ssh-complete sudo-full filesystem-full
   do
     run_companion_module "$name"
