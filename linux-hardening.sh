@@ -8,6 +8,13 @@
 
 set -u
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$SCRIPT_DIR/lib/sysctl-safe.sh" ]; then
+  # shellcheck source=lib/sysctl-safe.sh
+  source "$SCRIPT_DIR/lib/sysctl-safe.sh"
+else
+  echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 SCRIPT_VERSION=1.3.9
 AUTO_FIX=false
 AUTO_MODE=false
@@ -32,186 +39,45 @@ detect_os(){
 prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
 set_sysctl(){
-  local key="$1" value="$2" file=/etc/sysctl.d/99zz-orangebox-hardening.conf current configured tmp
-  current=$(sysctl -n "$key" 2>/dev/null||true)
-  if [ -z "$current" ]; then
-    warn "$key no disponible en este kernel"
-    return
-  fi
-  configured=$(awk -v key="$key" '
-    {
-      line=$0
-      if (line ~ /^[[:space:]]*#/) next
-      if (index(line, "=")) {
-        lhs=line
-        sub(/=.*/, "", lhs)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
-        if (lhs == key) {
-          val=line
-          sub(/^[^=]*=/, "", val)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-          found=val
-        }
-      }
-    }
-    END { print found }
-  ' "$file" 2>/dev/null || true)
-  if [ "$current" = "$value" ] && [ "$configured" = "$value" ]; then
-    ok "$key=$value (runtime y persistente)"
-    return
-  fi
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "$BLUE[INFO]$NC $key actual=$current persistencia=${configured:-no definida}; se aplicará=$value"
+  local key="$1" value="$2" file=/etc/sysctl.d/99zz-orangebox-hardening.conf
+  if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
+    [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
-    warn "$key actual=$current persistencia=${configured:-no definida} recomendado=$value"
-    return
-  fi
-
-  mkdir -p /etc/sysctl.d || { warn "No se pudo crear /etc/sysctl.d"; return; }
-  backup_once "$file"
-  tmp=$(mktemp "$file.XXXXXX") || { warn "No se pudo crear temporal para $key"; return; }
-  if [ -f "$file" ]; then
-    awk -v key="$key" '
-      {
-        line=$0
-        sub(/^[[:space:]]*#[[:space:]]*/, "", line)
-        if (index(line, "=")) {
-          lhs=line
-          sub(/=.*/, "", lhs)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", lhs)
-          if (lhs == key) next
-        }
-        print
-      }
-    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return; }
-  fi
-  printf '%s = %s\n' "$key" "$value" >> "$tmp" || { rm -f "$tmp"; warn "No se pudo escribir $key"; return; }
-  chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
-  if ! mv "$tmp" "$file"; then
-    rm -f "$tmp"
-    warn "No se pudo instalar la persistencia de $key"
-    return
-  fi
-  if sysctl -w "$key=$value" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null||true)" = "$value" ]; then
-    ok "$key aplicado y persistido=$value"
-    FIXED=$((FIXED+1))
-  else
-    warn "No se pudo aplicar/verificar $key; revisar $file"
+    WARNINGS=$((WARNINGS+1))
   fi
 }
-
 
 SYNFLOOD_FILE=/etc/sysctl.d/99zz-orangebox-synflood-hardening.conf
-SYNFLOOD_OLD_FILE=/etc/sysctl.d/99-orangebox-synflood-hardening.conf
-SYNFLOOD_LEGACY_FILE=/etc/sysctl.d/99-cpanel-synflood-hardening.conf
 SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
-# 3/5 is deliberately more conservative than the previous 2/2 profile.
 SYNFLOOD_VALUES=(1 4096 4096 3 5)
-synflood_managed(){ local f="$1"; [ -f "$f" ] && grep -Fqx '# OrangeBox managed SYN flood profile' "$f" && grep -Fqx '# BEGIN ORANGEBOX SYNFLOOD' "$f" && grep -Fqx '# END ORANGEBOX SYNFLOOD' "$f"; }
+synflood_managed(){
+  local f="$1"
+  [ -f "$f" ] &&
+    grep -Fqx '# OrangeBox managed SYN flood profile' "$f" &&
+    grep -Fqx '# BEGIN ORANGEBOX SYNFLOOD' "$f" &&
+    grep -Fqx '# END ORANGEBOX SYNFLOOD' "$f"
+}
 synflood_module(){
-  echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
+  echo -e "\\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
   [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }
 
-  local idx=1 key current desired external cfg profile="$SYNFLOOD_FILE"
-  [ -e "$SYNFLOOD_FILE" ] && ! synflood_managed "$SYNFLOOD_FILE" && {
-    warn "$SYNFLOOD_FILE no es gestionado por OrangeBox; no se sobrescribe"
-    return
-  }
-  [ ! -e "$SYNFLOOD_FILE" ] && synflood_managed "$SYNFLOOD_OLD_FILE" && profile="$SYNFLOOD_OLD_FILE"
-  [ ! -e "$SYNFLOOD_FILE" ] && [ "$profile" = "$SYNFLOOD_FILE" ] && synflood_managed "$SYNFLOOD_LEGACY_FILE" && profile="$SYNFLOOD_LEGACY_FILE"
-
-  for key in $SYNFLOOD_KEYS; do
-    current=$(sysctl -n "$key" 2>/dev/null || true)
-    desired="${SYNFLOOD_VALUES[$((idx-1))]}"
-    if [ -z "$current" ]; then
-      warn "$key no disponible en este kernel"
-      idx=$((idx+1))
-      continue
-    fi
-
-    external=""
-    for cfg in /etc/sysctl.conf /etc/sysctl.d/*.conf; do
-      [ -f "$cfg" ] || continue
-      [ "$cfg" = "$SYNFLOOD_FILE" ] && continue
-      [ "$cfg" = "$profile" ] && continue
-      if { [ "$cfg" = "$SYNFLOOD_OLD_FILE" ] || [ "$cfg" = "$SYNFLOOD_LEGACY_FILE" ]; } && synflood_managed "$cfg"; then
-        continue
-      fi
-      if grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$cfg"; then
-        external="$cfg"
-        break
-      fi
-    done
-
-    if [ -n "$external" ]; then
-      warn "$key definido en $external; se conservará el archivo y se aplicará el valor del perfil OrangeBox"
-    elif [ "$current" = "$desired" ]; then
-      ok "$key=$desired (runtime correcto)"
-    elif [ "$AUTO_FIX" = true ]; then
-      echo -e "$BLUE[INFO]$NC $key actual=$current; se aplicará=$desired"
-    else
-      warn "$key actual=$current recomendado=$desired"
-    fi
-    idx=$((idx+1))
-  done
-  $AUTO_FIX || return
-
-  backup_once "$SYNFLOOD_FILE"
-  [ "$profile" = "$SYNFLOOD_FILE" ] || backup_once "$profile"
-  local tmp
-  tmp=$(mktemp "$SYNFLOOD_FILE.XXXXXX") || { warn "No se pudo crear temporal"; return; }
-  if [ -e "$profile" ]; then
-    awk '$0=="# BEGIN ORANGEBOX SYNFLOOD"{i=1;next}$0=="# END ORANGEBOX SYNFLOOD"{i=0;next}!i&&$0!="# OrangeBox managed SYN flood profile"{print}' "$profile" > "$tmp" || {
-      rm -f "$tmp"
-      warn "No se pudo leer perfil"
-      return
-    }
-  fi
-
-  {
-    [ ! -s "$tmp" ] || printf '\n'
-    echo '# OrangeBox managed SYN flood profile'
-    echo '# BEGIN ORANGEBOX SYNFLOOD'
-    idx=1
-    for key in $SYNFLOOD_KEYS; do
-      desired="${SYNFLOOD_VALUES[$((idx-1))]}"
-      echo "$key = $desired"
-      idx=$((idx+1))
-    done
-    echo '# END ORANGEBOX SYNFLOOD'
-  } >> "$tmp"
-
-  chmod 644 "$tmp"
-  chown root:root "$tmp" 2>/dev/null || true
-  if ! mv "$tmp" "$SYNFLOOD_FILE"; then
-    rm -f "$tmp"
-    warn "No se pudo instalar perfil"
+  if [ -e "$SYNFLOOD_FILE" ] && ! synflood_managed "$SYNFLOOD_FILE"; then
+    warn "$SYNFLOOD_FILE existe y no es un perfil gestionado por OrangeBox; no se sobrescribe"
     return
   fi
 
-  [ "$profile" = "$SYNFLOOD_FILE" ] || rm -f "$profile"
-  if [ "$profile" != "$SYNFLOOD_OLD_FILE" ] && synflood_managed "$SYNFLOOD_OLD_FILE"; then
-    backup_once "$SYNFLOOD_OLD_FILE"
-    rm -f "$SYNFLOOD_OLD_FILE"
-  fi
-  if [ "$profile" != "$SYNFLOOD_LEGACY_FILE" ] && synflood_managed "$SYNFLOOD_LEGACY_FILE"; then
-    backup_once "$SYNFLOOD_LEGACY_FILE"
-    rm -f "$SYNFLOOD_LEGACY_FILE"
-  fi
-
-  idx=1
+  local idx=0 key desired
   for key in $SYNFLOOD_KEYS; do
-    desired="${SYNFLOOD_VALUES[$((idx-1))]}"
-    if sysctl -w "$key=$desired" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null || true)" = "$desired" ]; then
-      FIXED=$((FIXED+1))
+    desired="${SYNFLOOD_VALUES[$idx]}"
+    if sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" "$AUTO_FIX" "# BEGIN ORANGEBOX SYNFLOOD" "# END ORANGEBOX SYNFLOOD"; then
+      [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
     else
-      warn "No se pudo aplicar/verificar $key=$desired"
+      WARNINGS=$((WARNINGS+1))
     fi
     idx=$((idx+1))
   done
-  ok "SYN flood persistente: syncookies=1 backlog=4096 somaxconn=4096 synack_retries=3 syn_retries=5"
+  info "Los valores externos de sysctl se conservan. Los valores distintos solo se imponen con confirmación individual."
 }
-
 ssh_effective(){ sshd -T 2>/dev/null|awk -v k="$1" '$1==k{$1="";sub(/^ /,"");print;exit}'; }
 ssh_module(){
   echo -e "\n$BLUE### SSH ###$NC"; [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }; command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
