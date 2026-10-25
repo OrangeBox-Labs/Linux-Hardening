@@ -258,7 +258,7 @@ sysctl_safe_apply() {
     fi
     return 1
   else
-    if [ "$any_defs" = false ]; then need_persist=true; fi
+    if [ "$any_defs" = false ] || [ "$current" != "$expected" ]; then need_persist=true; fi
     if [ "$current" != "$expected" ]; then
       echo
       echo "[SYSCTL][CAMBIO PROPUESTO] $key: activo=$current; propuesto=$expected."
