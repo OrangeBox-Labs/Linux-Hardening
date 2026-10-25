@@ -59,7 +59,7 @@ lfa_nft_text_state() {
     function target(line,a,n,i){n=split(line,a,/[[:space:]]+/);for(i=1;i<n;i++)if(a[i]=="jump"||a[i]=="goto")return a[i+1];return ""}
     function strip_counter(s){sub(/^[[:space:]]*/,"",s);sub(/^counter packets [0-9]+ bytes [0-9]+[[:space:]]*/,"",s);return s}
     function jump_uncond(line,s){s=strip_counter(line);return s~/^(jump|goto)[[:space:]]+[[:alnum:]_.-]+[[:space:]]*$/}
-    function terminal_uncond(line,s){s=strip_counter(line);return s~/^drop[[:space:]]*;?$/||s~/^reject([[:space:]]+with[[:space:]]+[[:alnum:]_.-]+)*[[:space:]]*;?$/}
+    function terminal_uncond(line,s){s=strip_counter(line);return s~/^drop[[:space:]]*;?$/||s~/^reject([[:space:]]+with[[:space:]].*)?;?$/}
     function has_restriction(line){return line~/((^|[[:space:]])(ip saddr|ip daddr|ip6 saddr|ip6 daddr|iifname|oifname|ether saddr|ether daddr)([[:space:]]|$))/}
     function port_spec(spec,wanted,a,n,i,pair){gsub(/[{}[:space:]]/,"",spec);n=split(spec,a,",");for(i=1;i<=n;i++){if(a[i]~/^[0-9]+-[0-9]+$/){split(a[i],pair,"-");if(wanted+0>=pair[1]+0&&wanted+0<=pair[2]+0)return 1}else if(a[i]~/^[0-9]+:[0-9]+$/){split(a[i],pair,":");if(wanted+0>=pair[1]+0&&wanted+0<=pair[2]+0)return 1}else if(a[i]~/^[0-9]+$/&&a[i]+0==wanted+0)return 1}return 0}
     function has_port(line,proto,wanted,s,pos,spec,a) {
