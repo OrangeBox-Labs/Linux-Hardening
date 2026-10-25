@@ -25,7 +25,7 @@ Script de hardening para Bash que fortalece la seguridad del shell y el entorno 
 - Backup automático - guarda copia de seguridad antes de modificar
 - Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
 - Auditoría de comandos - envía todos los comandos a syslog
-- Historial por usuario - almacena historial segregado en /var/log/bash_history
+- Historial por usuario - guarda ~/.bash_history con permisos 0600; la auditoría central por syslog es independiente
 - Timeout de sesión - cierra sesiones inactivas
 - Prompt personalizado - muestra hora, usuario, hostname y directorio
 
@@ -119,17 +119,18 @@ sudo ./bash-hardening.sh
 
 ### 3. Auditoría a Syslog (/etc/profile.d/syslog_history.sh)
 
-- Captura todos los comandos ejecutados por cualquier usuario
-- Envía cada comando a syslog con nivel local1.notice
-- Registra usuario, directorio de trabajo y comando ejecutado
-- Configura /var/log/bash_commands.log para almacenar los logs
+- Envía eventos de comandos a syslog con nivel `local1.notice`
+- Registra usuario, directorio de trabajo y el texto de `BASH_COMMAND`
+- Configura `/var/log/bash_commands.log` para almacenar los eventos
+- **Advertencia:** `BASH_COMMAND` puede contener argumentos sensibles (tokens, contraseñas u otros secretos). No pases secretos como argumentos de línea de comandos si esta captura está habilitada; root también puede modificar los logs, por lo que no sustituyen una auditoría inmutable
 
 ### 4. Historial Seguro por Usuario (/etc/profile.d/history_secure.sh)
 
-- Crea archivos de historial individuales en /var/log/bash_history/
-- Formato: /var/log/bash_history/NOMBRE_USUARIO.history
-- Permisos seguros (640) para evitar acceso no autorizado
-- Separa el historial de root del de usuarios regulares
+- Usa un historial independiente para cada cuenta: `$HOME/.bash_history`
+- Crea el archivo con `umask 077` y ajusta a permisos `0600` cuando pertenece al usuario
+- Evita ubicar historiales de usuarios normales en `/var/log/bash_history`, cuyo directorio root:root 0750 impide que ellos creen/escriban sus propios archivos
+- `HISTTIMEFORMAT` guarda marcas de tiempo; `histappend` evita sobrescribir el archivo al cerrar una sesión
+- La auditoría central por syslog se configura por separado y tiene una advertencia de privacidad (ver más abajo)
 
 ### 5. Configuración de Root (/root/.bashrc)
 
@@ -220,12 +221,18 @@ Usuario root: HISTSIZE=20000, HISTFILESIZE=100000
 
 ### Los cambios no se ven en la sesión actual
 
-```
-Aplicar los cambios manualmente:
+Abrir una nueva sesión interactiva o aplicar manualmente:
+
+```bash
+set -o emacs
+bind '\"\\C-a\": beginning-of-line'
+bind '\"\\C-e\": end-of-line'
 source /etc/profile.d/orangebox.sh
 source /etc/profile.d/aliases.sh
 source ~/.bashrc
 ```
+
+El modo Emacs asigna `Ctrl+A` al inicio de la línea y `Ctrl+E` al final. El hardening configura estas asociaciones en las sesiones interactivas.
 
 ### Los comandos no se registran en syslog
 
