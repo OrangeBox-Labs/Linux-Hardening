@@ -61,13 +61,15 @@ ask_yes_no() {
     return 0
   fi
 
-  echo -e -n "${YELLOW}$question [s/N]: ${NC}"
-  read -r answer
-  case "$answer" in
-    s|S|si|Si|SI|sí|Sí|SÍ|y|Y|yes|Yes|YES) return 0 ;;
-    ""|n|N|no|No|NO) return 1 ;;
-    *) echo -e "${RED}Responda s o n; Enter equivale a No.${NC}"; return 1 ;;
-  esac
+  while true; do
+    echo -e -n "${YELLOW}$question [s/N]: ${NC}"
+    read -r answer
+    case "$answer" in
+      s|S|si|Si|SI|sí|Sí|SÍ|y|Y|yes|Yes|YES) return 0 ;;
+      ""|n|N|no|No|NO) return 1 ;;
+      *) echo -e "${RED}Responda s o n; Enter equivale a No.${NC}" ;;
+    esac
+  done
 }
 
 # ==============================================
