@@ -130,6 +130,8 @@ sudo ./bash-hardening.sh
 - Crea el archivo con `umask 077` y ajusta a permisos `0600` cuando pertenece al usuario
 - Evita ubicar historiales de usuarios normales en `/var/log/bash_history`, cuyo directorio root:root 0750 impide que ellos creen/escriban sus propios archivos
 - `HISTTIMEFORMAT` guarda marcas de tiempo; `histappend` evita sobrescribir el archivo al cerrar una sesión
+- La shell bloquea de mejor esfuerzo `history -c`, `history -d` y `history -w` mediante una función; el hardening no limpia ni trunca el historial existente
+- **Limitación:** no es una garantía antimanipulación. Un usuario puede eludir el wrapper con `builtin history -c`, desactivar la función o editar el archivo. Para una auditoría resistente a alteraciones se necesita logging remoto/controlado (por ejemplo, auditd y syslog remoto con permisos y retención adecuados)
 - La auditoría central por syslog se configura por separado y tiene una advertencia de privacidad (ver más abajo)
 
 ### 5. Configuración de Root (/root/.bashrc)
