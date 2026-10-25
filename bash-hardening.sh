@@ -72,7 +72,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -122,9 +122,9 @@ orangebox_history_guard() {
     set -o history
     HISTSIZE=-1
     HISTFILESIZE=-1
-    if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then
-        HISTFILE="$HOME/.bash_history"
-    fi
+    case "${HISTFILE:-}" in
+        ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="$HOME/.bash_history" ;;
+    esac
     export HISTSIZE HISTFILESIZE HISTFILE
     history -a
 }
@@ -133,6 +133,15 @@ case ";${PROMPT_COMMAND:-};" in
     *) PROMPT_COMMAND="orangebox_history_guard; ${PROMPT_COMMAND:-}" ;;
 esac
 export PROMPT_COMMAND
+
+# Readline interactivo: comportamiento Bash estándar para edición de comandos.
+case $- in
+  *i*)
+    set -o emacs 2>/dev/null || true
+    bind '"\C-a": beginning-of-line' 2>/dev/null || true
+    bind '"\C-e": end-of-line' 2>/dev/null || true
+    ;;
+esac
 
 # Timeout de sesión inactiva (15 minutos) - solo si no está definido
 if [ -z "$TMOUT" ]; then
@@ -295,7 +304,7 @@ EOF
 configure_secure_history() {
   echo -e "\n${BLUE}[*] Configurando historial seguro por usuario...${NC}"
 
-  if [ -f "$HISTORY_SECURE" ] && grep -q "OrangeBox" "$HISTORY_SECURE" 2>/dev/null; then
+  if [ -f "$HISTORY_SECURE" ] && grep -q "OrangeBox" "$HISTORY_SECURE" 2>/dev/null && grep -Fq 'HISTFILE="$HOME/.bash_history"' "$HISTORY_SECURE"; then
     echo -e "${GREEN}[✓] Historial seguro ya configurado${NC}"
     return 0
   fi
@@ -303,25 +312,25 @@ configure_secure_history() {
   echo -e "${RED}[!] Historial seguro NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
-    # Crear directorio para historial
-    mkdir -p /var/log/bash_history
-    chmod 750 /var/log/bash_history
-    chown root:root /var/log/bash_history
-
     cat >"$HISTORY_SECURE" <<'EOF'
 # ==============================================
 # Historial seguro por usuario - OrangeBox Labs
 # ==============================================
 
-# Crear archivo de historial por usuario en /var/log/bash_history
-if [ ! -d "/var/log/bash_history" ]; then
-    mkdir -p /var/log/bash_history
-    chmod 750 /var/log/bash_history
-fi
+# Guardar el historial en el home propio de cada usuario.
+# /var/log/bash_history root:root 0750 impide que los usuarios creen
+# allí sus propios historiales y provocaba pérdida de historial.
+case $- in
+    *i*) ;;
+    *) return 0 ;;
+esac
 
-HISTORY_FILE="/var/log/bash_history/${USER}.history"
-touch "$HISTORY_FILE" 2>/dev/null && chmod 640 "$HISTORY_FILE" 2>/dev/null
-export HISTFILE="$HISTORY_FILE"
+if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
+    HISTFILE="$HOME/.bash_history"
+    export HISTFILE
+    if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+    if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+fi
 EOF
     echo -e "${GREEN}[✓] Historial seguro configurado${NC}"
     FIXED=$((FIXED + 1))
