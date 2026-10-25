@@ -50,7 +50,7 @@ Para una instalación segura de Linux puedes revisar nuestros materiales:
 | `FS-hardening.sh` | Sistema de archivos |
 | `sudo-hardening.sh` | sudo |
 | `auditd-hardening.sh` | Auditoría |
-| `selinux-secure-setup.sh` | SELinux |
+| `selinux-secure-setup.sh` | Auditoría SELinux de solo lectura; no modifica configuración ni estado |
 | `kernel-hardening.sh` | Kernel |
 | `network-hardening.sh` | Red |
 | `cron-hardening.sh` | cron |
@@ -174,11 +174,13 @@ Para ejecución automática y conservadora, sin preguntas:
 
 El aviso legal genérico completo se instala en `/etc/issue` y `/etc/issue.net`; el banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon. `/etc/motd` muestra un mensaje breve posterior al login para evitar repetir el aviso. Ninguno de los banners enumera controles defensivos ni revela el estado de SELinux.
 
+Política operacional: `PASS_MAX_DAYS` se informa pero nunca se modifica; `use_pty` requiere confirmación específica y se omite en servidores cPanel; SELinux solo se audita y nunca se cambia; `fapolicyd` no se instala ni se activa. Si se detecta Wazuh, el auditor lo informa y mantiene esta política.
+
 El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfiles reemplacen `PS1`. Muestra la hora en formato `HH:MM:SS`, el usuario, el hostname completo y el directorio; root aparece en rojo con `#` y los usuarios normales en verde con `$`.
 
 ### Módulos especializados del repositorio
 
-El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. El benchmark `cis-benchmark-check.sh` se ejecuta por separado y no forma parte del selector de módulos de hardening. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` también se excluye de `linux-hardening-audit.sh` porque su ejecución normal puede modificar `/etc/selinux/config` y pedir un reinicio; solo debe ejecutarse mediante selección explícita y confirmación.
+El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. El benchmark `cis-benchmark-check.sh` se ejecuta por separado y no forma parte del selector de módulos de hardening. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` se conserva como auditoría de solo lectura. Tanto ese script como `post-install.sh` informan el estado de SELinux, pero no cambian su modo, `/etc/selinux/config`, contextos, paquetes ni reinician el servidor. La opción `--module selinux-setup` está bloqueada por política.
 
 **AIDE es opcional:** en el flujo interactivo `./linux-hardening.sh --fix`, si no está instalado se pregunta antes de instalarlo y configurar la base y la verificación diaria. El mensaje explica que AIDE compara una base de integridad y que puede solaparse con Wazuh FIM. `--fix --auto` no instala AIDE.
 
@@ -191,7 +193,7 @@ El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-harde
 | `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Cambian parámetros de autenticación o algoritmos; clientes antiguos, automatizaciones y el acceso root pueden dejar de funcionar. |
 | `FS-hardening.sh` | Puede remontar directorios con opciones restrictivas, cambiar `/proc` a `hidepid=2`, bloquear módulos y deshabilitar autofs. Puede afectar monitoreo, procesos que inspeccionan otras cuentas y aplicaciones. |
 | `cron-hardening.sh` | Puede crear `cron.allow` y `at.allow` restringidos a root; esto puede impedir cron de usuarios de hosting o tareas administradas por cPanel. |
-| `selinux-secure-setup.sh` | Puede activar SELinux y ejecutar `restorecon -R` sobre árboles grandes como `/etc`, `/var`, `/usr` y `/home`; etiquetas personalizadas y servicios pueden verse afectados. |
+| `selinux-secure-setup.sh` / `post-install.sh` | Solo auditan SELinux; por política OrangeBox no cambian su estado, configuración, contextos ni reinician el sistema. |
 | `grub-hardening.sh` / `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Cambian parámetros de arranque, sysctl o bloquean módulos/namespaces. Algunos efectos requieren reinicio y pueden afectar contenedores, VPN y aplicaciones. |
 | `rsyslog-hardening.sh` / `auditd-hardening.sh` | Reinician servicios de logging o amplían la auditoría; hay que revisar destinos, retención, volumen de eventos y reglas personalizadas. |
 | `configure-time-sync.sh` | Puede retirar el paquete NTP, instalar chrony o corregir la hora de golpe. Un salto temporal puede afectar certificados, autenticación y correlación de logs. |
