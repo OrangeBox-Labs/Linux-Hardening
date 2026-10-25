@@ -38,9 +38,12 @@ sysctl_safe_description() {
 # Emits filepath|line|value for all active exact-key definitions.
 # Accepts both "key = value" and "key value" syntax, and slash/dot key notation.
 sysctl_safe_inventory() {
-  local key="$1" file
+  local key="$1" file real_file seen_paths=" "
   for file in /etc/sysctl.conf /etc/sysctl.d/*.conf /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf; do
     [ -f "$file" ] || continue
+    real_file="$(readlink -f "$file" 2>/dev/null || echo "$file")"
+    case "$seen_paths" in *" $real_file "*) continue ;; esac
+    seen_paths="$seen_paths$real_file "
     awk -v key="$key" -v path="$file" '
       function trim(s) {
         sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s
@@ -214,6 +217,21 @@ sysctl_safe_apply() {
         [ "$cfg_file" = "/etc/sysctl.conf" ] && sysctl_conf_conflict=true
       fi
     done <<< "$defs"
+  fi
+
+  if [ "$current" = "$expected" ] && [ "$sysctl_conf_conflict" != true ] && [ "$conflict" = true ]; then
+    local expected_definition=false
+    while IFS='|' read -r cfg_file cfg_line cfg_value; do
+      [ "$cfg_value" = "$expected" ] && expected_definition=true
+    done <<< "$defs"
+    if [ "$expected_definition" = true ]; then
+      echo "[SYSCTL][OK] $key=$expected ya está activo y existe una definición persistente con ese valor."
+      echo "  Se conservan las demás definiciones sin crear un override innecesario:"
+      while IFS='|' read -r cfg_file cfg_line cfg_value; do
+        [ -n "$cfg_value" ] && printf '  - conservado: %s:%s = %s\n' "$cfg_file" "$cfg_line" "$cfg_value"
+      done <<< "$defs"
+      return 0
+    fi
   fi
 
   if [ "$conflict" = true ]; then
