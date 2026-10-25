@@ -104,56 +104,115 @@ set_sysctl() {
 # ==============================================
 # FUNCION PARA DESHABILITAR MODULO (maneja comentados)
 # ==============================================
+confirm_module_disable() {
+  local module="$1" description="$2" answer
+  [ "$AUTO_FIX" = true ] || return 1
+
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "${YELLOW}[WARN] Sin terminal interactiva: se omite el bloqueo de $module.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  echo -e "${YELLOW}[!] Se propone impedir la carga futura del módulo $module ($description).${NC}"
+  echo "    Si una aplicación o función de red lo requiere, podría dejar de funcionar."
+  if lsmod | awk -v m="$module" '$1 == m {found=1} END {exit !found}'; then
+    echo "    El módulo está cargado; también se intentará descargarlo durante esta ejecución."
+  else
+    echo "    El módulo no está cargado actualmente."
+  fi
+  printf '¿Confirmas deshabilitar %s? [y/N] ' "$module" > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) return 0 ;;
+    *)
+      echo -e "${YELLOW}[OMITIDO] No se modificará la configuración de $module.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+      ;;
+  esac
+}
+
 disable_module() {
-  local module=$1
-  local description=$2
-  local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
+  local module="$1"
+  local description="$2"
+  local conf_file="/etc/modprobe.d/99-disable-"$module".conf"
+  local config_changed=false
 
   echo -e "\n${BLUE}[*] Verificando modulo: $module - $description${NC}"
 
-  # Verificar si el modulo existe en el sistema
+  # Verificar si el modulo existe en el sistema.
   if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
     echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
     return 0
   fi
 
-  # Verificar si ya esta deshabilitado
-  if [ -f "$conf_file" ] && grep -q "^install $module /bin/false" "$conf_file" 2>/dev/null; then
-    echo -e "${GREEN}[✓] $module ya estaba deshabilitado${NC}"
+  if [ -L "$conf_file" ]; then
+    echo -e "${RED}[ERROR] $conf_file es un enlace simbólico; no se modifica.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  # Si ya hay una regla install activa, no reemplazar silenciosamente una política distinta.
+  if [ -f "$conf_file" ] && grep -Eq "^[[:space:]]*install[[:space:]]+$module[[:space:]]+" "$conf_file" &&
+      ! grep -Eq "^[[:space:]]*install[[:space:]]+$module[[:space:]]+/bin/false([[:space:]]|$)" "$conf_file"; then
+    echo -e "${RED}[WARN] $conf_file ya contiene otra regla install para $module; se conserva sin cambios.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  if [ -f "$conf_file" ] &&
+     grep -Eq "^[[:space:]]*install[[:space:]]+$module[[:space:]]+/bin/false([[:space:]]|$)" "$conf_file" &&
+     grep -Eq "^[[:space:]]*blacklist[[:space:]]+$module([[:space:]]|$)" "$conf_file"; then
+    echo -e "${GREEN}[✓] $module ya está deshabilitado en $conf_file${NC}"
     return 0
   fi
 
-  # Verificar si existe configuracion comentada
-  if [ -f "$conf_file" ] && grep -q "^#\s*install $module /bin/false" "$conf_file" 2>/dev/null; then
-    echo -e "${YELLOW}[!] $module configuracion comentada${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i "s/^#\s*install $module \/bin\/false/install $module \/bin\/false/" "$conf_file"
-      sed -i "s/^#\s*blacklist $module/blacklist $module/" "$conf_file"
-      echo -e "${GREEN}[✓] $module configuracion descomentada${NC}"
-      FIXED=$((FIXED + 1))
+  if [ "$AUTO_FIX" != true ]; then
+    echo -e "${RED}[!] $module está disponible; revisar si debe deshabilitarse.${NC}"
+    echo -e "${YELLOW}    Recomendación: deshabilitar $module solo si ningún servicio lo requiere.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  confirm_module_disable "$module" "$description" || return 0
+
+  # Mantener cualquier contenido previo; solo agregar las directivas que faltan.
+  mkdir -p /etc/modprobe.d || {
+    echo -e "${RED}[ERROR] No se pudo acceder a /etc/modprobe.d.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  touch "$conf_file" || {
+    echo -e "${RED}[ERROR] No se pudo crear $conf_file.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  if ! grep -Eq "^[[:space:]]*install[[:space:]]+$module[[:space:]]+/bin/false([[:space:]]|$)" "$conf_file"; then
+    printf 'install %s /bin/false\n' "$module" >> "$conf_file" || return 1
+    config_changed=true
+  fi
+  if ! grep -Eq "^[[:space:]]*blacklist[[:space:]]+$module([[:space:]]|$)" "$conf_file"; then
+    printf 'blacklist %s\n' "$module" >> "$conf_file" || return 1
+    config_changed=true
+  fi
+
+  if lsmod | awk -v m="$module" '$1 == m {found=1} END {exit !found}'; then
+    if rmmod "$module" 2>/dev/null; then
+      echo -e "${GREEN}[✓] $module descargado${NC}"
     else
+      echo -e "${YELLOW}[WARN] No se pudo descargar $module (posiblemente en uso); el bloqueo persistente ya está configurado.${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
-    return 0
   fi
 
-  echo -e "${RED}[!] $module existe - debe deshabilitarse${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    echo "install $module /bin/false" >"$conf_file"
-    echo "blacklist $module" >>"$conf_file"
-
-    if lsmod | grep -q "^$module"; then
-      rmmod "$module" 2>/dev/null
-      echo -e "${GREEN}[✓] $module descargado${NC}"
-    fi
-
-    echo -e "${GREEN}[✓] $module deshabilitado${NC}"
+  if [ "$config_changed" = true ]; then
+    echo -e "${GREEN}[✓] Regla persistente de $module actualizada en $conf_file${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}    Recomendacion: Deshabilitar $module${NC}"
-    WARNINGS=$((WARNINGS + 1))
+    echo -e "${GREEN}[✓] Las reglas de $module ya estaban presentes${NC}"
   fi
+  return 0
 }
 
 # ==============================================
