@@ -1994,7 +1994,7 @@ check_unique_uid0() {
 # ==============================================
 show_final_summary() {
   local total=$TOTAL_TESTS
-  local percentage=$((PASSED * 100 / total))
+  local percentage=$(((PASSED * 100 + total / 2) / total))
 
   # Escribir en pantalla y en log usando heredoc
   {
