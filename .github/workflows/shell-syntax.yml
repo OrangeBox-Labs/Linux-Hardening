@@ -30,3 +30,54 @@ jobs:
         run: bash tests/test_audit_listening_services.sh
       - name: Test firewall backend and Imunify detection
         run: bash tests/test_firewall_detect.sh
+
+  # Syntax/tests on representative RPM-family generations. CentOS 6/7 cover
+  # legacy Bash releases; AlmaLinux 8/9/10 cover modern RHEL-compatible userspace.
+  # These containers do not constitute certification on the exact RHEL products.
+  compatibility-smoke:
+    name: Compatibility smoke (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: CentOS 6 legacy baseline
+            image: centos:6
+          - label: CentOS 7 legacy baseline
+            image: centos:7
+          - label: AlmaLinux 8
+            image: almalinux:8
+          - label: AlmaLinux 9
+            image: almalinux:9
+          - label: AlmaLinux 10
+            image: almalinux:10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run syntax and regression tests in ${{ matrix.label }}
+        env:
+          TEST_IMAGE: ${{ matrix.image }}
+        run: |
+          docker pull "$TEST_IMAGE"
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --workdir /workspace \
+            "$TEST_IMAGE" /bin/bash -c '
+              set -eu
+              printf "OS: "
+              if [ -r /etc/centos-release ]; then cat /etc/centos-release
+              elif [ -r /etc/almalinux-release ]; then cat /etc/almalinux-release
+              else cat /etc/os-release 2>/dev/null || true
+              fi
+              /bin/bash --version | head -n 1
+              find . -path "./.git" -prune -o -type f -name "*.sh" -print0 |
+                xargs -0 -r -n1 /bin/bash -n
+              /bin/bash tests/test_bash_history_guard.sh
+              if command -v script >/dev/null 2>&1; then
+                /bin/bash tests/test_bash_prompt_fqdn.sh
+              else
+                echo "[SKIP] La prueba PTY requiere util-linux script, ausente en esta imagen; se ejecuta completa en el job Ubuntu."
+              fi
+              /bin/bash tests/test_audit_listening_services.sh
+              /bin/bash tests/test_firewall_detect.sh
+            '

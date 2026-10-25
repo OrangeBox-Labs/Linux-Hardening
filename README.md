@@ -92,6 +92,18 @@ La compatibilidad exacta depende de cada script. Revisa siempre el README indivi
 
 El proyecto no está diseñado como una colección genérica para Debian/Ubuntu: muchas políticas utilizan herramientas, PAM, SELinux, paquetes y rutas propias del ecosistema Red Hat.
 
+### Matriz de pruebas de compatibilidad
+
+El workflow **Compatibility smoke** ejecuta la validación sintáctica de los scripts y las pruebas de regresión en contenedores representativos de varias generaciones del ecosistema RPM:
+
+| Entorno de prueba | Propósito |
+|---|---|
+| CentOS 6 y CentOS 7 | Detectar incompatibilidades con generaciones antiguas de Bash y herramientas del sistema. |
+| AlmaLinux 8, 9 y 10 | Validar sintaxis y pruebas de usuario en generaciones actuales compatibles con RHEL. |
+
+Esta matriz es una **prueba de humo**, no una certificación completa de compatibilidad con cada versión de RHEL. No reproduce por sí sola el kernel del host, el arranque, los servicios activos, los backends reales de firewall, cPanel/CloudLinux ni los efectos de ejecutar `--fix`. Antes de declarar un módulo apto para producción en una versión concreta, sus rutas de ejecución y dependencias deben validarse también en una VM de laboratorio de esa generación, y en el perfil de proveedor correspondiente cuando aplique.
+
+
 ## Seguridad y compatibilidad
 
 Los scripts de hardening modifican configuración del sistema. **Prueba primero en laboratorio, snapshot o una máquina de validación.**
