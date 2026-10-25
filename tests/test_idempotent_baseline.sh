@@ -9,7 +9,8 @@ fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 
 # Kernel/SYN flood must rely on per-parameter sysctl checks, not a blanket module prompt.
-grep -Fq 'kernel|synflood)' "$CORE" || fail "kernel/SYN flood no se procesan sin prompt genérico"
+grep -Fq '      kernel)' "$CORE" || fail "kernel no tiene tratamiento de confirmación por parámetro"
+grep -Fq '      synflood)' "$CORE" || fail "SYN flood no tiene tratamiento de confirmación por parámetro"
 grep -Fq 'solo los que falten o difieran solicitarán confirmación' "$CORE" || fail "falta la política de confirmación por parámetro"
 grep -Fq 'sysctl_safe_apply ' "$CORE" || fail "baseline dejó de usar el helper seguro de sysctl"
 
