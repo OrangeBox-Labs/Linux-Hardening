@@ -321,7 +321,57 @@ rsyslog_module(){
   local conf=/etc/systemd/journald.conf
 
   if [ "$AUTO_FIX" != true ]; then
-    if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?
+    if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf" 2>/dev/null; then
+      ok "journal persistente (Storage=persistent y /var/log/journal existe)"
+    else
+      warn "journal no persistente o Storage=persistent no configurado explícitamente"
+    fi
+    return
+  fi
+
+  if [ ! -f "$conf" ]; then
+    warn "$conf no existe; no se modifica journald automáticamente"
+    return
+  fi
+
+  if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then
+    ok "journal persistente (configuración y directorio verificados)"
+    return
+  fi
+
+  backup_once "$conf"
+  if grep -Eq '^[[:space:]]*Storage[[:space:]]*=' "$conf"; then
+    if ! sed -ri 's/^[[:space:]]*Storage[[:space:]]*=.*/Storage=persistent/' "$conf"; then
+      warn "No se pudo configurar Storage=persistent en $conf"
+      return
+    fi
+  else
+    printf '\nStorage=persistent\n' >> "$conf" || {
+      warn "No se pudo añadir Storage=persistent a $conf"
+      return
+    }
+  fi
+
+  if ! mkdir -p /var/log/journal; then
+    warn "No se pudo crear /var/log/journal"
+    return
+  fi
+  if command -v systemd-tmpfiles >/dev/null 2>&1; then
+    systemd-tmpfiles --create --prefix=/var/log/journal >/dev/null 2>&1 || warn "systemd-tmpfiles no pudo normalizar /var/log/journal"
+  fi
+  if ! systemctl restart systemd-journald >/dev/null 2>&1; then
+    warn "journald no reinició; revisar $conf y el estado del servicio"
+    return
+  fi
+
+  if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf" && systemctl is-active --quiet systemd-journald; then
+    ok "journal configurado como persistente y verificado tras reiniciar journald"
+    FIXED=$((FIXED+1))
+  else
+    warn "No se pudo verificar la persistencia de journald después del cambio"
+  fi
+}
+
 selinux_module(){ echo -e "\n$BLUE### SELINUX ###$NC"; command -v getenforce >/dev/null 2>&1||{ warn "SELinux no disponible"; return; }; local mode; mode=$(getenforce); [ "$mode" = Enforcing ]&&ok "SELinux Enforcing"||warn "SELinux=$mode; NO se modifica por política OrangeBox"; }
 cron_module(){ echo -e "\n$BLUE### CRON / AT ###$NC"; [ -e /etc/cron.allow ]&&ok "cron.allow existe"||warn "cron.allow no existe; se deja intacto para no romper cPanel"; [ -e /etc/at.allow ]&&ok "at.allow existe"||warn "at.allow no existe; se deja intacto"; }
 usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_storage'&&warn "usb_storage cargado"||ok "usb_storage no cargado"; warn "USB no se bloquea automáticamente"; }
