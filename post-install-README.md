@@ -32,7 +32,7 @@ Si alguna de estas verificaciones falla, el script alerta con un mensaje claro y
 | Configuración | Qué hace | Beneficio |
 |--------------|----------|-----------|
 | Repositorios EPEL | Instala EPEL release | Acceso a paquetes adicionales no incluidos en RHEL base |
-| SELinux permisivo | setenforce 0 + configuración persistente | Permite auditar sin bloquear, ideal para servidores de aplicación |
+| Estado SELinux | Consulta de `getenforce` y lectura de `/etc/selinux/config` | Solo informa; nunca cambia el modo, configuración, contextos ni reinicia |
 | IPv6 deshabilitado | Agrega ipv6.disable=1 a GRUB | Reduce superficie de ataque y evita problemas de resolución DNS |
 | Herramientas base | vim, rsync, net-tools | Esenciales para cualquier administración básica |
 
