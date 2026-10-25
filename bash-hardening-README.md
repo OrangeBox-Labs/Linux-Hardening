@@ -27,7 +27,7 @@ Script de hardening para Bash que fortalece la seguridad del shell y el entorno 
 - Auditoría de comandos - envía todos los comandos a syslog
 - Historial por usuario - guarda ~/.bash_history con permisos 0600; la auditoría central por syslog es independiente
 - Timeout de sesión - cierra sesiones inactivas
-- Prompt personalizado - muestra hora, usuario, hostname y directorio
+- Prompt personalizado - muestra hora, usuario, hostname FQDN (`hostname -f`) y directorio
 
 ## Requisitos
 
@@ -233,7 +233,7 @@ source /etc/profile.d/aliases.sh
 source ~/.bashrc
 ```
 
-El modo Emacs asigna `Ctrl+A` al inicio de la línea y `Ctrl+E` al final. El hardening configura estas asociaciones en las sesiones interactivas.
+El modo Emacs asigna `Ctrl+A` al inicio de la línea y `Ctrl+E` al final. El hardening fija el hostname mediante `hostname -f` y restaura Emacs/Readline antes de cada prompt, incluso si `.bashrc` contiene `set -o vi`.
 
 ### Los comandos no se registran en syslog
 
