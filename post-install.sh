@@ -225,7 +225,7 @@ install_repos() {
 # ==============================================
 # AUDITAR SELINUX (SOLO LECTURA)
 # ==============================================
-configure_selinux() {
+audit_selinux() {
   echo -e "\n${BLUE}[*] Auditando SELinux; no se modificará...${NC}"
 
   local runtime_mode configured_mode
@@ -537,7 +537,7 @@ main() {
 
   # CONFIGURACIONES BASE
   install_repos
-  configure_selinux
+  audit_selinux
   disable_ipv6
 
   # HERRAMIENTAS Y SERVICIOS
