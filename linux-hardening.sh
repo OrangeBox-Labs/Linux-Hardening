@@ -669,7 +669,8 @@ Seguridad:
   --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
-  post-install se omite desde este orquestador: no tiene una ruta de auditoría de solo lectura.
+  post-install se omite: no tiene una ruta de auditoría de solo lectura.
+  selinux-setup se omite de repo-audit porque su ejecución normal puede modificar SELinux.
 EOF
 }
 
@@ -777,7 +778,13 @@ run_companion_module() {
     gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
     xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
     rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
-    selinux-setup) script="selinux-secure-setup.sh"; risky=true ;;
+    selinux-setup)
+      if [ "$AUTO_FIX" != true ]; then
+        warn "Se omite selinux-setup: no ofrece auditoría de solo lectura y puede modificar /etc/selinux/config."
+        return 0
+      fi
+      script="selinux-secure-setup.sh"; risky=true
+      ;;
     ssh-cis) script="ssh-hardening.sh"; risky=true ;;
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
     sudo-full) script="sudo-hardening.sh"; risky=true ;;
@@ -849,10 +856,11 @@ run_repository_audit() {
   AUTO_FIX=false
   echo "========== AUDITORÍA DE LOS SCRIPTS DEL REPOSITORIO =========="
   warn "Se omite post-install: no es una auditoría; puede instalar paquetes y modificar el sistema sin --fix."
+  warn "Se omite selinux-setup: su ejecución normal puede modificar /etc/selinux/config y pedir reinicio."
   for name in \
     aide audit-listeners auditd-full bash-full cis time-sync cpu-full cron-full \
     usb-storage grub-full kernel-full lpe-2026 network-full password-full \
-    gui-remove xinetd-remove rsyslog-full selinux-setup \
+    gui-remove xinetd-remove rsyslog-full \
     ssh-cis ssh-complete sudo-full filesystem-full
   do
     run_companion_module "$name"
