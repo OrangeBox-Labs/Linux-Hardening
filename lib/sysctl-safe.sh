@@ -4,6 +4,22 @@
 
 SYSCTL_SAFE_CHANGED=false
 
+# Status colors follow the same semantic palette used by the main scripts.
+# Resolve color variables at call time so this library works when sourced by
+# either linux-hardening.sh, kernel-hardening.sh or network-hardening.sh.
+sysctl_safe_log() {
+  local level="$1"
+  shift
+  local color reset="${NC:-$'\\033[0m'}"
+  case "$level" in
+    OK) color="${GREEN:-$'\\033[0;32m'}" ;;
+    ERROR) color="${RED:-$'\\033[0;31m'}" ;;
+    INFO|CAMBIO\ PROPUESTO) color="${BLUE:-$'\\033[0;34m'}" ;;
+    *) color="${YELLOW:-$'\\033[0;33m'}" ;;
+  esac
+  printf '%b[SYSCTL][%s]%b %s\\n' "$color" "$level" "$reset" "$*"
+}
+
 sysctl_safe_description() {
   case "$1" in
     fs.suid_dumpable) echo "Impide core dumps de programas privilegiados que podrían contener datos sensibles; puede limitar el análisis post-mortem." ;;
@@ -75,19 +91,19 @@ sysctl_safe_inventory() {
 sysctl_safe_write_profile() {
   local key="$1" value="$2" file="$3" backup_dir="$4" begin="$5" end="$6"
   local tmp mode backup
-  [ -n "$file" ] || { echo "[SYSCTL][ERROR] No se definió archivo de persistencia."; return 1; }
+  [ -n "$file" ] || { sysctl_safe_log "ERROR" "No se definió archivo de persistencia."; return 1; }
   mkdir -p "$(dirname "$file")" || return 1
   if [ "$file" = "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" ] && [ -L "$file" ]; then
-    echo "[SYSCTL][ERROR] $file es un enlace simbólico; no se reemplaza."
+    sysctl_safe_log "ERROR" "$file es un enlace simbólico; no se reemplaza."
     return 1
   fi
   if [ "$file" = "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" ] && [ -e "$file" ] && ! grep -Fqx "# OrangeBox managed sysctl overrides" "$file"; then
-    echo "[SYSCTL][ERROR] $file ya existe, pero no contiene el marcador de propiedad OrangeBox; no se sobrescribe."
+    sysctl_safe_log "ERROR" "$file ya existe, pero no contiene el marcador de propiedad OrangeBox; no se sobrescribe."
     return 1
   fi
   if [ -n "$begin" ] && [ -n "$end" ] && [ -e "$file" ]; then
     if ! grep -Fqx "$begin" "$file" || ! grep -Fqx "$end" "$file"; then
-      echo "[SYSCTL][ERROR] $file existe pero no contiene el bloque gestionado esperado; no se modifica."
+      sysctl_safe_log "ERROR" "$file existe pero no contiene el bloque gestionado esperado; no se modifica."
       return 1
     fi
   fi
@@ -152,7 +168,7 @@ sysctl_safe_write_profile() {
           if (lhs==key) found=1
         }
         END {exit(found?0:1)}
-      ' "$tmp" || { rm -f "$tmp"; echo "[SYSCTL][ERROR] No se pudo actualizar $key dentro del bloque gestionado."; return 1; }
+      ' "$tmp" || { rm -f "$tmp"; sysctl_safe_log "ERROR" "No se pudo actualizar $key dentro del bloque gestionado."; return 1; }
     else
       if [ "$begin" = "# BEGIN ORANGEBOX SYNFLOOD" ]; then
         { echo "# OrangeBox managed SYN flood profile"; echo "$begin"; echo "$key = $value"; echo "$end"; } > "$tmp" || { rm -f "$tmp"; return 1; }
@@ -203,7 +219,7 @@ sysctl_safe_apply() {
   local current defs any_defs=false conflict=false sysctl_conf_conflict=false cfg_file cfg_line cfg_value answer desc need_persist=false target_value legacy_target
   SYSCTL_SAFE_CHANGED=false
   current="$(sysctl -n "$key" 2>/dev/null || true)"
-  if [ -z "$current" ]; then echo "[SYSCTL][WARN] $key no está disponible en este kernel; no se aplica."; return 1; fi
+  if [ -z "$current" ]; then sysctl_safe_log "WARN" "$key no está disponible en este kernel; no se aplica."; return 1; fi
   desc="$supplied_desc"
   if [ -z "$desc" ] || [ "$desc" = "$key" ]; then desc="$(sysctl_safe_description "$key")"; fi
   [ -n "$desc" ] || desc="Ajusta el comportamiento del parámetro de kernel $key."
@@ -225,7 +241,7 @@ sysctl_safe_apply() {
       [ "$cfg_value" = "$expected" ] && expected_definition=true
     done <<< "$defs"
     if [ "$expected_definition" = true ]; then
-      echo "[SYSCTL][OK] $key=$expected ya está activo y existe una definición persistente con ese valor."
+      sysctl_safe_log "OK" "$key=$expected ya está activo y existe una definición persistente con ese valor."
       echo "  Se conservan las demás definiciones sin crear un override innecesario:"
       while IFS='|' read -r cfg_file cfg_line cfg_value; do
         [ -n "$cfg_value" ] && printf '  - conservado: %s:%s = %s\n' "$cfg_file" "$cfg_line" "$cfg_value"
@@ -236,7 +252,7 @@ sysctl_safe_apply() {
 
   if [ "$conflict" = true ]; then
     echo
-    echo "[SYSCTL][CONFLICTO] $key ya tiene definiciones persistentes diferentes."
+    sysctl_safe_log "CONFLICTO" "$key ya tiene definiciones persistentes diferentes."
     echo "  Qué cambia: $desc"
     echo "  Valor activo: $current | Valor propuesto: $expected"
     echo "  Definiciones detectadas (los archivos existentes no se modifican salvo /etc/sysctl.conf si se confirma):"
@@ -246,31 +262,31 @@ sysctl_safe_apply() {
 
     target_value="$(sysctl_safe_inventory "$key" | awk -F'|' -v target="$target" '$1==target {value=$3} END {print value}')"
     if [ "$current" = "$expected" ] && [ "$target_value" = "$expected" ] && [ "$sysctl_conf_conflict" != true ]; then
-      echo "[SYSCTL][OK] $key=$expected ya está aplicado mediante el override $target; las definiciones anteriores se conservan y no se vuelve a preguntar."
+      sysctl_safe_log "OK" "$key=$expected ya está aplicado mediante el override $target; las definiciones anteriores se conservan y no se vuelve a preguntar."
       return 0
     fi
 
-    if [ "$fix_mode" != true ]; then echo "[SYSCTL][WARN] Auditoría: se conserva la configuración actual."; return 1; fi
-    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then echo "[SYSCTL][WARN] No hay terminal interactiva; se omite $key por seguridad."; return 1; fi
+    if [ "$fix_mode" != true ]; then sysctl_safe_log "WARN" "Auditoría: se conserva la configuración actual."; return 1; fi
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."; return 1; fi
     if [ "$sysctl_conf_conflict" = true ]; then
-      printf '¿Confirmas aplicar %s=%s, crear el override en %s y actualizar solo las asignaciones conflictivas de /etc/sysctl.conf? [y/N] ' "$key" "$expected" "$target" > /dev/tty
+      printf '¿Confirmas aplicar %s=%s, crear el override en %s y actualizar solo las asignaciones conflictivas de /etc/sysctl.conf? [s/N] ' "$key" "$expected" "$target" > /dev/tty
     else
-      printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [y/N] ' "$key" "$expected" "$target" > /dev/tty
+      printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
     fi
     IFS= read -r answer < /dev/tty || answer=""
-    case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) echo "[SYSCTL][OMITIDO] No se modificó $key."; return 1 ;; esac
+    case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     need_persist=true
   elif [ "$current" = "$expected" ] && [ "$any_defs" = true ]; then
-    echo "[SYSCTL][OK] $key=$expected; valor activo y persistente alineados."
+    sysctl_safe_log "OK" "$key=$expected; valor activo y persistente alineados."
     while IFS='|' read -r cfg_file cfg_line cfg_value; do
       [ -n "$cfg_value" ] && printf '  - conservado: %s:%s = %s\n' "$cfg_file" "$cfg_line" "$cfg_value"
     done <<< "$defs"
     return 0
   elif [ "$fix_mode" != true ]; then
     if [ "$current" = "$expected" ]; then
-      echo "[SYSCTL][WARN] $key está activo en $expected, pero no tiene definición persistente; no se modifica en auditoría."
+      sysctl_safe_log "WARN" "$key está activo en $expected, pero no tiene definición persistente; no se modifica en auditoría."
     else
-      echo "[SYSCTL][WARN] $key activo=$current; recomendado=$expected. Qué cambia: $desc"
+      sysctl_safe_log "WARN" "$key activo=$current; recomendado=$expected. Qué cambia: $desc"
       if [ "$any_defs" = true ]; then
         echo "  Hay una definición persistente con el valor recomendado; se conserva."
         while IFS='|' read -r cfg_file cfg_line cfg_value; do
@@ -283,44 +299,44 @@ sysctl_safe_apply() {
     if [ "$any_defs" = false ] || [ "$current" != "$expected" ]; then need_persist=true; fi
     if [ "$current" != "$expected" ]; then
       echo
-      echo "[SYSCTL][CAMBIO PROPUESTO] $key: activo=$current; propuesto=$expected."
+      sysctl_safe_log "CAMBIO PROPUESTO" "$key: activo=$current; propuesto=$expected."
       echo "  Qué cambia: $desc"
       if [ "$fix_mode" != true ]; then
-        echo "[SYSCTL][WARN] Auditoría: no se cambia $key."
+        sysctl_safe_log "WARN" "Auditoría: no se cambia $key."
         return 1
       fi
       if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-        echo "[SYSCTL][WARN] No hay terminal interactiva; se omite $key por seguridad."
+        sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."
         return 1
       fi
-      printf '¿Confirmas cambiar %s de %s a %s y persistirlo cuando corresponda? [y/N] ' "$key" "$current" "$expected" > /dev/tty
+      printf '¿Confirmas cambiar %s de %s a %s y persistirlo cuando corresponda? [s/N] ' "$key" "$current" "$expected" > /dev/tty
       IFS= read -r answer < /dev/tty || answer=""
-      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) echo "[SYSCTL][OMITIDO] No se modificó $key."; return 1 ;; esac
+      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     fi
   fi
 
   if [ "$need_persist" = true ]; then
     if ! sysctl_safe_write_profile "$key" "$expected" "$target" "$backup_dir" "$begin" "$end"; then
-      echo "[SYSCTL][ERROR] No se pudo persistir $key en $target; no se aplica en runtime."
+      sysctl_safe_log "ERROR" "No se pudo persistir $key en $target; no se aplica en runtime."
       return 1
     fi
     SYSCTL_SAFE_CHANGED=true
-    echo "[SYSCTL][OK] Persistencia de $key=$expected escrita en $target; las otras definiciones quedan intactas."
+    sysctl_safe_log "OK" "Persistencia de $key=$expected escrita en $target; las otras definiciones quedan intactas."
     if [ "$sysctl_conf_conflict" = true ]; then
       legacy_target="$(readlink -f /etc/sysctl.conf 2>/dev/null || echo /etc/sysctl.conf)"
       if ! sysctl_safe_write_profile "$key" "$expected" "$legacy_target" "$backup_dir" "" ""; then
-        echo "[SYSCTL][WARN] Se escribió $target, pero no se pudo reconciliar la asignación conflictiva de /etc/sysctl.conf ($legacy_target)."
+        sysctl_safe_log "WARN" "Se escribió $target, pero no se pudo reconciliar la asignación conflictiva de /etc/sysctl.conf ($legacy_target)."
         return 1
       fi
-      echo "[SYSCTL][OK] Asignación conflictiva de $key actualizada en $legacy_target tras la confirmación."
+      sysctl_safe_log "OK" "Asignación conflictiva de $key actualizada en $legacy_target tras la confirmación."
     fi
   fi
   if [ "$current" != "$expected" ]; then
     if sysctl -w "$key=$expected" >/dev/null 2>&1 && [ "$(sysctl -n "$key" 2>/dev/null || true)" = "$expected" ]; then
       SYSCTL_SAFE_CHANGED=true
-      echo "[SYSCTL][OK] Valor activo de $key aplicado: $expected."
+      sysctl_safe_log "OK" "Valor activo de $key aplicado: $expected."
     else
-      echo "[SYSCTL][WARN] No se pudo aplicar/verificar $key=$expected; revise la precedencia de sysctl."
+      sysctl_safe_log "WARN" "No se pudo aplicar/verificar $key=$expected; revise la precedencia de sysctl."
       return 1
     fi
   fi
@@ -339,7 +355,7 @@ sysctl_safe_apply_kptr_restrict_policy() {
 
   case "$current" in
     1|2)
-      echo "[SYSCTL][OK] kernel.kptr_restrict=$current; la política OrangeBox acepta 1 o 2. Se conserva sin tocar runtime ni persistencia."
+      sysctl_safe_log "OK" "kernel.kptr_restrict=$current; la política OrangeBox acepta 1 o 2. Se conserva sin tocar runtime ni persistencia."
       return 0
       ;;
     0)
@@ -347,11 +363,11 @@ sysctl_safe_apply_kptr_restrict_policy() {
       return $?
       ;;
     "")
-      echo "[SYSCTL][WARN] kernel.kptr_restrict no está disponible en este kernel; no se modifica."
+      sysctl_safe_log "WARN" "kernel.kptr_restrict no está disponible en este kernel; no se modifica."
       return 1
       ;;
     *)
-      echo "[SYSCTL][WARN] kernel.kptr_restrict=$current no es un valor contemplado por la política; solo se cambia cuando el valor activo es 0. Se conserva sin cambios."
+      sysctl_safe_log "WARN" "kernel.kptr_restrict=$current no es un valor contemplado por la política; solo se cambia cuando el valor activo es 0. Se conserva sin cambios."
       return 1
       ;;
   esac
