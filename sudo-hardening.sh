@@ -163,7 +163,7 @@ check_sudo_pty() {
     *) echo -e "${YELLOW}[i] use_pty no confirmado; se conserva la configuración actual.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1 ;;
   esac
 
-  printf '%s\\n' 'Defaults use_pty' >> "$SUDOERS_FILE" || {
+  printf '%s\n' 'Defaults use_pty' >> "$SUDOERS_FILE" || {
     echo -e "${RED}[!] No se pudo escribir en $SUDOERS_FILE${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 1
