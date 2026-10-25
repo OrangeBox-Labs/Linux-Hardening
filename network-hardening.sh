@@ -168,16 +168,33 @@ shorewall_is_active() {
   printf '%s\n' "$status" | grep -Eiq 'running|started|active'
 }
 
+# CSF administra reglas iptables directamente; no requiere una unidad systemd propia.
+# Se considera operativo cuando csf -l puede mostrar las cadenas activas del kernel.
+csf_rules_active() {
+  command -v csf >/dev/null 2>&1 || return 1
+  local listing
+  listing="$(csf -l 2>&1)" || return 1
+  printf '%s\n' "$listing" | grep -Eq 'iptables .* table|Chain INPUT[[:space:]]+\('
+}
+
 check_firewall_conflicts() {
   echo -e "\n${BLUE}[*] Verificando gestores y backend de firewall...${NC}"
 
   local shorewall_installed=false shorewall_active=false
+  local csf_installed=false csf_active=false
+  local imunify360_rules=false
   local firewalld_installed=false firewalld_active=false
   local nftables_installed=false nftables_active=false
   local iptables_installed=false iptables_active=false
 
   command -v shorewall >/dev/null 2>&1 && shorewall_installed=true
   shorewall_is_active && shorewall_active=true
+  command -v csf >/dev/null 2>&1 && csf_installed=true
+  csf_rules_active && csf_active=true
+
+  if command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null | grep -Eq 'INPUT_imunify360|imunify360'; then
+    imunify360_rules=true
+  fi
 
   if rpm -q firewalld &>/dev/null; then
     firewalld_installed=true
@@ -193,14 +210,16 @@ check_firewall_conflicts() {
   fi
 
   echo -e "  shorewall: instalado=$shorewall_installed activo=$shorewall_active"
+  echo -e "  csf: instalado=$csf_installed reglas_activas=$csf_active"
   echo -e "  firewalld: instalado=$firewalld_installed activo=$firewalld_active"
   echo -e "  nftables: instalado=$nftables_installed activo=$nftables_active"
   echo -e "  iptables-services: instalado=$iptables_installed activo=$iptables_active"
+  [ "$imunify360_rules" = true ] && echo -e "  [INFO] Se detectan cadenas de integración de Imunify360 en iptables."
 
   if [ "$shorewall_active" = true ]; then
     echo -e "${GREEN}[✓] Shorewall está activo y se reconoce como gestor principal del firewall${NC}"
-    if [ "$firewalld_active" = true ]; then
-      echo -e "${RED}[!] Shorewall y firewalld aparecen activos; revisar posible doble gestión${NC}"
+    if [ "$firewalld_active" = true ] || [ "$csf_active" = true ]; then
+      echo -e "${RED}[!] Shorewall y otro gestor de firewall aparecen activos; revisar posible doble gestión${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
     if [ "$AUTO_FIX" = true ] && [ "$ALLOW_SHOREWALL" != true ]; then
@@ -214,13 +233,16 @@ check_firewall_conflicts() {
   [ "$firewalld_active" = true ] && active_managers=$((active_managers + 1))
   [ "$nftables_active" = true ] && active_managers=$((active_managers + 1))
   [ "$iptables_active" = true ] && active_managers=$((active_managers + 1))
+  [ "$csf_active" = true ] && active_managers=$((active_managers + 1))
 
   if [ "$active_managers" -gt 1 ]; then
-    echo -e "${RED}[!] Varios servicios de firewall aparecen activos ($active_managers); revisar backend y reglas antes de cambiar configuración${NC}"
+    echo -e "${RED}[!] Varios gestores/backends de firewall aparecen activos ($active_managers); revisar integración y reglas antes de cambiar configuración${NC}"
     WARNINGS=$((WARNINGS + 1))
   elif [ "$active_managers" -eq 0 ]; then
-    echo -e "${YELLOW}[!] No se pudo confirmar un gestor de firewall activo (incluido Shorewall)${NC}"
+    echo -e "${YELLOW}[!] No se pudo confirmar un gestor de firewall activo (incluidos Shorewall y CSF)${NC}"
     WARNINGS=$((WARNINGS + 1))
+  elif [ "$csf_active" = true ]; then
+    echo -e "${GREEN}[✓] CSF reporta reglas activas en iptables; se reconoce como gestor del firewall${NC}"
   else
     echo -e "${GREEN}[✓] Un gestor/backend de firewall está activo${NC}"
   fi
