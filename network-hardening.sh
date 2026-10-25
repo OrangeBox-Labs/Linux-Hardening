@@ -18,6 +18,13 @@ else
   echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
   exit 1
 fi
+if [ -r "$SCRIPT_DIR/lib/firewall-detect.sh" ]; then
+  # shellcheck source=lib/firewall-detect.sh
+  source "$SCRIPT_DIR/lib/firewall-detect.sh"
+else
+  echo "[ERROR] Falta lib/firewall-detect.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -251,7 +258,8 @@ check_firewall_conflicts() {
   command -v csf >/dev/null 2>&1 && csf_installed=true
   csf_rules_active && csf_active=true
 
-  if command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null | grep -Eq 'INPUT_imunify360|imunify360'; then
+  firewall_print_backend_diagnostics
+  if firewall_has_imunify360_rules; then
     imunify360_rules=true
   fi
 

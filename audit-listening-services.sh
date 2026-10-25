@@ -1,212 +1,112 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# OrangeBox Linux Hardening - inventario no destructivo de sockets en escucha.
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
-# ==============================================
-# Script: audit-listening-services.sh
-# Autor: Felipe Roman
-# Web: www.orangebox.cl
-# Email: froman@orangebox.cl
-# Descripcion: Audita servicios en escucha y sugiere acciones
-#              CIS 2.4 - Ensure nonessential services are removed or masked
-# ==============================================
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-# ==============================================
-# BASE DE DATOS DE SERVICIOS CONOCIDOS
-# ==============================================
-
-get_service_info() {
-  local port=$1
-
-  case "$port" in
-  21) echo "vsftpd|vsftpd|eliminar|Servidor FTP (inseguro, usar SFTP)" ;;
-  22) echo "sshd|openssh-server|mantener|SSH - necesario para administracion remota" ;;
-  23) echo "telnet|telnet-server|eliminar|Telnet (inseguro, usar SSH)" ;;
-  25) echo "postfix|postfix|configurar-local|Servidor de correo SMTP" ;;
-  53) echo "named|bind|eliminar|Servidor DNS (si no es servidor DNS)" ;;
-  80) echo "httpd|httpd|eliminar|Servidor web HTTP (si no es servidor web)" ;;
-  110) echo "dovecot|dovecot|eliminar|Servidor POP3 (correo)" ;;
-  111) echo "rpcbind|rpcbind|eliminar|RPC bind (necesario solo para NFS)" ;;
-  139) echo "smb|samba|eliminar|Samba (comparticion archivos Windows)" ;;
-  143) echo "dovecot|dovecot|eliminar|Servidor IMAP (correo)" ;;
-  199) echo "snmpd|net-snmp|eliminar|SNMP (si no se usa monitoreo)" ;;
-  389) echo "slapd|openldap-servers|eliminar|Servidor LDAP" ;;
-  443) echo "httpd|httpd|eliminar|Servidor web HTTPS (si no es servidor web)" ;;
-  445) echo "smb|samba|eliminar|Samba (comparticion archivos Windows)" ;;
-  465) echo "postfix|postfix|configurar-local|SMTP con SSL" ;;
-  514) echo "rsyslog|rsyslog|mantener|Syslog (logging del sistema)" ;;
-  587) echo "postfix|postfix|configurar-local|SMTP" ;;
-  631) echo "cups|cups|eliminar|Servidor de impresion" ;;
-  993) echo "dovecot|dovecot|eliminar|IMAP con SSL (correo)" ;;
-  995) echo "dovecot|dovecot|eliminar|POP3 con SSL (correo)" ;;
-  1433) echo "mssql|mssql-server|eliminar|SQL Server" ;;
-  2049) echo "nfs|nfs-utils|eliminar|NFS (comparticion archivos Unix)" ;;
-  3000) echo "grafana-server|grafana|monitoreo|Grafana (monitoreo)" ;;
-  3128) echo "squid|squid|eliminar|Proxy HTTP" ;;
-  3306) echo "mysqld|MariaDB-server|eliminar|MySQL/MariaDB" ;;
-  5432) echo "postgresql|postgresql-server|eliminar|PostgreSQL" ;;
-  5665) echo "icinga2|icinga2|monitoreo|Icinga2 (monitoreo)" ;;
-  5666) echo "nrpe|nrpe|monitoreo|NRPE (monitoreo Nagios)" ;;
-  5667) echo "nsca|nsca|monitoreo|NSCA (monitoreo Nagios)" ;;
-  6379) echo "redis|redis|eliminar|Redis" ;;
-  8080) echo "tomcat|tomcat|eliminar|Tomcat" ;;
-  8086) echo "influxdb|influxdb|monitoreo|InfluxDB (series temporales)" ;;
-  8088) echo "influxdb|influxdb|monitoreo|InfluxDB (cluster)" ;;
-  8443) echo "tomcat|tomcat|eliminar|Tomcat SSL" ;;
-  9000) echo "php-fpm|php-fpm|eliminar|PHP-FPM" ;;
-  27017) echo "mongod|mongodb-org|eliminar|MongoDB" ;;
-  *) echo "desconocido|desconocido|revisar|Servicio no identificado" ;;
+classify_bind_address() {
+  case "$1" in
+    127.*:*|localhost:*|"[::1]:"*|"::1:"*) printf '%s\n' LOOPBACK ;;
+    0.0.0.0:*|"[::]:"*|":::"*|\*:*) printf '%s\n' TODAS_INTERFACES ;;
+    *) printf '%s\n' IP_ESPECIFICA ;;
   esac
 }
 
-# ==============================================
-# MOSTRAR CABECERA
-# ==============================================
-show_header() {
-  echo -e "${GREEN}============================================${NC}"
-  echo -e "${GREEN}  Auditoria de Servicios en Escucha${NC}"
-  echo -e "${GREEN}  CIS 2.4 - Nonessential Services${NC}"
-  echo -e "${GREEN}============================================${NC}"
-  echo ""
+# El proceso observado tiene prioridad sobre el número de puerto.
+classify_listening_process() {
+  local process="$1" port="$2"
+  case "$process" in
+    sshd) printf '%s\n' ADMINISTRACION ;;
+    pure-ftpd|vsftpd|proftpd) printf '%s\n' FTP ;;
+    pdns_server|named|dnsmasq|unbound|systemd-resolved) printf '%s\n' DNS ;;
+    rpcbind) printf '%s\n' RPC_NFS ;;
+    httpd|nginx|apache2|lshttpd|openlitespeed) printf '%s\n' WEB ;;
+    postfix|dovecot|exim|sendmail) printf '%s\n' CORREO ;;
+    master)
+      case "$port" in 25|465|587) printf '%s\n' CORREO ;; *) printf '%s\n' NO_CLASIFICADO ;; esac
+      ;;
+    mariadbd|mysqld|mongod|postgres|postgresql|redis-server|memcached) printf '%s\n' BASE_DATOS ;;
+    zabbix_agent2|zabbix_agentd|node_exporter|fluent-bit|otelcol|otelopscol|opentelemetry-collector|prometheus|grafana-server|dcgm-exporter)
+      printf '%s\n' MONITOREO ;;
+    *) printf '%s\n' NO_CLASIFICADO ;;
+  esac
 }
 
-# ==============================================
-# EXTRAER PUERTO DE LA COLUMNA 4 (formato: 127.0.0.1:8088 o *:80)
-# ==============================================
-extract_port() {
-  local addr_port="$1"
-  echo "$addr_port" | awk -F: '{print $NF}'
+# Entrada: una línea de "ss -H -lntup". Salida TSV para pruebas reproducibles.
+parse_ss_socket_line() {
+  local line="$1" protocol state recvq sendq local_addr peer rest port process category scope
+  IFS=' ' read -r protocol state recvq sendq local_addr peer rest <<< "$line"
+  [ -n "$protocol" ] && [ -n "$local_addr" ] || return 1
+  [[ "$local_addr" == *:* ]] || return 1
+  port="$(printf '%s\n' "$local_addr" | awk -F: '{print $NF}')"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+
+  process="$(printf '%s\n' "$line" | sed -n 's/.*users:(("//;t got;b;:got s/".*//;p')"
+  [ -n "$process" ] || process=desconocido
+  category="$(classify_listening_process "$process" "$port")"
+  scope="$(classify_bind_address "$local_addr")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$protocol" "$state" "$port" "$local_addr" "$process" "$category" "$scope"
 }
 
-# ==============================================
-# EXTRAER NOMBRE DEL PROGRAMA DE LA COLUMNA 6
-# ==============================================
-extract_program() {
-  local users="$1"
-  # Extrae el nombre del programa entre comillas dobles
-  if [[ "$users" =~ users:\(\(\"([^\"]+)\" ]]; then
-    echo "${BASH_REMATCH[1]}"
-  else
-    echo "desconocido"
-  fi
-}
-
-# ==============================================
-# AUDITAR PUERTOS LISTEN USANDO SS
-# ==============================================
 audit_listening_ports() {
-  echo -e "\n${BLUE}========================================${NC}"
-  echo -e "${BLUE}  PUERTOS EN ESCUCHA (LISTEN)${NC}"
-  echo -e "${BLUE}========================================${NC}\n"
+  local socket_output line parsed protocol state port local_addr process category scope note proto_upper
+  local count=0 skipped=0
 
-  printf "${YELLOW}%-8s %-20s %-25s %-15s %s${NC}\n" "PUERTO" "SERVICIO" "PAQUETE" "ACCION" "DESCRIPCION"
-  echo -e "${BLUE}----------------------------------------------------------------------------------------------${NC}"
+  command -v ss >/dev/null 2>&1 || { echo "[ERROR] No se encontró ss." >&2; return 1; }
+  if ! socket_output="$(ss -H -lntup 2>&1)"; then
+    echo "[ERROR] ss no pudo enumerar sockets:" >&2
+    printf '%s\n' "$socket_output" >&2
+    return 1
+  fi
 
-  ss -tlnp 2>/dev/null | grep LISTEN | while read line; do
-    # La columna 4 tiene la direccion:puerto
-    addr_port=$(echo "$line" | awk '{print $4}')
-    port=$(extract_port "$addr_port")
+  printf '%-5s %-8s %-7s %-30s %-24s %-17s %-18s %s\n' \
+    PROTO ESTADO PUERTO "DIRECCION LOCAL" PROCESO CLASE BIND OBSERVACION
+  printf '%s\n' "---------------------------------------------------------------------------------------------------------------"
 
-    # La columna 6 tiene los usuarios y programas
-    users_info=$(echo "$line" | awk '{for(i=6;i<=NF;i++) printf "%s ", $i; print ""}' | tr -d '\n')
-    program=$(extract_program "$users_info")
-
-    # Saltar si no hay puerto valido
-    [ -z "$port" ] && continue
-
-    # Obtener informacion del servicio
-    IFS='|' read -r service pkg action desc <<<"$(get_service_info "$port")"
-
-    # Si no se identifico por puerto, usar el programa detectado
-    if [ "$service" = "desconocido" ]; then
-      service="$program"
-      pkg="desconocido"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if ! parsed="$(parse_ss_socket_line "$line")"; then
+      skipped=$((skipped + 1))
+      continue
     fi
-
-    # Color segun accion
-    case $action in
-    eliminar)
-      color="$RED"
-      accion_sugerida="ELIMINAR"
-      ;;
-    configurar-local)
-      color="$YELLOW"
-      accion_sugerida="CONFIGURAR LOCAL"
-      ;;
-    mantener)
-      color="$GREEN"
-      accion_sugerida="MANTENER"
-      ;;
-    monitoreo)
-      color="$GREEN"
-      accion_sugerida="MONITOREO"
-      ;;
-    *)
-      color="$YELLOW"
-      accion_sugerida="REVISAR"
-      ;;
+    IFS=$'\t' read -r protocol state port local_addr process category scope <<< "$parsed"
+    proto_upper="$(printf '%s' "$protocol" | tr '[:lower:]' '[:upper:]')"
+    case "$scope" in
+      LOOPBACK) note="Solo loopback" ;;
+      TODAS_INTERFACES) note="Revisar ACL/firewall" ;;
+      *) note="Revisar red/ACL" ;;
     esac
+    [ "$category" != NO_CLASIFICADO ] || note="$note; validar propósito"
+    printf '%-5s %-8s %-7s %-30.30s %-24.24s %-17s %-18s %s\n' \
+      "$proto_upper" "$state" "$port" "$local_addr" "$process" "$category" "$scope" "$note"
+    count=$((count + 1))
+  done <<< "$socket_output"
 
-    printf "${color}%-8s %-20s %-25s %-15s %s${NC}\n" \
-      "$port" "${service:0:20}" "${pkg:0:25}" "$accion_sugerida" "${desc:0:50}"
-  done
+  echo
+  echo "Sockets procesados: $count"
+  [ "$skipped" -eq 0 ] || echo "Líneas omitidas por formato no reconocido: $skipped"
+  echo "BIND wildcard no demuestra accesibilidad desde Internet: deben revisarse CSF/Imunify360,"
+  echo "todos los backends de firewall, las rutas y las reglas externas."
+  echo "Los procesos NO_CLASIFICADO quedan para revisión; no se recomiendan eliminaciones de paquetes."
 }
 
-# ==============================================
-# GENERAR COMANDOS SUGERIDOS
-# ==============================================
-generate_commands() {
-  echo -e "\n${BLUE}========================================${NC}"
-  echo -e "${BLUE}  COMANDOS SUGERIDOS${NC}"
-  echo -e "${BLUE}========================================${NC}\n"
-
-  ss -tlnp 2>/dev/null | grep LISTEN | while read line; do
-    addr_port=$(echo "$line" | awk '{print $4}')
-    port=$(extract_port "$addr_port")
-
-    [ -z "$port" ] && continue
-
-    IFS='|' read -r service pkg action desc <<<"$(get_service_info "$port")"
-
-    if [ "$action" = "eliminar" ] && [ "$pkg" != "desconocido" ]; then
-      echo -e "${YELLOW}yum remove $pkg -y  # $desc${NC}"
-    elif [ "$action" = "configurar-local" ] && [ "$pkg" = "postfix" ]; then
-      echo -e "${YELLOW}sed -i 's/^inet_interfaces =.*/inet_interfaces = localhost/' /etc/postfix/main.cf && systemctl restart postfix  # $desc${NC}"
-    fi
-  done | sort -u
-}
-
-# ==============================================
-# MOSTRAR RESULTADO FINAL
-# ==============================================
-show_summary() {
-  echo -e "\n${GREEN}============================================${NC}"
-  echo -e "${GREEN}  RESUMEN DE LA AUDITORIA${NC}"
-  echo -e "${GREEN}============================================${NC}"
-
-  local open_ports=$(ss -tlnp 2>/dev/null | grep LISTEN | wc -l)
-
-  echo -e "\n${YELLOW}Puertos abiertos (escuchando): $open_ports${NC}"
-  echo -e "\n${GREEN}[✓] Auditoria completada${NC}"
-}
-
-# ==============================================
-# FUNCION PRINCIPAL
-# ==============================================
 main() {
-  show_header
-  audit_listening_ports
-  generate_commands
-  show_summary
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --check) ;;
+      -h|--help) echo "Uso: $0 [--check]"; echo "Auditoría TCP/UDP de solo lectura."; return 0 ;;
+      *) echo "Opción desconocida: $arg" >&2; return 2 ;;
+    esac
+  done
+  [ "$EUID" -eq 0 ] || { echo "[ERROR] Ejecuta como root para identificar los procesos." >&2; return 1; }
+  echo -e "$GREEN============================================================$NC"
+  echo -e "$GREEN OrangeBox - Auditoría de sockets en escucha (solo lectura)$NC"
+  echo -e "$GREEN============================================================$NC"
+  audit_listening_ports || return $?
+  echo -e "$GREEN Auditoría completada. No se aplicaron cambios.$NC"
+  echo "Para diagnosticar gestores/backends de firewall: ./network-hardening.sh --check"
 }
 
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[!] Este script debe ejecutarse como root${NC}"
-  exit 1
+# Permite cargar las funciones en pruebas unitarias sin lanzar la auditoría.
+if [ "$0" = "$BASH_SOURCE" ]; then
+  main "$@"
 fi
-
-main "$@"
