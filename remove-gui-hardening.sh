@@ -298,7 +298,11 @@ show_instructions() {
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  if [ -d "$BACKUP_DIR" ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  else
+    echo -e "  • Backup: no creado (modo verificación)"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
   echo -e "  systemctl get-default"
