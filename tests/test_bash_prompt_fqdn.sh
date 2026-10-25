@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.orangebox-prompt-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 MOCK_BIN="$TMP_DIR/bin"
 MOCK_HOME="$TMP_DIR/home"

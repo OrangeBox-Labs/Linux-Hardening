@@ -5,27 +5,22 @@ ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 
-# /tmp and /var/tmp may be mounted noexec on hardened servers. Choose a
-# writable temporary directory only after proving that a generated executable
-# can actually run there; otherwise the mock would resolve in PATH but fail
-# with status 126, which looks like a backend-detection bug.
+# Create test executables inside the repository checkout. Executing mocks from
+# /tmp, /var/tmp or /dev/shm triggers the production rule for execution from
+# critical temporary locations and creates misleading alerts.
+# Do not fall back to watched temporary directories if the checkout is noexec.
 create_exec_tempdir() {
-  local base candidate probe
-  for base in "${TMPDIR:-/tmp}" /tmp /var/tmp "${HOME:-/root}" "$ROOT_DIR"; do
-    [ -d "$base" ] || continue
-    candidate="$(mktemp -d "$base/.orangebox-firewall-test.XXXXXX" 2>/dev/null)" || continue
-    probe="$candidate/.exec-test"
-    if ! printf '#!/bin/sh\nexit 0\n' > "$probe" || ! chmod 700 "$probe"; then
-      rm -rf "$candidate"
-      continue
-    fi
-    if "$probe" >/dev/null 2>&1; then
-      rm -f "$probe"
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-    rm -rf "$candidate"
-  done
+  local candidate probe
+  candidate="$(mktemp -d "$ROOT_DIR/.orangebox-firewall-test.XXXXXX" 2>/dev/null)" || return 1
+  probe="$candidate/.exec-test"
+  if printf '#!/bin/sh\nexit 0\n' > "$probe" &&
+     chmod 700 "$probe" &&
+     "$probe" >/dev/null 2>&1; then
+    rm -f "$probe"
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  rm -rf "$candidate"
   return 1
 }
 
