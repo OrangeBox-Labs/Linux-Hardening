@@ -37,7 +37,7 @@ pass "SELinux solo se audita; no hay acciones de cambio en los módulos SELinux"
 
 # fapolicyd is never installed or activated by the baseline; Wazuh is reported when found.
 grep -Fq 'Wazuh detectado:' "$CORE" || fail "no se informa cuando Wazuh está instalado"
-grep -Fq 'no se instalará ni activará fapolicyd' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"
+grep -Fq 'no instalará ni activará fapolicyd' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"
 if grep -Eq '(dnf|yum)[[:space:]]+install.*fapolicyd|systemctl[[:space:]]+(enable|start|restart).*fapolicyd' "$CORE"; then
   fail "el baseline intenta instalar o activar fapolicyd"
 fi
