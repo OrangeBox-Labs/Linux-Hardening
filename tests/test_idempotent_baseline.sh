@@ -33,11 +33,29 @@ grep -Fq '¿Confirmas persistir %s=%s en %s? [s/N]' "$SYSCTL" || fail "no hay co
 grep -Fq 'ORANGEBOX IT SERVICES' "$CORE" || fail "MOTD perdió la marca OrangeBox"
 grep -Fq 'LINUX ENTERPRISE  /  INFRAESTRUCTURA  /  SEGURIDAD' "$CORE" || fail "falta el subtítulo de marca en MOTD"
 grep -Fq 'Las sesiones pueden ser registradas y auditadas.' "$CORE" || fail "falta el aviso breve del MOTD"
+awk '
+  index($0, "cat >") && index($0, "ORANGEBOX_MOTD") { in_motd=1; next }
+  in_motd && $0 == "ORANGEBOX_MOTD" { exit }
+  in_motd {
+    if (length($0) != 78) { print "[FAIL] línea MOTD de ancho " length($0) ": " $0 > "/dev/stderr"; bad=1 }
+    count++
+  }
+  END { if (count != 12 || bad) exit 1 }
+' "$CORE" || fail "MOTD no tiene el formato alineado de 78 columnas"
 
 # Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
 grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
 grep -Fq 'unset TMOUT 2>/dev/null || true' "$CORE" || fail "la shell root no elimina TMOUT heredado"
 grep -Fq 'readonly TMOUT' "$CORE" || fail "TMOUT no está protegido contra cambios por el usuario"
 grep -Fq 'solo aplica a shells interactivos' "$CORE" || fail "no se limita el resto del perfil a shells interactivos"
+profile_tmp="$(mktemp)"
+trap 'rm -f "$profile_tmp"' EXIT
+awk '
+  index($0, "cat >") && index($0, "ORANGEBOX_BASH") { in_profile=1; next }
+  in_profile && $0 == "ORANGEBOX_BASH" { exit }
+  in_profile { print }
+' "$CORE" > "$profile_tmp"
+[ -s "$profile_tmp" ] || fail "no se pudo extraer el perfil Bash administrado"
+bash -n "$profile_tmp" || fail "el perfil Bash generado tiene errores de sintaxis"
 
 pass "confirmaciones idempotentes, MOTD de marca y TMOUT=120 exclusivo para sesiones interactivas no-root"
