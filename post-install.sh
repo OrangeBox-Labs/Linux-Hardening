@@ -99,7 +99,7 @@ check_lvm() {
     else
       echo -e -n "${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
-      if [[ ! "$answer" =~ ^[Ss]$ ]]; then
+      if [[ ! "$answer" =~ ^([Ss]|[Ss][Ii]|[Ss][Íí])$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con LVM.${NC}"
         exit 1
       fi
@@ -156,7 +156,7 @@ check_separated_partitions() {
     else
       echo -e -n "\n${YELLOW}¿Quieres continuar igualmente? [s/N]: ${NC}"
       read -r answer
-      if [[ ! "$answer" =~ ^[Ss]$ ]]; then
+      if [[ ! "$answer" =~ ^([Ss]|[Ss][Ii]|[Ss][Íí])$ ]]; then
         echo -e "${RED}[!] Script cancelado. Reinstale el sistema con las particiones separadas.${NC}"
         exit 1
       fi
