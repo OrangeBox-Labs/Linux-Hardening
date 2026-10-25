@@ -130,7 +130,7 @@ check_exec_shield() {
     case "$exec_shield" in
       1|2) echo -e "${GREEN}[✓] Exec-Shield activo (valor: $exec_shield)${NC}" ;;
       *)
-        if sysctl_safe_apply "kernel.exec-shield" "1" "Exec-Shield: activa la protección NX/XD heredada cuando el kernel la soporta." "/etc/sysctl.d/99-exec-shield.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+        if sysctl_safe_apply "kernel.exec-shield" "1" "Exec-Shield: activa la protección NX/XD heredada cuando el kernel la soporta." "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
           [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
         else
           WARNINGS=$((WARNINGS + 1))
@@ -158,7 +158,7 @@ check_aslr() {
     echo -e "${GREEN}[✓] ASLR completo (valor: 2)${NC}"
     return
   fi
-  if sysctl_safe_apply "kernel.randomize_va_space" "2" "ASLR: aleatoriza el espacio de direcciones de procesos y librerías." "/etc/sysctl.d/99-cis-hardening.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+  if sysctl_safe_apply "kernel.randomize_va_space" "2" "ASLR: aleatoriza el espacio de direcciones de procesos y librerías." "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
   else
     WARNINGS=$((WARNINGS + 1))
@@ -178,7 +178,7 @@ check_ptrace_scope() {
   fi
   case "$ptrace_value" in
     0)
-      if sysctl_safe_apply "kernel.yama.ptrace_scope" "1" "Restringe ptrace a procesos permitidos; puede afectar depuración, gdb/strace y ciertos monitores." "/etc/sysctl.d/99-cis-hardening.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
+      if sysctl_safe_apply "kernel.yama.ptrace_scope" "1" "Restringe ptrace a procesos permitidos; puede afectar depuración, gdb/strace y ciertos monitores." "/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf" "/var/backups/orangebox-cpu-hardening" "$AUTO_FIX" "" ""; then
         [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
       else
         WARNINGS=$((WARNINGS + 1))
