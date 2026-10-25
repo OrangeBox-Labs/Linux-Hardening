@@ -142,6 +142,11 @@ show_usage() {
 show_ssh_audit_analysis() {
   echo -e "\n${BLUE}[*] Analisis actual de ssh-audit:${NC}\n"
 
+  if ! command -v ssh-audit &>/dev/null; then
+    echo -e "${YELLOW}[WARN] ssh-audit no está instalado; se omite el análisis externo en modo auditoría sin instalar paquetes.${NC}"
+    return 0
+  fi
+
   local audit_output=$(ssh-audit localhost 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
 
   echo -e "${YELLOW}=== KEY EXCHANGE ALGORITHMS ===${NC}"
@@ -507,7 +512,6 @@ main() {
   echo -e "${GREEN}  SSH Hardening Complete - sshaudit.com${NC}"
   echo -e "${GREEN}============================================${NC}\n"
 
-  check_ssh_audit
   detect_distro
 
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
@@ -528,6 +532,7 @@ main() {
   fi
 
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+    check_ssh_audit
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
