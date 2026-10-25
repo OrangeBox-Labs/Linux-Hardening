@@ -505,6 +505,13 @@ orangebox_history_guard() {
 export HISTTIMEFORMAT='%F %T '
 orangebox_history_guard
 
+# Normalizar la edición de línea en Bash para administración.
+# Ctrl+A = inicio de línea; Ctrl+E = final de línea.
+# No depender de un ~/.inputrc o /etc/inputrc personalizado.
+set -o emacs 2>/dev/null || true
+bind '\"\\C-a\": beginning-of-line' 2>/dev/null || true
+bind '\"\\C-e\": end-of-line' 2>/dev/null || true
+
 # Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
 orangebox_set_prompt() {
   if [ "${EUID:-$(id -u)}" -eq 0 ]; then
