@@ -57,6 +57,7 @@ lfa_nft_text_state() {
   local rules="$1" family="$2" protocol="$3" port="$4"
   printf '%s\n' "$rules" | awk -v wf="$family" -v wp="$protocol" -v p="$port" '
     function target(line,a,n,i){n=split(line,a,/[[:space:]]+/);for(i=1;i<n;i++)if(a[i]=="jump"||a[i]=="goto")return a[i+1];return ""}
+    function family_matches(tf,wf){return tf=="inet"||(wf=="ipv4"&&tf=="ip")||(wf=="ipv6"&&tf=="ip6")}
     function strip_counter(s){sub(/^[[:space:]]*/,"",s);sub(/^counter packets [0-9]+ bytes [0-9]+[[:space:]]*/,"",s);return s}
     function jump_uncond(line,s){s=strip_counter(line);return s~/^(jump|goto)[[:space:]]+[[:alnum:]_.-]+[[:space:]]*$/}
     function terminal_uncond(line,s){s=strip_counter(line);return s~/^drop[[:space:]]*;?$/||s~/^reject([[:space:]]+with[[:space:]].*)?;?$/}
@@ -78,7 +79,7 @@ lfa_nft_text_state() {
     $1=="chain"{cn=$2;gsub(/[{}]/,"",cn);ck=table ":" cn;exists[ck]=1;ctable[ck]=table;cfamily[ck]=tf;next}
     /^[[:space:]]*}[[:space:]]*$/ {ck="";next}
     ck!="" {
-      if(tf!=wf&&tf!="inet")next
+      if(!family_matches(tf,wf))next
       if($0~/hook[[:space:]]+input/){input_seen=1;base[ck]=1;if($0~/policy[[:space:]]+(drop|reject)([[:space:];]|$)/){found_control=1;exit}}
       else{nr++;rules[nr]=$0;rc[nr]=ck}
     }
