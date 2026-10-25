@@ -2,7 +2,8 @@
 # OrangeBox Linux Hardening - auditoría agregada estrictamente de solo lectura.
 # Este script únicamente invoca los modos de verificación de los módulos.
 # No crea backups, no instala paquetes y no aplica correcciones.
-set -u
+# Sin 'set -u': mantiene compatibilidad con Bash 4.4 (CentOS/RHEL 8)
+# al expandir arrays vacíos de argumentos de auditoría.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SCRIPT_VERSION="1.0.0"
