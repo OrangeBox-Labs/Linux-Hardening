@@ -108,15 +108,25 @@ https://www.orangebox.cl/
 
 Linux hardening, Linux security, CIS Benchmark, CIS hardening, RHEL hardening, Red Hat hardening, Rocky Linux hardening, AlmaLinux hardening, CentOS hardening, Fedora hardening, SSH hardening, sudo hardening, SELinux, auditd, kernel hardening, filesystem hardening, GRUB hardening, firewall hardening, Bash security, server hardening, Linux Enterprise, OrangeBox.
 
-## Auditoría agregada del repositorio (solo lectura)
+## Auditoría de módulos de hardening (solo lectura)
 
-La auditoría agregada está separada del orquestador de hardening y se ejecuta con:
+La auditoría agregada de módulos se ejecuta con:
 
 ```bash
 ./linux-hardening-audit.sh
 ```
 
-Este programa solo consulta el estado actual: invoca los módulos en sus modos de verificación, fuerza `--check` en los módulos de red, filesystem y mitigación LPE, y no pasa nunca `--fix`. No crea directorios de backup ni reportes persistentes; la salida del comprobador CIS se muestra por pantalla y su archivo se redirige a `/dev/null`. Los módulos de preparación, eliminación interactiva de paquetes/servicios, configuración de SELinux sin modo de auditoría garantizado y generación destructiva de reglas de firewall quedan excluidos.
+Este programa consulta las comprobaciones operacionales de los módulos, fuerza `--check` en red, filesystem y mitigación LPE, y nunca pasa `--fix`. No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y no crea backups ni reportes persistentes. Los módulos de preparación, eliminación interactiva de paquetes/servicios, configuración de SELinux sin modo de auditoría garantizado y generación destructiva de reglas de firewall quedan excluidos.
+
+## Benchmark CIS independiente
+
+El benchmark CIS es una evaluación separada de los chequeos operacionales de los módulos. Ejecuta únicamente:
+
+```bash
+./cis-benchmark-check.sh
+```
+
+El resultado y el porcentaje de cumplimiento CIS provienen exclusivamente de los controles de `cis-benchmark-check.sh`. No se suman ni se mezclan con advertencias, recomendaciones o estados internos que reportan otros scripts.
 
 Para **aplicar hardening**, usa `linux-hardening.sh --fix`. Sin `--fix`, el orquestador principal conserva su modo de revisión previa sin aplicar cambios. La opción antigua `--module repo-audit` se rechaza y muestra la ruta del auditor separado.
 
@@ -154,7 +164,7 @@ El prompt se vuelve a fijar antes de cada indicador para evitar que otros perfil
 
 ### Módulos especializados del repositorio
 
-El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `cis-benchmark-check.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` también se excluye de `linux-hardening-audit.sh` porque su ejecución normal puede modificar `/etc/selinux/config` y pedir un reinicio; solo debe ejecutarse mediante selección explícita y confirmación.
+El orquestador permite seleccionar funciones de `aide-install.sh`, `auditd-hardening.sh`, `bash-hardening.sh`, `configure-time-sync.sh`, `cpu-hardening.sh`, `cron-hardening.sh`, `FS-hardening.sh`, `grub-hardening.sh`, `kernel-hardening.sh`, `kernel-lpe-2026-mitigation.sh`, `network-hardening.sh`, `password-hardening.sh`, `remove-xinetd.sh`, `remove-gui-hardening.sh`, `rsyslog-hardening.sh`, `selinux-secure-setup.sh`, `ssh-hardening.sh`, `ssh-hardening-complete.sh` y `sudo-hardening.sh`. El benchmark `cis-benchmark-check.sh` se ejecuta por separado y no forma parte del selector de módulos de hardening. Los scripts interactivos de eliminación de paquetes/servicios requieren selección manual y no forman parte de la auditoría agregada. `post-install.sh` queda fuera del orquestador y de la auditoría agregada porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar la configuración incluso sin `--fix`. `selinux-secure-setup.sh` también se excluye de `linux-hardening-audit.sh` porque su ejecución normal puede modificar `/etc/selinux/config` y pedir un reinicio; solo debe ejecutarse mediante selección explícita y confirmación.
 
 ### Controles de alto riesgo
 
