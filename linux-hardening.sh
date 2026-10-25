@@ -645,7 +645,7 @@ risk_description() {
     time|time-sync) echo "puede cambiar el servicio de sincronización o dar un salto de hora; puede afectar certificados, autenticación y correlación de logs." ;;
     usb|usb-storage) echo "bloquea almacenamiento USB mediante modprobe; puede afectar dispositivos o flujos de recuperación que dependan de USB." ;;
     services|services-remove|packages-remove|xinetd-remove|gui-remove) echo "puede detener/deshabilitar servicios o eliminar paquetes y dependencias; podría afectar aplicaciones instaladas." ;;
-    aide) echo "instala AIDE y puede crear una base inicial de integridad, consumiendo espacio y CPU." ;;
+    aide) echo "instala AIDE y crea una base de integridad; puede solaparse con Wazuh FIM y consumir espacio/CPU. El instalador explicará ese solapamiento y pedirá consentimiento explícito." ;;
     bash-full) echo "instala auditoría amplia de comandos mediante trap DEBUG/syslog; puede aumentar volumen y registrar argumentos sensibles." ;;
     post-install) echo "script para preparación inicial que puede tocar SELinux, GRUB y paquetes; está bloqueado en modo aplicación desde este orquestador." ;;
     *) echo "este módulo puede modificar configuración o servicios; revisa el alcance y conserva una vía de recuperación." ;;
@@ -750,6 +750,8 @@ run_companion_module() {
       echo -e "$YELLOW[--auto] Se omitirá la aplicación de '$name'.$NC"
       echo "Qué haría: $(risk_description "$name")"
       apply_fix=false
+    elif [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; then
+      info "AIDE no está instalado; aide-install.sh explicará sus efectos y solicitará consentimiento explícito."
     elif ! confirm_risky_change "$name"; then
       apply_fix=false
     fi
@@ -874,6 +876,10 @@ main() {
     for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
       run_internal_module_with_confirmation "$m"
     done
+
+    # AIDE is optional because Wazuh FIM may already cover the same files.
+    # Its installer owns the consent prompt and must explain that tradeoff.
+    run_module aide
   elif [ "$MODULE" = "all" ]; then
     ok "MODO AUDITORÍA: sin cambios"
     local m
