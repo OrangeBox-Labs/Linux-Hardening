@@ -1,5 +1,7 @@
 # Script: post-install.sh
 
+> **Política operacional:** SELinux solo se audita. Este script no debe cambiar su modo ni `/etc/selinux/config`, modificar contextos ni solicitar reinicios.
+
 **Configuración base para servidores Linux recién instalados**
 
 Script interactivo que prepara lo básico de servidores RHEL 8/9/10 y derivados (Rocky, AlmaLinux, Oracle Linux) dejándolos listos para aplicar el hardening de seguridad. Incluye verificaciones pre-vuelo de LVM y particiones separadas, instalación de repositorios, herramientas esenciales y configuraciones de seguridad base.
