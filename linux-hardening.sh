@@ -438,7 +438,7 @@ ORANGEBOX_MOTD
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
 grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"; }
 firewall_module() {
-  echo -e "\\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
+  echo -e "\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
   # Auditoría exclusivamente de lectura: nunca administrar el firewall desde
   # este baseline. Solo se advierte un listener no loopback si la cobertura
   # INPUT es verificablemente inexistente para su familia/protocolo/puerto.
