@@ -48,8 +48,8 @@ set_sysctl(){
 }
 
 SYNFLOOD_FILE=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
-SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
-SYNFLOOD_VALUES=(1 4096 4096 3 5)
+SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn"
+SYNFLOOD_VALUES=(1 4096 4096)
 synflood_module(){
   echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
   [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }

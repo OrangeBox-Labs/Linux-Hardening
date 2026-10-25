@@ -30,6 +30,8 @@ jobs:
         run: bash tests/test_audit_listening_services.sh
       - name: Test firewall backend and Imunify detection
         run: bash tests/test_firewall_detect.sh
+      - name: Test SYN flood baseline policy
+        run: bash tests/test_synflood_defaults.sh
 
   # Syntax/tests on representative RPM-family generations. CentOS 6/7 cover
   # legacy Bash releases; AlmaLinux 8/9/10 cover modern RHEL-compatible userspace.
@@ -80,4 +82,5 @@ jobs:
               fi
               /bin/bash tests/test_audit_listening_services.sh
               /bin/bash tests/test_firewall_detect.sh
+              /bin/bash tests/test_synflood_defaults.sh
             '
