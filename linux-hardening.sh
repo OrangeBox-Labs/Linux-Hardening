@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.2 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.3 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.2
+SCRIPT_VERSION=1.4.3
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -82,6 +82,22 @@ synflood_module(){
     idx=$((idx+1))
   done
   info "Los valores externos de sysctl se conservan. Los valores distintos solo se imponen con confirmación individual."
+}
+
+# Returns success only when every SYN flood setting already passes the same
+# read-only active/persistent checks used by the real module.
+# Output is captured so the preflight does not duplicate the module's report.
+synflood_state_compliant() {
+  [ -d /etc/sysctl.d ] || return 1
+  local idx=0 key desired check_output
+  for key in $SYNFLOOD_KEYS; do
+    desired="${SYNFLOOD_VALUES[$idx]}"
+    if ! check_output="$(sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" false "" "" 2>&1)"; then
+      return 1
+    fi
+    idx=$((idx+1))
+  done
+  return 0
 }
 ssh_effective(){ sshd -T 2>/dev/null|awk -v k="$1" '$1==k{$1="";sub(/^ /,"");print;exit}'; }
 ssh_module(){
@@ -748,7 +764,7 @@ risk_description() {
     ssh) echo "añade controles a sshd (intentos, tiempos de sesión y autenticación por host). Se valida la sintaxis; aun así, revisa clientes e integraciones SSH." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
-    synflood) echo "habilita SYN cookies y persiste backlog TCP/reintentos recomendados; no cambia net.ipv4.ip_forward." ;;
+    synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
     network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
     firewall|firewall-rules) echo "modifica o reemplaza el filtrado. El generador de iptables está bloqueado porque vacía reglas y establece INPUT DROP; no se ejecutará sobre Shorewall." ;;
@@ -798,7 +814,13 @@ confirm_risky_change() {
 run_internal_module_with_confirmation() {
   local name="$1" previous_fix="$AUTO_FIX"
   if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
-    if ! confirm_risky_change "$name"; then
+    # Do not ask for consent to apply a module when its active and persistent
+    # values already pass the same read-only checks. The module will still run
+    # once in fix mode to print the normal verification report; it makes no
+    # changes because the preflight found no pending settings.
+    if [ "$name" = "synflood" ] && synflood_state_compliant; then
+      info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; se omite la confirmación porque no hay cambios pendientes."
+    elif ! confirm_risky_change "$name"; then
       AUTO_FIX=false
       run_module "$name"
       AUTO_FIX="$previous_fix"

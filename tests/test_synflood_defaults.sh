@@ -25,4 +25,11 @@ fi
 
 grep -Fq 'tcp_synack_retries' "$ROOT_DIR/network-hardening-README.md" || fail "falta documentar tcp_synack_retries"
 grep -Fq 'tcp_syn_retries' "$ROOT_DIR/network-hardening-README.md" || fail "falta documentar tcp_syn_retries"
+# The orchestrator should ask for risk consent only when SYN flood settings need attention.
+grep -Fq 'synflood_state_compliant()' "$ORCHESTRATOR" || fail "falta preflight de cumplimiento SYN flood"
+grep -Fq 'synflood_state_compliant; then' "$ORCHESTRATOR" || fail "el flujo no evita confirmaciones redundantes de SYN flood"
+grep -Fq 'SYN cookies/backlog ya cumplen los objetivos activos y persistentes' "$ORCHESTRATOR" || fail "falta mensaje cuando SYN flood ya está conforme"
+if grep -Fq 'persiste backlog TCP/reintentos recomendados' "$ORCHESTRATOR"; then
+  fail "la descripción de SYN flood aún afirma que modifica reintentos TCP"
+fi
 pass "el baseline conserva SYN cookies/backlogs y deja los reintentos TCP a la política de cada plataforma"
