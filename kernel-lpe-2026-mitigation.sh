@@ -32,6 +32,15 @@ set -euo pipefail
 # ============================================================================
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ -r "$SCRIPT_DIR/lib/sysctl-safe.sh" ]]; then
+  # shellcheck source=lib/sysctl-safe.sh
+  source "$SCRIPT_DIR/lib/sysctl-safe.sh"
+else
+  echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 STATE_DIR="/var/lib/orangebox/kernel-lpe-2026"
 SYSCTL_FILE="/etc/sysctl.d/99-orangebox-kernel-lpe-2026.conf"
 MODPROBE_FILE="/etc/modprobe.d/orangebox-kernel-lpe-2026.conf"
@@ -329,51 +338,22 @@ backup_file() {
 apply_userns() {
   local current
   current="$(current_userns)"
-
   if [[ -z "$current" ]]; then
     if [[ "$(uname -r)" == 2.6.* ]]; then
-      # En kernels 2.6.x antiguos (p.ej. CentOS 6) no existe el control
-      # user.max_user_namespaces porque el soporte de user namespaces no esta
-      # presente como en kernels modernos. No escribimos un sysctl inexistente.
       ok "No se aplica user.max_user_namespaces: el kernel 2.6.x no expone user namespaces modernos."
       return 0
     fi
-
     error "No es posible aplicar user.max_user_namespaces=0 en este kernel."
     return 1
   fi
 
-  if [[ "$current" == "0" ]]; then
-    ok "user.max_user_namespaces ya estaba en 0."
-    return 0
+  if sysctl_safe_apply "user.max_user_namespaces" "0" "Bloquea user namespaces; puede afectar contenedores rootless, sandboxes y aplicaciones que dependan de ellos." "$SYSCTL_FILE" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
+    if [[ "$SYSCTL_SAFE_CHANGED" == "true" ]]; then
+      CHANGES=$((CHANGES + 1))
+    fi
+  else
+    WARNINGS=$((WARNINGS + 1))
   fi
-
-  backup_file "$SYSCTL_FILE"
-
-  cat >"$SYSCTL_FILE" <<'EOF'
-# ============================================================================
-# OrangeBox - Mitigacion DirtyAH6 / TUNderflow / PPPoEject
-# ============================================================================
-#
-# Bloquea user namespaces sin privilegios.
-#
-# Cubre la via local normal de:
-#   CVE-2026-80844
-#   CVE-2026-81000
-#   CVE-2026-68121
-#
-# NO mitiga CVE-2026-74469 (DiagSpill).
-#
-# Revisar compatibilidad en hosts con contenedores, sandboxes o aplicaciones
-# que dependan de user namespaces.
-# ============================================================================
-
-user.max_user_namespaces = 0
-EOF
-
-  sysctl -w user.max_user_namespaces=0 >/dev/null
-  ok "user.max_user_namespaces=0 aplicado y persistente."
-  CHANGES=$((CHANGES + 1))
 }
 
 module_available() {
