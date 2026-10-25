@@ -2,7 +2,7 @@
 # Regression tests for the history() protection embedded in the hardening scripts.
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -28,10 +28,10 @@ extract_history_function() {
 
 test_one_script() {
   local source="$1" label="$2"
-  local wrapper="$TMP_DIR/\${label}-history-function.sh"
-  local histfile="$TMP_DIR/\${label}.history"
-  local errors="$TMP_DIR/\${label}.stderr"
-  local output="$TMP_DIR/\${label}.stdout"
+  local wrapper="$TMP_DIR/${label}-history-function.sh"
+  local histfile="$TMP_DIR/${label}.history"
+  local errors="$TMP_DIR/${label}.stderr"
+  local output="$TMP_DIR/${label}.stdout"
 
   extract_history_function "$source" "$wrapper" ||
     fail "$label: no se pudo extraer/validar la función history()"
