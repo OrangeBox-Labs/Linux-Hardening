@@ -784,7 +784,7 @@ risk_description() {
     services|services-remove|packages-remove|xinetd-remove|gui-remove) echo "puede detener/deshabilitar servicios o eliminar paquetes y dependencias; podría afectar aplicaciones instaladas." ;;
     aide) echo "instala AIDE y crea una base de integridad; puede solaparse con Wazuh FIM y consumir espacio/CPU. El instalador explicará ese solapamiento y pedirá consentimiento explícito." ;;
     bash-full) echo "instala auditoría amplia de comandos mediante trap DEBUG/syslog; puede aumentar volumen y registrar argumentos sensibles." ;;
-    post-install) echo "script para preparación inicial que puede tocar SELinux, GRUB y paquetes; está bloqueado en modo aplicación desde este orquestador." ;;
+    post-install) echo "script de preparación inicial que puede cambiar GRUB, instalar paquetes y habilitar servicios; SELinux solo se audita." ;;
     *) echo "este módulo puede modificar configuración o servicios; revisa el alcance y conserva una vía de recuperación." ;;
   esac
 }
@@ -853,9 +853,9 @@ run_companion_module() {
     password-full) script="password-hardening.sh"; risky=true ;;
     post-install)
       if [ "$AUTO_FIX" = true ]; then
-        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host."
+        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host; SELinux solo se audita."
       fi
-      warn "Se omite post-install: puede instalar paquetes, cambiar SELinux/GRUB y habilitar servicios incluso sin --fix."
+      warn "Se omite post-install: puede instalar paquetes, cambiar GRUB y habilitar servicios incluso sin --fix; SELinux solo se audita."
       return 0
       ;;
     gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
@@ -880,7 +880,7 @@ run_companion_module() {
 
   local apply_fix="$AUTO_FIX" skip_without_audit=false
   if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ] && [ "$AUTO_MODE" != true ]; then
-    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar SELinux, GRUB y paquetes. Ejecuta el script aparte después de revisar el host."
+    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar GRUB, instalar paquetes y habilitar servicios. SELinux solo se audita."
   fi
 
   if [ "$AUTO_FIX" = true ] && [ "$risky" = true ]; then
