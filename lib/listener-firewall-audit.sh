@@ -86,7 +86,7 @@ lfa_nft_text_state() {
       else{nr++;rules[nr]=$0;rc[nr]=ck;seq[nr]=chain_seq[ck]++}
     }
     END{
-      if(!input_seen){print "ALLOWED";exit}
+      if(!input_seen){print "UNKNOWN";exit}
       if(input_chains>1)complex=1
       for(c in base)reachable[c]=1
       for(pass=1;pass<=nr;pass++)for(i=1;i<=nr;i++)if(reachable[rc[i]]){t=target(rules[i]);if(t!=""){nc=ctable[rc[i]] ":" t;if(exists[nc]){if(jump_uncond(rules[i]))reachable[nc]=1;else complex=1}}}
