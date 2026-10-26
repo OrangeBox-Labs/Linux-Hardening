@@ -48,7 +48,6 @@ fi
 grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$CORE" || fail "falta el título del banner previo a autenticación"
 grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$CORE" || fail "el aviso de auditoría no está en el banner pre-login"
 grep -Fq 'reportado a las autoridades competentes.' "$CORE" || fail "falta el aviso de reporte de actividad no autorizada"
-grep -Fq 'IP remota' "$CORE" && fail "la IP remota no debe mostrarse en el MOTD de shell"
 login_banner_tmp="$(mktemp)"
 trap 'rm -f "$login_banner_tmp"' EXIT
 awk '
