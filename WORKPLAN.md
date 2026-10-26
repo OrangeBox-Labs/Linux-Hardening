@@ -2,7 +2,8 @@
 
 Última actualización: 2026-10-26
 Rama de referencia: `main`
-Commit de partida: `7d619b9f65687d214d7ce9d3c7bd9ad43f71575b`
+Commit de partida en `main`: `707daa5f6c587acfb97d98d4d709362c9949d160`
+Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status`
 
 Este archivo es el punto de reanudación del trabajo. Actualizar estados y commit de referencia al terminar cada bloque coherente.
 
@@ -33,6 +34,18 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Añadir al baseline principal los controles `kernel.yama.ptrace_scope`, `vm.mmap_min_addr`, `kernel.unprivileged_bpf_disabled` y `user.max_user_namespaces`, usando la ruta de validación/confirmación de sysctl.
 - [x] Añadir pruebas iniciales para los comportamientos de filesystem y calidad del verificador CIS.
 - [ ] Confirmar el resultado CI de commit `7d619b9f65687d214d7ce9d3c7bd9ad43f71575b` y corregir fallos si aparecen.
+
+### Auditoría CIS / estado del repositorio — 2026-10-26
+
+- [x] Contrastar el mapa de benchmarks CIS catalogados para RHEL, AlmaLinux, Rocky Linux y Oracle Linux 8–10 con las páginas públicas de CIS; CentOS/Stream permanece sin equivalencia automática.
+- [x] Confirmar que `cis-benchmark-check.sh` implementa 143 comprobaciones locales: el resultado debe describirse como subconjunto y no como cumplimiento completo del benchmark.
+- [x] Detectar un falso PASS en las comprobaciones de montaje: `findmnt --kernel /ruta` podía devolver el filesystem padre y hacer creer que la ruta tenía montaje dedicado/opciones propias.
+- [x] Añadir en la rama `cis-mount-audit-and-status` helpers de mountpoint exacto, prueba unitaria con `findmnt` simulado y ejecución desde el workflow CI.
+- [x] Alinear el comentario de versión del baseline con `SCRIPT_VERSION=1.4.26` y enlazar el tablero `PROJECT-STATUS.md` desde README.
+- [ ] Validar la sintaxis de los archivos modificados y ejecutar las pruebas CIS en esta rama.
+- [ ] Confirmar CI completo y compatibilidad CentOS 6/7 + AlmaLinux 8/9/10; no integrar en `main` antes de comprobarlo.
+- [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9.
+- [ ] Corregir otros falsos PASS pendientes en GRUB/BLS/argumentos efectivos, core dumps con overrides, SELinux runtime/persistencia y restantes controles dependientes de la versión.
 
 ### En curso
 
