@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.23 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.24 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.23
+SCRIPT_VERSION=1.4.24
 AUTO_FIX=false
 AUDIT_MODE=false
 AUTO_MODE=false
@@ -1068,8 +1068,10 @@ fapolicyd_module() {
 normalize_history_dotfile() {
   local file="$1" tmp
   if [ -L "$file" ]; then
-    warn "$file es un enlace simbólico; no se reemplaza automáticamente."
-    return 1
+    warn "$file es un enlace simbólico; --fix no lo reemplaza automáticamente."
+    if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+      return 1
+    fi
   fi
 
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
