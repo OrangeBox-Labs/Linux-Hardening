@@ -3,7 +3,7 @@
 Última actualización: 2026-10-26
 Rama de referencia: `main`
 Commit de partida en `main`: `707daa5f6c587acfb97d98d4d709362c9949d160`
-Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status`
+Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status` (fusionada mediante PR #20)
 
 Este archivo es el punto de reanudación del trabajo. Actualizar estados y commit de referencia al terminar cada bloque coherente.
 
@@ -21,7 +21,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 
 ## Estado
 
-### Completado en este ciclo, sujeto a la validación final de CI
+### Completado en este ciclo, CI verde e integrado en `main`
 
 - [x] Restaurar y preservar modos ejecutables en los entrypoints modificados.
 - [x] Corregir la comprobación de controles CIS de calidad de contraseñas para exigir reglas PAM activas y valores efectivos, sin modificar PAM automáticamente.
@@ -34,6 +34,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Añadir al baseline principal los controles `kernel.yama.ptrace_scope`, `vm.mmap_min_addr`, `kernel.unprivileged_bpf_disabled` y `user.max_user_namespaces`, usando la ruta de validación/confirmación de sysctl.
 - [x] Añadir pruebas iniciales para los comportamientos de filesystem y calidad del verificador CIS.
 - [x] CI run `40402752036` pasó todos los jobs (sintaxis, regresiones y compatibility smoke en CentOS 6/7 + AlmaLinux 8/9/10) para el árbol del PR #20 antes de integrarlo.
+- [x] PR #20 integrado mediante squash en `main` como commit `0b90e3bebf8cee1f2917eef66242e45ced3fad27`; el resto del trabajo CIS pendiente queda en este plan y `PROJECT-STATUS.md`.
 
 ### Auditoría CIS / estado del repositorio — 2026-10-26
 
