@@ -28,7 +28,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
-KERNEL_BACKUP_DIR="/var/backups/orangebox-kernel-hardening/$(date +%Y%m%d-%H%M%S)-$"
+KERNEL_BACKUP_DIR="/var/backups/orangebox-kernel-hardening/$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
