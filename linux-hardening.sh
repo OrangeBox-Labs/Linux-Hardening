@@ -30,7 +30,7 @@ AUTO_MODE=false
 ALLOW_RISKY=false
 ALLOW_SHOREWALL=false
 MODULE=all
-RUN_ID=$(date +%Y%m%d-%H%M%S)
+RUN_ID="$(date +%Y%m%d-%H%M%S)-$"
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
 FIXED=0
 OK_COUNT=0
@@ -99,8 +99,60 @@ detect_os(){
     ok "Detectado: $OS_ID $OS_VERSION"
   fi
 }
-prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
-backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
+prepare_backup() {
+  if ! mkdir -p "$BACKUP_DIR"; then
+    echo "[ERROR] No se pudo crear el directorio de backup $BACKUP_DIR." >&2
+    return 1
+  fi
+  if [ -L "$BACKUP_DIR" ] || [ ! -d "$BACKUP_DIR" ]; then
+    echo "[ERROR] $BACKUP_DIR no es un directorio regular seguro; se aborta --fix." >&2
+    return 1
+  fi
+  if ! chmod 700 "$BACKUP_DIR"; then
+    echo "[ERROR] No se pudieron restringir los permisos del backup $BACKUP_DIR." >&2
+    return 1
+  fi
+  local mode=""
+  mode="$(stat -c '%a' "$BACKUP_DIR" 2>/dev/null || true)"
+  if [ "$mode" != 700 ]; then
+    echo "[ERROR] No se pudo verificar el modo 0700 del backup $BACKUP_DIR (modo actual=${mode:-desconocido})." >&2
+    return 1
+  fi
+  return 0
+}
+
+# In --fix, a failed backup is fatal: several callers rely on this helper
+# immediately before replacing a configuration file.
+backup_once() {
+  local src="$1" dst backup
+  [ -e "$src" ] || [ -L "$src" ] || return 0
+  [ "${AUTO_FIX:-false}" = true ] || return 0
+
+  backup="$BACKUP_DIR$src"
+  if [ -e "$backup" ] || [ -L "$backup" ]; then
+    return 0
+  fi
+  dst="$BACKUP_DIR$(dirname "$src")"
+  if ! mkdir -p "$dst" || [ -L "$dst" ] || [ ! -d "$dst" ]; then
+    die "No se pudo preparar el destino del backup para $src; no se aplicarán más cambios."
+  fi
+  if ! cp -a "$src" "$backup"; then
+    die "No se pudo respaldar $src en $backup; se aborta --fix antes de modificarlo."
+  fi
+  if [ ! -e "$backup" ] && [ ! -L "$backup" ]; then
+    die "La copia de seguridad de $src no aparece en $backup; se aborta --fix."
+  fi
+  if [ -f "$src" ] && ! cmp -s "$src" "$backup"; then
+    die "La copia de seguridad de $src no coincide con el original; se aborta --fix."
+  fi
+  if [ -L "$src" ] && [ "$(readlink "$src" 2>/dev/null || true)" != "$(readlink "$backup" 2>/dev/null || true)" ]; then
+    die "La copia de seguridad del enlace $src no coincide; se aborta --fix."
+  fi
+  if [ -d "$src" ] && ! diff -qr "$src" "$backup" >/dev/null 2>&1; then
+    die "La copia de seguridad del directorio $src no coincide; se aborta --fix."
+  fi
+  return 0
+}
 orangebox_sysctl_persistence_target() {
   if [ "${OS_VERSION:-}" = 6 ]; then
     printf '%s\n' /etc/sysctl.conf
@@ -2206,7 +2258,9 @@ main() {
   if $PENDING_ONLY_AUDIT; then
     echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría del baseline genérico ($OS_ID $OS_VERSION)"
   fi
-  if [ "$AUTO_FIX" = true ]; then prepare_backup; fi
+  if [ "$AUTO_FIX" = true ] && ! prepare_backup; then
+    die "Preflight de backup falló; no se ejecutará ningún módulo ni se modificarán archivos."
+  fi
 
   local m
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
