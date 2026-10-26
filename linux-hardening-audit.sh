@@ -6,14 +6,19 @@
 # al expandir arrays vacíos de argumentos de auditoría.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.3.1"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 MODULES_RUN=0
+MODULES_SKIPPED=0
 ERRORS=0
+OS_ID=""
+OS_VERSION=""
+OS_MAJOR=""
+OS_NAME=""
 
 ok()   { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -21,6 +26,20 @@ die()  { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 require_root() {
   [ "${EUID}" -eq 0 ] || die "Ejecuta esta auditoría como root para obtener resultados completos."
+}
+
+detect_os() {
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    OS_ID="${ID:-}"
+    OS_VERSION="${VERSION_ID:-}"
+    OS_NAME="${PRETTY_NAME:-${ID:-Linux} ${VERSION_ID:-}}"
+  elif [ -r /etc/redhat-release ]; then
+    OS_NAME="$(cat /etc/redhat-release)"
+    OS_ID=centos
+    OS_VERSION="$(sed -nE 's/.*release[[:space:]]+([0-9]+(\.[0-9]+)*).*/\1/p' /etc/redhat-release)"
+  fi
+  OS_MAJOR="${OS_VERSION%%.*}"
 }
 
 usage() {
@@ -166,6 +185,15 @@ run_audit_module() {
     return 1
   fi
 
+  if [ "$name" = "ssh-complete" ] &&
+     [[ "$OS_MAJOR" =~ ^[0-9]+$ ]] && [ "$OS_MAJOR" -lt 7 ]; then
+    echo
+    echo "========== AUDITORÍA: $name ($script) =========="
+    echo "[N/A] $script declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10; se omite en ${OS_NAME:-EL $OS_VERSION}."
+    MODULES_SKIPPED=$((MODULES_SKIPPED + 1))
+    return 0
+  fi
+
   echo
   echo "========== AUDITORÍA: $name ($script) =========="
   MODULES_RUN=$((MODULES_RUN + 1))
@@ -197,6 +225,7 @@ print_final_summary() {
   echo -e "${BLUE} RESUMEN DE AUDITORÍA DE MÓDULOS DE HARDENING${NC}"
   echo -e "${BLUE}============================================================${NC}"
   echo "Módulos ejecutados: $MODULES_RUN"
+  echo "Módulos omitidos por compatibilidad: $MODULES_SKIPPED"
   echo "Errores de ejecución del auditor: $ERRORS"
 
   echo
@@ -234,10 +263,8 @@ main() {
   echo -e "${BLUE} MODO ESTRICTO DE AUDITORÍA: no aplicar cambios${NC}"
   echo -e "${BLUE}============================================================${NC}"
 
-  if [ -r /etc/os-release ]; then
-    . /etc/os-release
-    echo "Sistema detectado: ${PRETTY_NAME:-${ID:-Linux} ${VERSION_ID:-}}"
-  fi
+  detect_os
+  [ -n "$OS_NAME" ] && echo "Sistema detectado: $OS_NAME"
   echo "Directorio de trabajo: $SCRIPT_DIR"
   echo "No se crean backups ni reportes persistentes; hallazgos en pantalla."
 

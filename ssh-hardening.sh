@@ -428,11 +428,13 @@ check_extra_security() {
   local ssh_version=$(get_ssh_version)
   echo -e "${BLUE}[*] Version detectada: OpenSSH $ssh_version${NC}"
 
-  # Configurar algoritmos de clave publica segun version
+  # El valor esperado debe coincidir con el conjunto que aplica --fix;
+  # dejarlo vacío generaba el absurdo "(debe ser )" y no permitía auditarlo.
+  local accepted_key_algorithms="ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256"
   if [ "$ssh_version" -ge 9 ] 2>/dev/null; then
-    check_sshd_param "pubkeyacceptedalgorithms" "" "Algoritmos de clave publica" "PubkeyAcceptedAlgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256"
+    check_sshd_param "pubkeyacceptedalgorithms" "$accepted_key_algorithms" "Algoritmos de clave publica" "PubkeyAcceptedAlgorithms $accepted_key_algorithms"
   elif [ "$ssh_version" -ge 7 ] 2>/dev/null; then
-    check_sshd_param "pubkeyacceptedkeytypes" "" "Algoritmos de clave publica" "PubkeyAcceptedKeyTypes ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256"
+    check_sshd_param "pubkeyacceptedkeytypes" "$accepted_key_algorithms" "Algoritmos de clave publica" "PubkeyAcceptedKeyTypes $accepted_key_algorithms"
   else
     echo -e "${YELLOW}[!] No se pudo detectar version, omitiendo configuracion de algoritmos de clave${NC}"
   fi

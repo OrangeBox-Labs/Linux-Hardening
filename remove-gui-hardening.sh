@@ -235,25 +235,56 @@ remove_extra_gui_packages() {
 # CAMBIAR A MODO TEXTO (runlevel 3)
 # ==============================================
 set_text_mode() {
-  echo -e "\n${BLUE}[*] Configurando modo texto (runlevel 3)...${NC}"
+  echo -e "\n${BLUE}[*] Verificando modo de inicio...${NC}\n"
 
-  current_target=$(systemctl get-default)
-
-  if [ "$current_target" = "graphical.target" ]; then
-    echo -e "${YELLOW}[!] Sistema en modo grafico (graphical.target)${NC}"
-
-    if [ "$AUTO_FIX" = true ]; then
-      systemctl set-default multi-user.target
-      echo -e "${GREEN}[✓] Sistema configurado a modo texto (multi-user.target)${NC}"
-      echo -e "${YELLOW}[!] Se requiere reinicio para aplicar${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: systemctl set-default multi-user.target${NC}"
+  if command -v systemctl >/dev/null 2>&1; then
+    current_target="$(systemctl get-default 2>/dev/null)"
+    if [ -z "$current_target" ]; then
+      echo -e "${YELLOW}[!] No se pudo verificar el target predeterminado de systemd${NC}"
       WARNINGS=$((WARNINGS + 1))
+      return 0
     fi
-  else
-    echo -e "${GREEN}[✓] Sistema ya esta en modo texto${NC}"
+    if [ "$current_target" = "graphical.target" ]; then
+      echo -e "${YELLOW}[!] Sistema en modo gráfico (graphical.target)${NC}"
+      if [ "$AUTO_FIX" = true ]; then
+        systemctl set-default multi-user.target
+        echo -e "${GREEN}[✓] Sistema configurado a modo texto (multi-user.target)${NC}"
+        echo -e "${YELLOW}[!] Se requiere reinicio para aplicar${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${YELLOW}    Recomendación: systemctl set-default multi-user.target${NC}"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      echo -e "${GREEN}[✓] Sistema ya está en modo texto ($current_target)${NC}"
+    fi
+    return 0
   fi
+
+  # CentOS/RHEL 6 usan SysV init; no se debe invocar systemctl.
+  local current_runlevel=""
+  if command -v runlevel >/dev/null 2>&1; then
+    current_runlevel="$(runlevel 2>/dev/null | awk '{print $NF}')"
+  fi
+  if [ -z "$current_runlevel" ] && [ -r /etc/inittab ]; then
+    current_runlevel="$(awk -F: '/^[[:space:]]*id:[0-6]:initdefault:/ { print $2; exit }' /etc/inittab)"
+  fi
+  case "$current_runlevel" in
+    3)
+      echo -e "${GREEN}[✓] Sistema en modo texto (SysV runlevel 3)${NC}"
+      ;;
+    5)
+      echo -e "${YELLOW}[!] SysV runlevel 5; no hay systemd para cambiar el modo de inicio automáticamente${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      ;;
+    0|1|2|4|6)
+      echo -e "${BLUE}[INFO] SysV runlevel actual: $current_runlevel; no se modifica automáticamente${NC}"
+      ;;
+    *)
+      echo -e "${YELLOW}[!] No se pudo determinar el runlevel; estado gráfico/no gráfico no verificable${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      ;;
+  esac
 }
 
 # ==============================================

@@ -58,27 +58,91 @@ parse_ss_socket_line() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$protocol" "$state" "$port" "$local_addr" "$process" "$category" "$scope"
 }
 
-audit_listening_ports() {
-  local socket_output line parsed protocol state port local_addr process category scope note proto_upper
-  local count=0 skipped=0
+# Entrada: una línea de "netstat -plntu" en sistemas sin un formato ss compatible.
+# Admite el formato SysV/EL6 de net-tools y normaliza tcp6/udp6.
+parse_netstat_socket_line() {
+  local line="$1" protocol state local_addr pid_program port process category scope
+  local -a fields=()
+  read -r -a fields <<< "$line"
+  [ "${#fields[@]}" -ge 6 ] || return 1
+  case "${fields[0]}" in
+    tcp|tcp6)
+      protocol=tcp
+      [ "${#fields[@]}" -ge 7 ] || return 1
+      state="${fields[5]}"
+      [ "$state" = LISTEN ] || return 1
+      pid_program="${fields[6]}"
+      ;;
+    udp|udp6)
+      protocol=udp
+      state=UNCONN
+      pid_program="${fields[5]}"
+      ;;
+    *) return 1 ;;
+  esac
+  local_addr="${fields[3]}"
+  [[ "$local_addr" == *:* ]] || return 1
+  port="${local_addr##*:}"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  process=desconocido
+  if [[ "$pid_program" == */* ]]; then
+    process="${pid_program#*/}"
+    [ -n "$process" ] || process=desconocido
+  fi
+  category="$(classify_listening_process "$process" "$port")"
+  scope="$(classify_bind_address "$local_addr")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$protocol" "$state" "$port" "$local_addr" "$process" "$category" "$scope"
+}
 
-  command -v ss >/dev/null 2>&1 || { echo "[ERROR] No se encontró ss." >&2; return 1; }
-  if ! socket_output="$(ss -H -lntup 2>&1)"; then
-    echo "[ERROR] ss no pudo enumerar sockets:" >&2
-    printf '%s\n' "$socket_output" >&2
-    return 1
+audit_listening_ports() {
+  local socket_output="" line parsed protocol state port local_addr process category scope note proto_upper first_token
+  local count=0 skipped=0 ss_ok=false netstat_ok=false
+  local -a rows=()
+
+  if command -v ss >/dev/null 2>&1; then
+    if socket_output="$(ss -H -lntup 2>/dev/null)"; then
+      ss_ok=true
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if parsed="$(parse_ss_socket_line "$line")"; then
+          rows+=("$parsed")
+          count=$((count + 1))
+        else
+          first_token="${line%%[[:space:]]*}"
+          case "$first_token" in tcp|tcp6|udp|udp6|LISTEN|UNCONN) skipped=$((skipped + 1)) ;; esac
+        fi
+      done <<< "$socket_output"
+    fi
+  fi
+
+  # ss puede existir y aun así usar un formato no soportado por este parser.
+  # Si hay líneas de socket no interpretadas, usa netstat cuando esté disponible.
+  if [ "$ss_ok" != true ] || [ "$skipped" -gt 0 ]; then
+    if command -v netstat >/dev/null 2>&1; then
+      echo "[INFO] ss no produjo un inventario interpretable completo; intentando netstat."
+      if socket_output="$(netstat -plntu 2>/dev/null)"; then
+        netstat_ok=true
+        rows=()
+        count=0
+        skipped=0
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          if parsed="$(parse_netstat_socket_line "$line")"; then
+            rows+=("$parsed")
+            count=$((count + 1))
+          else
+            first_token="${line%%[[:space:]]*}"
+            case "$first_token" in tcp|tcp6|udp|udp6) skipped=$((skipped + 1)) ;; esac
+          fi
+        done <<< "$socket_output"
+      fi
+    fi
   fi
 
   printf '%-5s %-8s %-7s %-30s %-24s %-17s %-18s %s\n' \
     PROTO ESTADO PUERTO "DIRECCION LOCAL" PROCESO CLASE BIND OBSERVACION
   printf '%s\n' "---------------------------------------------------------------------------------------------------------------"
-
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    if ! parsed="$(parse_ss_socket_line "$line")"; then
-      skipped=$((skipped + 1))
-      continue
-    fi
+  for parsed in "${rows[@]}"; do
     IFS=$'\t' read -r protocol state port local_addr process category scope <<< "$parsed"
     proto_upper="$(printf '%s' "$protocol" | tr '[:lower:]' '[:upper:]')"
     case "$scope" in
@@ -92,15 +156,21 @@ audit_listening_ports() {
     esac
     printf '%-5s %-8s %-7s %-30.30s %-24.24s %-17s %-18s %s\n' \
       "$proto_upper" "$state" "$port" "$local_addr" "$process" "$category" "$scope" "$note"
-    count=$((count + 1))
-  done <<< "$socket_output"
+  done
 
   echo
   echo "Sockets procesados: $count"
-  [ "$skipped" -eq 0 ] || echo "Líneas omitidas por formato no reconocido: $skipped"
+  [ "$netstat_ok" = true ] && echo "Fuente: netstat (compatibilidad legacy)"
+  if [ "$skipped" -gt 0 ]; then
+    echo "[WARN] Líneas de sockets no interpretadas: $skipped; el inventario es incompleto."
+  fi
   echo "BIND wildcard no demuestra accesibilidad desde Internet: deben revisarse CSF/Imunify360,"
   echo "todos los backends de firewall, las rutas y las reglas externas."
   echo "Los procesos NO_CLASIFICADO quedan para revisión; no se recomiendan eliminaciones de paquetes."
+
+  if [ "$skipped" -gt 0 ] || { [ "$count" -eq 0 ] && [ "$ss_ok" != true ] && [ "$netstat_ok" != true ]; }; then
+    return 2
+  fi
 }
 
 main() {

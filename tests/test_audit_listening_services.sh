@@ -36,6 +36,32 @@ assert_socket 'tcp LISTEN 0 128 127.0.0.1:783 0.0.0.0:* users:(("spamd child",pi
 assert_socket 'tcp LISTEN 0 128 127.0.0.1:579 0.0.0.0:* users:(("cPhulkd - dbpro",pid=114,fd=17))' tcp 579 127.0.0.1:579 "cPhulkd - dbpro" SEGURIDAD_CPANEL LOOPBACK
 assert_socket 'tcp LISTEN 0 32 0.0.0.0:111 0.0.0.0:* users:(("systemd",pid=115,fd=18))' tcp 111 0.0.0.0:111 systemd ACTIVACION_SOCKET TODAS_INTERFACES
 
+assert_netstat_socket() {
+  local fixture="$1" ep="$2" eport="$3" eaddr="$4" eproc="$5" eclass="$6" escope="$7"
+  local parsed protocol state port address process category scope
+  parsed="$(parse_netstat_socket_line "$fixture")" || fail "no se pudo parsear netstat: $fixture"
+  IFS=
+unknown="$(parse_ss_socket_line 'tcp LISTEN 0 32 0.0.0.0:45678 0.0.0.0:* users:(("custom-agent",pid=107,fd=10))')"
+IFS=$'\t' read -r protocol state port address process category scope <<< "$unknown"
+[ "$process" = custom-agent ] || fail "no se conservó proceso desconocido"
+[ "$category" = NO_CLASIFICADO ] || fail "proceso desconocido clasificado incorrectamente"
+if grep -qiE 'yum remove|dnf remove|ELIMINAR' "$ROOT_DIR/audit-listening-services.sh"; then
+  fail "el auditor contiene sugerencias de eliminación de paquetes"
+fi
+pass "TCP/UDP, Pure-FTPd, PowerDNS, MongoDB, monitoreo, bind y procesos desconocidos"
+\t' read -r protocol state port address process category scope <<< "$parsed"
+  [ "$protocol" = "$ep" ] || fail "netstat protocolo esperado=$ep actual=$protocol"
+  [ "$port" = "$eport" ] || fail "netstat puerto esperado=$eport actual=$port"
+  [ "$address" = "$eaddr" ] || fail "netstat dirección esperada=$eaddr actual=$address"
+  [ "$process" = "$eproc" ] || fail "netstat proceso esperado=$eproc actual=$process"
+  [ "$category" = "$eclass" ] || fail "netstat clase esperada=$eclass actual=$category"
+  [ "$scope" = "$escope" ] || fail "netstat bind esperado=$escope actual=$scope"
+}
+
+assert_netstat_socket 'tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN 123/sshd' tcp 22 0.0.0.0:22 sshd ADMINISTRACION TODAS_INTERFACES
+assert_netstat_socket 'udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd' udp 161 0.0.0.0:161 snmpd NO_CLASIFICADO TODAS_INTERFACES
+assert_netstat_socket 'tcp6 0 0 :::443 :::* LISTEN 456/httpd' tcp 443 ':::443' httpd WEB TODAS_INTERFACES
+
 unknown="$(parse_ss_socket_line 'tcp LISTEN 0 32 0.0.0.0:45678 0.0.0.0:* users:(("custom-agent",pid=107,fd=10))')"
 IFS=$'\t' read -r protocol state port address process category scope <<< "$unknown"
 [ "$process" = custom-agent ] || fail "no se conservó proceso desconocido"
