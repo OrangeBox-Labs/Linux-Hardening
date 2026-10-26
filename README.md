@@ -87,6 +87,9 @@ Los controles sysctl distinguen entre valor activo, persistente, configuración 
 
 Los cambios pendientes pueden requerir confirmación individual.
 
+Los parámetros de forwarding IPv4/IPv6 ahora también se auditan en el baseline y el módulo de kernel independiente. El objetivo CIS es deshabilitarlos, pero **no se fuerzan automáticamente**: cambiar `net.ipv4.ip_forward` o `net.ipv6.conf.all.forwarding` puede interrumpir routing, NAT, VPN, gateways y redes de contenedores. En `--fix`, cada parámetro explica el impacto y solicita confirmación individual `[s/N]`; sin terminal interactiva se omite. Si IPv4 forwarding se conserva, el baseline usa `rp_filter=2` (modo flexible) para reducir descartes de tráfico asimétrico.
+
+
 Política OrangeBox para los controles principales:
 
 ```text
