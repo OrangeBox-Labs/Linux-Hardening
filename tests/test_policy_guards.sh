@@ -23,11 +23,13 @@ done
 for key in 'net.ipv4.ip_forward' 'net.ipv6.conf.all.forwarding'; do
   grep -Fq "set_sysctl $key 0" "$CORE" || fail "el baseline no audita ni protege $key"
   grep -Fq "check_sysctl_param \"$key\" \"0\"" "$KERNEL" || fail "kernel-hardening no contempla $key"
+  grep -Fq "Deshabilita el reenvío" "$SYSCTL_SAFE" || fail "el cambio debe describir su impacto operativo"
 done
 SYSCTL_SAFE="$ROOT_DIR/lib/sysctl-safe.sh"
 grep -Fq 'Deshabilita el reenvío IPv4 del host' "$SYSCTL_SAFE" || fail "falta explicar el impacto de apagar IPv4 forwarding"
 grep -Fq 'Deshabilita el reenvío IPv6 del host' "$SYSCTL_SAFE" || fail "falta explicar el impacto de apagar IPv6 forwarding"
 grep -Fq 'No hay terminal interactiva; se omite $key por seguridad.' "$SYSCTL_SAFE" || fail "un cambio sysctl sensible debe omitirse sin TTY"
+grep -Fq 'IPv6 forwarding no está expuesto por este kernel; no aplica.' "$KERNEL" || fail "kernel legacy debe informar N/A para IPv6 forwarding"
 grep -Fq 'set_kptr_restrict_policy' "$CORE" || fail "baseline no utiliza la política condicional de kptr_restrict"
 grep -Fq 'check_kptr_restrict_policy' "$KERNEL" || fail "kernel-hardening no utiliza la política condicional de kptr_restrict"
 if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr_restrict" "2"' "$CORE" "$KERNEL"; then
