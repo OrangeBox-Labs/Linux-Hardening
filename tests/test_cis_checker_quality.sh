@@ -37,6 +37,11 @@ grep -Fq 'No se concede PASS sin ambas evidencias' "$CIS" || fail "audit backlog
 
 grep -Fq 'cis_mount_is_exact()' "$CIS" || fail "los checks de filesystem deben exigir el mountpoint exacto"
 grep -Fq 'cis_mount_option_enabled()' "$CIS" || fail "las opciones deben obtenerse del mountpoint exacto"
+grep -Fq 'cis_file_has_kernel_argument /proc/cmdline "selinux=0"' "$CIS" || fail "SELinux boot check debe validar el kernel activo"
+grep -Fq '/boot/loader/entries/*.conf' "$CIS" || fail "SELinux boot check debe inspeccionar entradas BLS"
+grep -Fq 'cis_systemd_config_value systemd/coredump.conf' "$CIS" || fail "core dump checks deben evaluar la configuración efectiva"
+grep -Fq 'systemd-analyze cat-config' "$CIS" || fail "core dump checks deben considerar drop-ins systemd"
+
 if grep -Eq 'findmnt --kernel /(tmp|var|var/tmp|var/log|var/log/audit|home|dev/shm)' "$CIS"; then
   fail "quedan checks de montaje que pueden heredar el estado del filesystem padre"
 fi
