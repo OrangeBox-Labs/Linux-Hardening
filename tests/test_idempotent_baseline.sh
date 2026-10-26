@@ -29,19 +29,20 @@ grep -Fq 'if ! confirm_risky_change "$name"; then' "$CORE" || fail "se perdió c
 grep -Fq 'falta persistencia' "$SYSCTL" || fail "sysctl no distingue runtime correcto de persistencia ausente"
 grep -Fq '¿Confirmas persistir %s=%s en %s? [s/N]' "$SYSCTL" || fail "no hay confirmación para cambios solo de persistencia"
 
-# MOTD is deliberately different from the large pre-authentication legal banner.
-grep -Fq 'ORANGEBOX IT SERVICES' "$CORE" || fail "MOTD perdió la marca OrangeBox"
-grep -Fq 'LINUX ENTERPRISE  /  INFRAESTRUCTURA  /  SEGURIDAD' "$CORE" || fail "falta el subtítulo de marca en MOTD"
-grep -Fq 'Las sesiones pueden ser registradas y auditadas.' "$CORE" || fail "falta el aviso breve del MOTD"
-awk '
-  index($0, "cat >") && index($0, "ORANGEBOX_MOTD") { in_motd=1; next }
-  in_motd && $0 == "ORANGEBOX_MOTD" { exit }
-  in_motd {
-    if (length($0) != 78) { print "[FAIL] línea MOTD de ancho " length($0) ": " $0 > "/dev/stderr"; bad=1 }
-    count++
-  }
-  END { if (count != 12 || bad) exit 1 }
-' "$CORE" || fail "MOTD no tiene el formato alineado de 78 columnas"
+# Session-aware MOTD: /etc/motd stays empty to avoid duplicate output.
+MOTD_LIB="$ROOT_DIR/lib/orangebox-motd.sh"
+[ -r "$MOTD_LIB" ] || fail "falta la librería de MOTD dinámico"
+grep -Fq 'orangebox_motd_ensure_figlet "$AUTO_FIX"' "$CORE" || fail "el módulo no verifica/instala FIGlet según el modo"
+grep -Fq 'orangebox_motd_write_profile "$session_motd_tmp"' "$CORE" || fail "el módulo no genera el perfil dinámico"
+grep -Fq ': > "$motd_tmp"' "$CORE" || fail "/etc/motd estático debe quedar vacío para evitar duplicados"
+grep -Fq 'figlet -f small OrangeBox' "$MOTD_LIB" || fail "falta FIGlet con la fuente small"
+grep -Fq 'yum -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con yum"
+grep -Fq 'dnf -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con dnf"
+grep -Fq 'SSH_CONNECTION' "$MOTD_LIB" || fail "el MOTD no detecta la IP remota SSH"
+grep -Fq '/proc/uptime' "$MOTD_LIB" || fail "uptime no es compatible con sistemas antiguos"
+grep -Fq '/proc/loadavg' "$MOTD_LIB" || fail "el MOTD no incluye load average"
+grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$MOTD_LIB" || fail "falta el título del banner"
+grep -Fq 'AVISO DE SEGURIDAD' "$MOTD_LIB" || fail "falta el aviso de seguridad"
 
 # Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
 grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
@@ -49,7 +50,8 @@ grep -Fq 'unset TMOUT 2>/dev/null || true' "$CORE" || fail "la shell root no eli
 grep -Fq 'readonly TMOUT' "$CORE" || fail "TMOUT no está protegido contra cambios por el usuario"
 grep -Fq 'solo aplica a shells interactivos' "$CORE" || fail "no se limita el resto del perfil a shells interactivos"
 profile_tmp="$(mktemp)"
-trap 'rm -f "$profile_tmp"' EXIT
+motd_profile_tmp="$(mktemp)"
+trap 'rm -f "$profile_tmp" "$motd_profile_tmp"' EXIT
 awk '
   index($0, "cat >") && index($0, "ORANGEBOX_BASH") { in_profile=1; next }
   in_profile && $0 == "ORANGEBOX_BASH" { exit }
@@ -57,5 +59,15 @@ awk '
 ' "$CORE" > "$profile_tmp"
 [ -s "$profile_tmp" ] || fail "no se pudo extraer el perfil Bash administrado"
 bash -n "$profile_tmp" || fail "el perfil Bash generado tiene errores de sintaxis"
+
+# Generate and validate the dynamic MOTD without touching system files or installing packages.
+# shellcheck source=lib/orangebox-motd.sh
+source "$MOTD_LIB"
+orangebox_motd_write_profile "$motd_profile_tmp" || fail "no se pudo generar el perfil MOTD"
+[ -s "$motd_profile_tmp" ] || fail "el perfil MOTD dinámico está vacío"
+sh -n "$motd_profile_tmp" || fail "el perfil MOTD no es compatible con sintaxis sh"
+grep -Fq 'SSH_CONNECTION' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra la IP remota"
+grep -Fq '/proc/uptime' "$motd_profile_tmp" || fail "el perfil MOTD generado no calcula uptime"
+grep -Fq '/proc/loadavg' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra load"
 
 pass "confirmaciones idempotentes, MOTD de marca y TMOUT=120 exclusivo para sesiones interactivas no-root"
