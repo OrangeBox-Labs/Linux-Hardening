@@ -32,7 +32,7 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)-$"
 
 # Archivos de configuración
 BASHRC_SYSTEM="/etc/bashrc"
@@ -66,13 +66,35 @@ show_usage() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
-      [ -f "$file" ] && cp "$file" "$BACKUP_DIR/"
-    done
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el directorio de backup $BACKUP_DIR; no se modifica Bash.${NC}" >&2
+    return 1
   fi
+  local mode file backup parent
+  mode="$(stat -c '%a' "$BACKUP_DIR" 2>/dev/null || true)"
+  if [ "$mode" != 700 ]; then
+    echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup Bash $BACKUP_DIR.${NC}" >&2
+    return 1
+  fi
+  for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    backup="$BACKUP_DIR$file"
+    parent="$(dirname "$backup")"
+    if ! mkdir -p "$parent" || [ -L "$parent" ] || [ ! -d "$parent" ]; then
+      echo -e "${RED}[ERROR] No se pudo preparar el destino de backup de $file; no se modifica Bash.${NC}" >&2
+      return 1
+    fi
+    if ! cp -a "$file" "$backup"; then
+      echo -e "${RED}[ERROR] No se pudo respaldar $file en $backup; no se modifica Bash.${NC}" >&2
+      return 1
+    fi
+    if [ -f "$file" ] && ! cmp -s "$file" "$backup"; then
+      echo -e "${RED}[ERROR] El backup de $file no coincide con el original; no se modifica Bash.${NC}" >&2
+      return 1
+    fi
+  done
+  echo -e "${GREEN}[✓] Backup de Bash verificado en: $BACKUP_DIR${NC}"
 }
 
 # ==============================================
@@ -766,7 +788,10 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
-    make_backup
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup de Bash falló; se aborta antes de modificar perfiles.${NC}" >&2
+      exit 1
+    fi
   fi
 
   # Ejecutar configuraciones
