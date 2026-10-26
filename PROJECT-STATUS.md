@@ -16,7 +16,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 | Baseline `linux-hardening.sh` | Implementado; validación continua | Auditoría predeterminada, `--fix` interactivo, controles de kernel/red, SSH, sudo, PAM/passwords, auditd, cron, GRUB, filesystem, logs, SELinux y banners. Revisar que el comportamiento efectivo y el reporte sean correctos en cada plataforma soportada. |
 | Helper `lib/sysctl-safe.sh` | Implementado | Inventaría valores activos/persistentes, detecta conflictos, respalda y solicita consentimiento individual para cambios. Algunas opciones pueden afectar tracing, namespaces, routing, IPv6 y observabilidad. |
 | SSH y hardening avanzado | Implementado; pruebas/compatibilidad pendientes | Preflight de configuración efectiva, backup, validación sintáctica, comprobación de valores y rollback. Cambios de autenticación, forwarding y algoritmos deben seguir pidiendo autorización individual. |
-| Kernel y red | Implementado parcialmente por controles | ASLR, ptrace, BPF sin privilegios, namespaces, core dumps, SYN cookies, backlog, redirects, source routing y reverse-path filtering. Verificar especialmente hosts multihomed, VPN, routers, contenedores y herramientas de tracing. |
+| Kernel y red | Implementado; validación CIS pendiente | ASLR, ptrace, BPF sin privilegios, namespaces, core dumps, SYN cookies, backlog, redirects, source routing y reverse-path filtering. El baseline y el módulo independiente ahora auditan forwarding IPv4/IPv6 y solo proponen deshabilitarlo con confirmación individual; puede romper routing/NAT/VPN/gateways/containers. |
 | Filesystem | Implementado; validación CIS pendiente | Opciones de montaje, `hidepid`, módulos no usados y autofs; auditoría por defecto y confirmación para restricciones. No asumir que `noexec`, `nodev` o `nosuid` sirven igual para todas las cargas de trabajo. |
 | Auditd | Implementado; revisión operacional pendiente | Reglas y configuración, rotación/retención, espacio, acciones de fallo e inmutabilidad. `single`/ `halt` pueden interrumpir el servidor; toda aplicación debe explicar el riesgo y exigir confirmación. |
 | Password/PAM y sudo | Implementado parcialmente | Comprobaciones de calidad, hashing, lockout, historial, permisos y sudo. PAM/authselect no se debe reescribir a ciegas; preservamos políticas de caducidad para evitar bloquear cuentas/servicios existentes. |
@@ -53,13 +53,14 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 - [x] Corregido otro falso PASS de SELinux en bootloader: se valida el kernel activo y fuentes persistentes BLS/GRUB/EFI; evidencia incompleta queda en WARN.
 - [x] Core dumps ahora se evalúa con `systemd-analyze cat-config` y reconoce overrides; cuando la precedencia de drop-ins no puede resolverse, el resultado queda en WARN.
 - [x] Añadida `tests/test_cis_effective_config.sh` para probar overrides efectivos y detección de argumentos de arranque, y conectada al workflow.
+- [x] Añadido hardening opt-in de forwarding IPv4/IPv6 al baseline y al módulo `kernel-hardening.sh`: solo cambia con confirmación individual del helper sysctl y explicación de impacto; se omite sin TTY.
 - [ ] Ejecutar/confirmar todos los tests y compatibilidad; el resultado de CI para la rama de trabajo aún no está verificado.
 - [ ] Integrar los cambios de esta rama en `main` tras validar CI y revisar diff.
 
 ## Siguiente trabajo priorizado
 
 1. **P0 — Confirmar CI de esta rama y revisar el diff.** No integrar si falla sintaxis o cualquier prueba de regresión.
-2. **P1 — Construir una matriz de trazabilidad CIS por distribución/versión.** Por cada recomendación: ID y versión exacta, nivel/perfil cuando aplique, evidencia verificada, módulo responsable, estado `implementado/parcial/pendiente/N/A`, y razón de cualquier excepción.
+2. **P1 — Construir una matriz de trazabilidad CIS por distribución/versión.** Por cada recomendación: ID y versión exacta, nivel/perfil cuando aplique, evidencia verificada, módulo responsable, estado `implementado/parcial/pendiente/N/A`, y razón de cualquier excepción. En CIS RHEL 9 v3.0.0, la recomendación 3.3.1 cubre forwarding IPv4/IPv6; se agregó con confirmación por su impacto operativo. La numeración equivalente en otros perfiles aún debe verificarse.
 3. **P1 — Corregir evidencias CIS que puedan dar falso PASS.** Montajes exactos, SELinux runtime/persistencia y core dumps con overrides están corregidos en la rama; queda validar CI y continuar con evidencias de GRUB/permisos, AIDE activo y opciones PAM/SSH efectivas.
 4. **P1 — Completar controles faltantes de bajo impacto.** Añadir primero verificaciones de solo lectura y pruebas; no cambiar la configuración durante una auditoría.
 5. **P2 — Aplicar cambios CIS de bajo riesgo de forma idempotente.** Mantener backup, comprobación efectiva y no tocar cuando ya cumple.
