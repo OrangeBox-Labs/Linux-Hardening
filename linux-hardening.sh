@@ -899,8 +899,6 @@ kernel_module(){
   set_sysctl fs.protected_symlinks 1
   set_sysctl net.ipv4.conf.all.accept_redirects 0
   set_sysctl net.ipv4.conf.default.accept_redirects 0
-  set_sysctl net.ipv6.conf.all.accept_redirects 0
-  set_sysctl net.ipv6.conf.default.accept_redirects 0
   set_sysctl net.ipv4.conf.all.send_redirects 0
   set_sysctl net.ipv4.conf.default.send_redirects 0
   set_sysctl net.ipv4.conf.all.accept_source_route 0
@@ -915,6 +913,10 @@ kernel_module(){
   set_sysctl net.ipv4.conf.default.rp_filter "$rp_filter"
 
   if [ -d /proc/sys/net/ipv6 ]; then
+    # CIS RHEL 9 v3.0.0 3.3.5 also covers IPv6 ICMP redirects.
+    # These network changes require the normal per-parameter consent.
+    set_sysctl net.ipv6.conf.all.accept_redirects 0
+    set_sysctl net.ipv6.conf.default.accept_redirects 0
     # IPv6 forwarding is also a routing role setting; never switch it without consent.
     set_sysctl net.ipv6.conf.all.forwarding 0
     set_sysctl net.ipv6.conf.all.accept_source_route 0
@@ -934,6 +936,8 @@ kernel_module(){
   elif [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
     sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_redirects: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_redirects: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_ra: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_ra: este kernel no expone /proc/sys/net/ipv6."
   fi
