@@ -25,6 +25,7 @@ jobs:
       - name: Verify executable bits on entrypoint scripts
         run: |
           test -x ./linux-hardening.sh
+          test -x ./audit-firewall-listeners.sh
           test -x ./kernel-lpe-2026-mitigation.sh
           test -x ./configure-login-banners.sh
       - name: Test legacy OS release detection
@@ -39,6 +40,8 @@ jobs:
         run: bash tests/test_firewall_detect.sh
       - name: Test listener firewall coverage audit
         run: bash tests/test_listener_firewall_audit.sh
+      - name: Test actionable baseline scope and standalone firewall audit
+        run: bash tests/test_main_audit_scope.sh
       - name: Test SYN flood baseline policy
         run: bash tests/test_synflood_defaults.sh
       - name: Test SSH effective-setting preflight
@@ -101,6 +104,7 @@ jobs:
               /bin/bash tests/test_audit_listening_services.sh
               /bin/bash tests/test_firewall_detect.sh
               /bin/bash tests/test_listener_firewall_audit.sh
+              /bin/bash tests/test_main_audit_scope.sh
               /bin/bash tests/test_synflood_defaults.sh
               /bin/bash tests/test_ssh_preflight.sh
               /bin/bash tests/test_idempotent_baseline.sh

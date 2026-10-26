@@ -26,11 +26,11 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.15, compatibilidad legacy CentOS 6 para SYSCTL, listeners, auditd/NTP/GRUB, crypto-policy y PAM, con prueba de regresión de la rama GRUB legacy. |
+| `linux-hardening.sh` | Baseline 1.4.16: la auditoría predeterminada presenta solo pendientes con una ruta de corrección mediante `--fix`. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
-| `lib/listener-firewall-audit.sh` | Correlación de listeners no-loopback con políticas y reglas de filtrado verificables. Solo lectura. |
+| `audit-firewall-listeners.sh` | Auditoría independiente de gestores, backends, sockets y reglas INPUT. Solo lectura; fuera del flujo del baseline. |\n| `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
 | `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
 | `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict` y `kernel.kptr_restrict`. |
@@ -99,9 +99,15 @@ Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
 ## 🌐 Auditoría de firewall
 
-El inventario de sockets identifica protocolo, dirección, puerto, proceso y servicio cuando la información está disponible.
+Ejecuta esta función por separado:
 
-El informe principal distingue actividad confirmada de mera instalación y presenta un gestor activo solo cuando existe evidencia observable. Detecta CSF, Shorewall, firewalld, el servicio nftables, iptables-services, UFW, backends iptables-nft/legacy y cadenas de integración de Imunify360. Si detecta varios gestores a la vez o ve reglas sin poder atribuirlas, lo advierte en vez de elegir uno a ciegas. Lista todos los listeners TCP/UDP, incluidos los locales, identifica el proceso/servicio cuando la información está disponible y contrasta cada listener remoto por protocolo, puerto y familia con las reglas INPUT legibles.
+```bash
+./audit-firewall-listeners.sh
+```
+
+Esta auditoría ya no forma parte de `linux-hardening.sh` ni se mezcla con sus pendientes de hardening. El inventario identifica protocolo, dirección, puerto, proceso y servicio cuando la información está disponible.
+
+El informe distingue actividad confirmada de mera instalación y presenta un gestor activo solo cuando existe evidencia observable. Detecta CSF, Shorewall, firewalld, el servicio nftables, iptables-services, UFW, backends iptables-nft/legacy y cadenas de integración de Imunify360. Si detecta varios gestores a la vez o ve reglas sin poder atribuirlas, lo advierte en vez de elegir uno a ciegas. Lista todos los listeners TCP/UDP, incluidos los locales, identifica el proceso/servicio cuando la información está disponible y contrasta cada listener remoto por protocolo, puerto y familia con las reglas INPUT legibles.
 
 Los resultados se separan en cuatro estados:
 
@@ -193,7 +199,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.14, inventario de firewall de solo lectura y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
+| `linux-hardening.sh` | Baseline 1.4.16; reporte predeterminado de pendientes corregibles mediante `--fix`. |\n| `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
 | `post-install.sh` | Preparación inicial |
@@ -267,7 +273,7 @@ No son exactamente lo mismo.
 ./linux-hardening.sh
 ```
 
-Modo de revisión previa sin aplicar cambios delicados.
+Muestra solo hallazgos pendientes que el baseline puede corregir mediante `--fix`. Oculta controles correctos y comprobaciones sin una ruta de corrección segura. Firewall y listeners se revisan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
 
 ### Aplicar de forma interactiva
 
