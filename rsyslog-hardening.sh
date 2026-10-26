@@ -222,50 +222,55 @@ configure_journald_param() {
 # FUNCION PARA CONFIGURAR REMOTE LOGGING
 # ==============================================
 configure_remote_logging() {
-  local remote_host="$1"
-  local remote_port="${2:-514}"
-  local remote_proto="${3:-udp}"
+  local remote_host="$1" remote_port="$2" remote_proto="$3" remote_config="" proto_display="" effect="" prior_auto="$AUTO_FIX"
+  [ -n "$remote_port" ] || remote_port=514
+  [ -n "$remote_proto" ] || remote_proto=udp
+  case "$remote_port" in *[!0-9]*|"") echo -e "$RED[!] Puerto remoto inválido: $remote_port$NC"; return 1 ;; esac
+  if [ "$remote_port" -lt 1 ] || [ "$remote_port" -gt 65535 ]; then echo -e "$RED[!] Puerto remoto fuera de rango: $remote_port$NC"; return 1; fi
+  case "$remote_proto" in
+    TCP|tcp|Tcp) remote_proto=tcp ;;
+    UDP|udp|Udp) remote_proto=udp ;;
+    *) echo -e "$RED[!] Protocolo inválido: use udp o tcp$NC"; return 1 ;;
+  esac
 
-  echo -e "\n${BLUE}[*] Configurando envio de logs a servidor remoto...${NC}"
+  if [ ! -f "$RSYSLOG_CONF" ] || [ -L "$RSYSLOG_CONF" ]; then
+    echo -e "$RED[!] $RSYSLOG_CONF no es un archivo regular; no se modifica.$NC"
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*[^#[:space:]].*@[^[:space:]]+' "$RSYSLOG_CONF" 2>/dev/null; then
+    echo -e "$YELLOW[!] Ya existe forwarding remoto. No se agrega una regla duplicada; revise primero el destino actual.$NC"
+    grep -E '^[[:space:]]*[^#[:space:]].*@[^[:space:]]+' "$RSYSLOG_CONF" | sed 's/^/  - /'
+    return 1
+  fi
 
-  if [[ "$remote_proto" =~ ^[Tt][Cc][Pp]$ ]]; then
+  if [ "$remote_proto" = "tcp" ]; then
     remote_config="*.* @@$remote_host:$remote_port"
-    proto_display="TCP"
+    proto_display=TCP
   else
     remote_config="*.* @$remote_host:$remote_port"
-    proto_display="UDP"
+    proto_display=UDP
   fi
 
-  # Verificar si ya existe configuracion remota
-  if grep -q "^[^#].*@.*" "$RSYSLOG_CONF" 2>/dev/null; then
-    echo -e "${YELLOW}[!] Ya existe configuracion remota en /etc/rsyslog.conf${NC}"
-    echo -e "${YELLOW}    Se agregara igualmente (puede haber duplicados)${NC}"
+  effect="Envía todos los logs que maneja rsyslog (*.*) a $remote_host:$remote_port por $proto_display. Puede exponer datos sensibles, consumir ancho de banda y hacer depender la retención del host remoto; valide autorización, transporte y capacidad del destino."
+  if ! confirm_rsyslog_change "configurar forwarding a $remote_host:$remote_port ($proto_display)" "$effect"; then
+    return 1
   fi
 
-  # Backup antes de modificar
-  if [ ! -f "${BACKUP_DIR}/rsyslog.conf.bak" ]; then
-    cp "$RSYSLOG_CONF" "${BACKUP_DIR}/rsyslog.conf.bak"
-    echo -e "${GREEN}[✓] Backup creado: ${BACKUP_DIR}/rsyslog.conf.bak${NC}"
+  mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" || { echo -e "$RED[!] No se pudo crear el backup$NC"; return 1; }
+  if [ ! -f "$BACKUP_DIR/rsyslog.conf.bak" ]; then
+    cp -p "$RSYSLOG_CONF" "$BACKUP_DIR/rsyslog.conf.bak" || { echo -e "$RED[!] No se pudo respaldar $RSYSLOG_CONF$NC"; return 1; }
   fi
+  {
+    printf '\n# OrangeBox remote log forwarding\n'
+    printf '# Destination: %s:%s (%s)\n' "$remote_host" "$remote_port" "$proto_display"
+    printf '%s\n' "$remote_config"
+  } >> "$RSYSLOG_CONF" || { echo -e "$RED[!] No se pudo escribir la configuración$NC"; return 1; }
 
-  # Agregar configuracion remota
-  echo "" >>"$RSYSLOG_CONF"
-  echo "# ==============================================" >>"$RSYSLOG_CONF"
-  echo "# Envio de logs a servidor remoto (CIS 4.2.1.4)" >>"$RSYSLOG_CONF"
-  echo "# Configurado: $(date)" >>"$RSYSLOG_CONF"
-  echo "# Destino: $remote_host:$remote_port ($proto_display)" >>"$RSYSLOG_CONF"
-  echo "$remote_config" >>"$RSYSLOG_CONF"
-  echo "# ==============================================" >>"$RSYSLOG_CONF"
-
-  echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port ($proto_display)${NC}"
-
-  # Reiniciar rsyslog
-  ob_service_restart rsyslog 2>/dev/null
-  echo -e "${GREEN}[✓] Rsyslog reiniciado${NC}"
-
-  echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
-  echo -e "  tail -f /var/log/messages | grep -i syslog"
-  echo -e "  tcpdump -n port $remote_port"
+  RSYSLOG_CONFIG_CHANGED=true
+  echo -e "$GREEN[✓] Regla de forwarding agregada; pendiente validar rsyslog y confirmar el reinicio.$NC"
+  AUTO_FIX=true
+  restart_services
+  AUTO_FIX="$prior_auto"
 }
 
 # ==============================================
