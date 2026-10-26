@@ -89,16 +89,13 @@ if command -v tput >/dev/null 2>&1 && [ -n "$TERM" ] && [ "$TERM" != dumb ]; the
 fi
 
 # SSH_CONNECTION = client IP, client port, server IP, server port.
-OB_REMOTE_IP=
+# Only show the server's local address here. The remote IP belongs in server-side
+# SSH authentication logs; the standard OpenSSH Banner file cannot expand per-session values.
 OB_SERVER_IP=
 if [ -n "$SSH_CONNECTION" ]; then
-  OB_REMOTE_IP=$(printf '%s\n' "$SSH_CONNECTION" | awk 'NF {print $1; exit}')
   OB_SERVER_IP=$(printf '%s\n' "$SSH_CONNECTION" | awk 'NF {print $3; exit}')
-elif [ -n "$SSH_CLIENT" ]; then
-  OB_REMOTE_IP=$(printf '%s\n' "$SSH_CLIENT" | awk 'NF {print $1; exit}')
 fi
 
-# For local console sessions, detect an IPv4 address on the server.
 if [ -z "$OB_SERVER_IP" ] && command -v ip >/dev/null 2>&1; then
   OB_SERVER_IP=$(ip -o -4 addr show scope global 2>/dev/null |
     awk '$3 == "inet" && $4 !~ /^127\./ {split($4,a,"/"); print a[1]; exit}')
@@ -109,15 +106,12 @@ if [ -z "$OB_SERVER_IP" ] && command -v ifconfig >/dev/null 2>&1; then
     $1 == "inet" {ip=$2; if (ip !~ /^127\./) {print ip; exit}}
   ')
 fi
-[ -n "$OB_REMOTE_IP" ] || OB_REMOTE_IP="Sesión local / IP no disponible"
 [ -n "$OB_SERVER_IP" ] || OB_SERVER_IP="No detectada"
 
 OB_UPTIME=$(awk 'NR == 1 {s=int($1); printf "up %d days, %d hours, %d minutes", int(s/86400), int((s%86400)/3600), int((s%3600)/60)}' /proc/uptime 2>/dev/null)
 [ -n "$OB_UPTIME" ] || OB_UPTIME="No disponible"
 OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)
 [ -n "$OB_LOAD" ] || OB_LOAD="No disponible"
-OB_KERNEL=$(uname -r 2>/dev/null)
-[ -n "$OB_KERNEL" ] || OB_KERNEL="No disponible"
 
 ob_center() {
   ob_text="$1"
@@ -147,26 +141,11 @@ ORANGEBOX_ASCII
 fi
 
 printf '\n'
-ob_center "SISTEMA DE ACCESO RESTRINGIDO" "$OB_RED$OB_BOLD"
 ob_center "www.orangebox.cl" "$OB_CYAN"
 printf '\n'
-printf '  %sIP remota:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_REMOTE_IP"
-printf '  %sIP servidor:%s  %s\n' "$OB_CYAN" "$OB_RESET" "$OB_SERVER_IP"
-printf '  %sUptime:%s       %s\n' "$OB_YELLOW" "$OB_RESET" "$OB_UPTIME"
+printf '  %sIP interna:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_SERVER_IP"
+printf '  %sUptime:%s        %s\n' "$OB_YELLOW" "$OB_RESET" "$OB_UPTIME"
 printf '  %sLoad (1/5/15m):%s %s\n' "$OB_MAGENTA" "$OB_RESET" "$OB_LOAD"
-printf '  %sKernel:%s       %s\n' "$OB_MAGENTA" "$OB_RESET" "$OB_KERNEL"
-printf '\n'
-ob_center "AVISO DE SEGURIDAD" "$OB_RED$OB_BOLD"
-printf '\n'
-printf '  %sTodas las conexiones y los comandos ejecutados quedan%s\n' "$OB_WHITE" "$OB_RESET"
-printf '  %sasociados a la IP de origen y se registran en sistemas%s\n' "$OB_WHITE" "$OB_RESET"
-printf '  %sremotos de auditoría.%s\n' "$OB_WHITE" "$OB_RESET"
-printf '\n'
-printf '  %sTodo acceso, uso o actividad no autorizada será%s\n' "$OB_RED" "$OB_RESET"
-printf '  %sdocumentado y reportado a las autoridades competentes.%s\n' "$OB_RED" "$OB_RESET"
-printf '\n'
-printf '  %sSi no cuenta con autorización, desconéctese%s\n' "$OB_RED$OB_BOLD" "$OB_RESET"
-printf '  %sinmediatamente.%s\n' "$OB_RED$OB_BOLD" "$OB_RESET"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
 }
