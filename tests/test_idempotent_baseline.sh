@@ -52,12 +52,12 @@ grep -Fq 'IP remota' "$CORE" && fail "la IP remota no debe mostrarse en el MOTD 
 login_banner_tmp="$(mktemp)"
 trap 'rm -f "$login_banner_tmp"' EXIT
 awk '
-  index($0, "cat > \\"$login_tmp\\" <<\\047ORANGEBOX_LOGIN_BANNER\\047") { in_banner=1; next }
+  index($0, "cat >") && index($0, "ORANGEBOX_LOGIN_BANNER") { in_banner=1; next }
   in_banner && $0 == "ORANGEBOX_LOGIN_BANNER" { exit }
   in_banner { print }
 ' "$CORE" > "$login_banner_tmp"
 [ -s "$login_banner_tmp" ] || fail "no se pudo extraer el banner pre-login"
-if grep -Eq '\\| \\(_\\) \\||ORANGEBOX_ASCII|figlet' "$login_banner_tmp"; then
+if grep -Fq '| (_) |' "$login_banner_tmp" || grep -Fq "ORANGEBOX_ASCII" "$login_banner_tmp" || grep -Fq "figlet" "$login_banner_tmp"; then
   fail "el banner pre-login no debe repetir el logotipo ASCII/FIGlet"
 fi
 
