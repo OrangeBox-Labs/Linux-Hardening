@@ -94,6 +94,11 @@ make_backup() {
     return 1
   }
   for file in "$GRUB_CONFIG" "$GRUB_CFG" "$GRUB_USER_CFG"; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    if [ -L "$file" ]; then
+      echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica GRUB sin un backup seguro.${NC}" >&2
+      return 1
+    fi
     [ -f "$file" ] || continue
     backup="$BACKUP_DIR/$(basename "$file")"
     if ! cp -p "$file" "$backup"; then
