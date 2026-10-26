@@ -44,12 +44,16 @@ chmod +x configure-time-sync.sh
 ./configure-time-sync.sh
 
 ./configure-time-sync.sh --fix
+
+# Solo validar/instalar el refresco cron de ntpd legacy en EL6
+./configure-time-sync.sh --refresh-only
 ```
 
 ## Opciones
 
-sin opciones o --fix: Aplica las correcciones
---check: Solo verificacion
+- Sin opciones: modo verificación, no modifica el sistema.
+- `--fix`: aplica las correcciones generales de sincronización de tiempo.
+- `--refresh-only`: solo verifica/instala la tarea cron de refresco de `ntpd` para EL6 con el paquete `ntp`; no modifica `ntp.conf`, no instala paquetes y no intenta ajustar la hora en ese momento.
 
 ## Verificacion
 

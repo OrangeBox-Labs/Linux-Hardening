@@ -50,6 +50,7 @@ show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
   echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 --refresh-only - Solo valida/instala el cron de refresco ntpd de EL6"
   echo "  $0 -f         - Modo automático (versión corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
@@ -387,6 +388,14 @@ configure_legacy_ntp_refresh() {
     return 1
   fi
 
+  if [ -f "$NTP_REFRESH_CRON" ] && [ ! -f "$BACKUP_DIR/$(basename "$NTP_REFRESH_CRON")" ]; then
+    if ! mkdir -p "$BACKUP_DIR" || ! cp -p "$NTP_REFRESH_CRON" "$BACKUP_DIR/"; then
+      echo -e "${RED}[!] No se pudo respaldar $NTP_REFRESH_CRON; se cancela el cambio.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+  fi
+
   if [ -f "$NTP_REFRESH_CRON" ]; then
     {
       printf '\n# OrangeBox: refresco periódico de ntpd legacy cada 6 horas\n'
@@ -572,6 +581,18 @@ main() {
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
+  fi
+
+  if [ "$1" = "--refresh-only" ]; then
+    local refresh_os_major=""
+    AUTO_FIX=true
+    refresh_os_major="$(detect_os_major_for_ntp_refresh)"
+    if [ "$refresh_os_major" != "6" ] || ! rpm -q ntp &>/dev/null; then
+      echo -e "${YELLOW}[INFO] --refresh-only aplica solo a EL6 con el paquete ntp; no se realizaron cambios.${NC}"
+      exit 0
+    fi
+    configure_legacy_ntp_refresh
+    exit $?
   fi
 
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then

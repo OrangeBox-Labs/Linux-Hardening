@@ -18,7 +18,9 @@ grep -Fq '17 */6 * * * root if /sbin/service ntpd restart' "$TIME_SYNC" ||
   fail "no se programa el reinicio de ntpd cada seis horas"
 grep -Fq 'configure_legacy_ntp_refresh' "$TIME_SYNC" ||
   fail "no se invoca el control de refresco desde el flujo principal"
+grep -Fq 'if [ "$1" = "--refresh-only" ]; then' "$TIME_SYNC" ||
+  fail "falta el modo aislado que instala solo el refresco cron"
 grep -Fq 'No se detectó un reinicio periódico de ntpd en cron' "$TIME_SYNC" ||
   fail "el modo de auditoría no alerta cuando falta la tarea"
 
-pass "EL6 valida tareas existentes y programa el refresco de ntpd solo con --fix"
+pass "EL6 valida tareas existentes y permite instalar solo el refresco con --refresh-only"
