@@ -212,7 +212,7 @@ ssh_setting_impact() {
     maxauthtries) echo "Limita intentos de login por conexión; puede afectar usuarios con varios métodos/llaves." ;;
     logingracetime) echo "Limita el tiempo para autenticarse; clientes de autenticación lenta pueden fallar." ;;
     maxsessions) echo "Limita sesiones multiplexadas por conexión." ;;
-    us epam|usepam) echo "Cambia la integración con PAM y puede afectar autenticación, MFA o políticas de sesión." ;;
+    usepam) echo "Cambia la integración con PAM y puede afectar autenticación, MFA o políticas de sesión." ;;
     *) echo "Modifica la política SSH; valida clientes y accesos administrativos desde una segunda sesión." ;;
   esac
 }
