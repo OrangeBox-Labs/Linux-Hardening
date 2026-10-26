@@ -9,6 +9,14 @@ else
   exit 1
 fi
 
+if [ -r "$OB_COMPAT_DIR/lib/orangebox-motd.sh" ]; then
+  # shellcheck source=lib/orangebox-motd.sh
+  . "$OB_COMPAT_DIR/lib/orangebox-motd.sh"
+else
+  echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: bash-hardening.sh
 # Autor: Felipe Roman
@@ -37,6 +45,7 @@ BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 # Archivos de configuración
 BASHRC_SYSTEM="/etc/bashrc"
 PROFILE_D="/etc/profile.d/orangebox.sh"
+PROFILE_MOTD="/etc/profile.d/99-orangebox-motd.sh"
 ALIASES_D="/etc/profile.d/aliases.sh"
 HISTORY_SYSLOG="/etc/profile.d/syslog_history.sh"
 HISTORY_SECURE="/etc/profile.d/history_secure.sh"
@@ -77,7 +86,7 @@ make_backup() {
     echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup Bash $BACKUP_DIR.${NC}" >&2
     return 1
   fi
-  for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
+  for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$PROFILE_MOTD" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     if [ -L "$file" ]; then
       echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica Bash sin un backup seguro del destino.${NC}" >&2
@@ -110,12 +119,12 @@ make_backup() {
 }
 
 # ==============================================
-# CONFIGURAR PROFILE.D CON BANNER Y PROMPT
+# CONFIGURAR PROFILE.D DE BASH Y PROMPT
 # ==============================================
 configure_profile() {
-  echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
+  echo -e "\n${BLUE}[*] Configurando perfil de Bash y prompt...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D" && grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -130,21 +139,9 @@ configure_profile() {
 # https://www.orangebox.cl
 # ==============================================
 
-# Banner de OrangeBox (ASCII art simple, no requiere figlet)
-echo "  ___                         ___          "
-echo " / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __"
-echo "| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /"
-echo " \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\"
-echo "                    |___/                  "
-echo
-echo ""
-
-# Mostrar información de la conexión
-echo "=== INFORMACION DE CONEXION ==="
-echo "IP del cliente: $(who am i | awk '{print $5}' | tr -d '()' || echo 'local')"
-echo "Usuario: $USER"
-echo "Fecha/Hora: $(date '+%Y-%m-%d %H:%M:%S')"
-echo ""
+# ORANGEBOX_SESSION_DISPLAY=external-motd
+# Logo, estado y datos de conexión se muestran una sola vez en
+# /etc/profile.d/99-orangebox-motd.sh. Este perfil configura Bash.
 
 # Resolver hostname FQDN una vez por shell para mostrarlo en el prompt.
 ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
@@ -247,6 +244,56 @@ umask 027
 # Historial habilitado e ilimitado; los valores se revalidan por sesión.
 EOF
     echo -e "${GREEN}[✓] Profile creado en $PROFILE_D${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
+# ==============================================
+# CONFIGURAR BIENVENIDA ÚNICA DE SESIÓN
+# ==============================================
+configure_session_motd() {
+  echo -e "\n${BLUE}[*] Configurando logo y datos de sesión...${NC}"
+
+  if [ -f "$PROFILE_MOTD" ] &&
+     grep -Fq 'figlet -f small OrangeBox' "$PROFILE_MOTD" &&
+     grep -Fq '"Load:"' "$PROFILE_MOTD" &&
+     ! grep -Fq 'Load (1/5/15m):' "$PROFILE_MOTD" &&
+     grep -Fq 'IP del cliente:' "$PROFILE_MOTD" &&
+     grep -Fq 'Fecha/hora:' "$PROFILE_MOTD" &&
+     [ "$(grep -Fc 'Fecha/hora:' "$PROFILE_MOTD")" -eq 1 ] &&
+     grep -Fq 'OB_CYAN=$(printf' "$PROFILE_MOTD" &&
+     ! grep -Eq 'tput[[:space:]]+(setaf|sgr0|colors)' "$PROFILE_MOTD"; then
+    echo -e "${GREEN}[✓] Bienvenida de shell ya configurada${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}[!] Bienvenida de shell ausente o desactualizada${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    local motd_tmp
+    motd_tmp=$(mktemp "${PROFILE_MOTD}.XXXXXX") || {
+      echo -e "${RED}[ERROR] No se pudo crear temporal para $PROFILE_MOTD${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    }
+
+    if ! orangebox_motd_write_profile "$motd_tmp" || ! sh -n "$motd_tmp"; then
+      rm -f "$motd_tmp"
+      echo -e "${RED}[ERROR] No se pudo generar/validar la bienvenida dinámica${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+
+    if ! chmod 644 "$motd_tmp" || ! chown root:root "$motd_tmp" || ! mv -f "$motd_tmp" "$PROFILE_MOTD"; then
+      rm -f "$motd_tmp"
+      echo -e "${RED}[ERROR] No se pudo instalar $PROFILE_MOTD${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+
+    echo -e "${GREEN}[✓] Bienvenida de shell instalada en $PROFILE_MOTD${NC}"
     FIXED=$((FIXED + 1))
   else
     WARNINGS=$((WARNINGS + 1))
@@ -707,6 +754,13 @@ check_status() {
   echo -e "${BLUE}Profile.d:${NC}"
   [ -f "$PROFILE_D" ] && echo -e "  ${GREEN}✓${NC} $PROFILE_D existe" || echo -e "  ${RED}✗${NC} $PROFILE_D no existe"
 
+  echo -e "\n${BLUE}MOTD de shell:${NC}"
+  if [ -f "$PROFILE_MOTD" ] && grep -Fq '"Load:"' "$PROFILE_MOTD" && ! grep -Fq 'Load (1/5/15m):' "$PROFILE_MOTD" && grep -Fq 'figlet -f small OrangeBox' "$PROFILE_MOTD"; then
+    echo -e "  ${GREEN}✓${NC} Logo y ficha de sesión unificados"
+  else
+    echo -e "  ${RED}✗${NC} MOTD ausente o desactualizado"
+  fi
+
   echo -e "\n${BLUE}Aliases:${NC}"
   [ -f "$ALIASES_D" ] && echo -e "  ${GREEN}✓${NC} $ALIASES_D existe" || echo -e "  ${RED}✗${NC} $ALIASES_D no existe"
 
@@ -756,6 +810,7 @@ show_summary() {
 
   echo -e "\n${YELLOW}PARA APLICAR CAMBIOS EN SESION ACTUAL:${NC}"
   echo -e "  source /etc/profile.d/orangebox.sh"
+  echo -e "  source /etc/profile.d/99-orangebox-motd.sh"
   echo -e "  source /etc/profile.d/aliases.sh"
   echo -e "  source ~/.bashrc"
 
@@ -808,6 +863,7 @@ main() {
 
   # Ejecutar configuraciones
   configure_profile
+  configure_session_motd
   configure_aliases
   configure_syslog_history
   configure_secure_history

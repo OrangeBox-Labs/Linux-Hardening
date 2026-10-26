@@ -48,11 +48,11 @@ La IP remota real no puede interpolarse dentro del `Banner` estático estándar 
 
 ## Mensaje posterior al login (MOTD dinámico)
 
-El banner de shell se muestra desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas. Muestra únicamente IP interna del servidor, uptime normalizado desde `/proc/uptime`, carga promedio de 1/5/15 minutos desde `/proc/loadavg` y fecha/hora local. No muestra logo, IP remota ni aviso de seguridad.
+El banner de shell se muestra desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas. Muestra primero el logo FIGlet (o ASCII de fallback) y debajo, en filas alineadas, la IP interna, uptime desde `/proc/uptime`, carga desde `/proc/loadavg` bajo la etiqueta `Load`, IP del cliente, usuario efectivo y fecha/hora local una sola vez. La paleta ANSI es igual para root y los usuarios normales. El aviso de acceso restringido sigue en el banner previo a la autenticación y no se repite dentro de la shell.
 
 `/etc/motd` se deja vacío para evitar duplicados. El perfil no se ejecuta para SFTP ni para comandos SSH no interactivos; `/etc/issue.net` sigue siendo el aviso previo al login.
 
-FIGlet se utiliza para generar el logo estático de `/etc/issue` y `/etc/issue.net`. En modo `--fix`, si falta FIGlet o la fuente `small`, se intenta instalar desde repositorios ya configurados; si la instalación falla, se genera un logo ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
+FIGlet se utiliza tanto para el logo estático de `/etc/issue` y `/etc/issue.net` como para la bienvenida de la shell cuando está disponible. En modo `--fix`, si falta FIGlet o la fuente `small`, se intenta instalar desde repositorios ya configurados; si no está disponible al iniciar una shell, se usa el logo ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
 
 ## Backup
 
