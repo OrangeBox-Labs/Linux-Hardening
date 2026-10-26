@@ -28,6 +28,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+KERNEL_BACKUP_DIR="/var/backups/orangebox-kernel-hardening/$(date +%Y%m%d-%H%M%S)-$"
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
@@ -64,13 +65,27 @@ kernel_confirm_change() {
 }
 
 kernel_backup_file() {
-  local source="$1" backup_dir="/var/backups/orangebox-kernel-hardening/$(date +%Y%m%d-%H%M%S)-$"
-  [ -e "$source" ] || return 0
-  if ! mkdir -p "$backup_dir" || ! chmod 700 "$backup_dir" || ! cp -p "$source" "$backup_dir/"; then
-    echo "[ERROR] No se pudo respaldar $source."
+  local source="$1" backup_dir="$KERNEL_BACKUP_DIR" backup parent mode
+  [ -e "$source" ] || [ -L "$source" ] || return 0
+  [ ! -L "$source" ] || { echo "[ERROR] $source es un symlink; no se modifica." >&2; return 1; }
+  backup="$backup_dir$source"
+  parent="$(dirname "$backup")"
+  if ! mkdir -p "$parent" || ! chmod 700 "$backup_dir" 2>/dev/null && [ ! -d "$backup_dir" ]; then
+    echo "[ERROR] No se pudo preparar el destino del backup para $source."
     return 1
   fi
-  echo "[INFO] Backup $source: $backup_dir/$(basename "$source")"
+  mode="$(stat -c '%a' "$backup_dir" 2>/dev/null || true)"
+  if [ "$mode" != 700 ]; then
+    echo "[ERROR] No se pudo verificar el modo 0700 del backup de kernel."
+    return 1
+  fi
+  # A repeated call for the same file must preserve the original pre-change copy.
+  [ -e "$backup" ] && return 0
+  if ! cp -p "$source" "$backup" || [ ! -f "$backup" ] || ! cmp -s "$source" "$backup"; then
+    echo "[ERROR] No se pudo crear/verificar el backup de $source." >&2
+    return 1
+  fi
+  echo "[INFO] Backup $source: $backup"
 }
 
 kernel_write_limit() {
