@@ -24,7 +24,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 | Auditoría de listeners/firewall | Implementado; solo lectura | Inventario TCP/UDP, proceso/servicio y contraste con reglas INPUT de gestores/backends conocidos. No modifica reglas ni decide qué puertos cerrar. |
 | Verificador `cis-benchmark-check.sh` | **Parcial** | 143 controles locales implementados. Cubre partes de filesystem, paquetes, AIDE, GRUB, core dumps, SELinux, servicios, tiempo, auditd, cron, SSH, sudo, PAM/passwords, permisos y cuentas. No equivale a las recomendaciones completas del benchmark vigente. |
 | Catálogo CIS | Catalogado; trazabilidad control a control pendiente | Hay referencias para RHEL, AlmaLinux, Rocky Linux y Oracle Linux 8–10. CentOS/Stream no se equipara automáticamente a un perfil RHEL. Falta asociar cada control local a la recomendación y versión exactas, distinguir aplicabilidad y registrar controles no cubiertos/no aplicables. |
-| Pruebas y CI | Implementados; resultado de esta rama aún no confirmado | El workflow ejecuta sintaxis Bash, regresiones operacionales y smoke tests en CentOS 6/7 y AlmaLinux 8/9/10. Esta rama añade pruebas para mountpoints exactos, precedencia de systemd y argumentos de arranque; los guards también cubren consentimiento de forwarding y auditoría no destructiva de logging. CI debe quedar en verde antes de integrar en `main`. |
+| Pruebas y CI | Último código validado en verde; verificar el HEAD tras actualizar estos documentos | CI run `40402420319` pasó sintaxis/regresiones y compatibility smoke en CentOS 6/7 y AlmaLinux 8/9/10 para el código del commit `45d3cd2f5d2c658556bcc3ab9ed8fbd9d5b92e2c`. Incluye las nuevas pruebas CIS y guards de forwarding/logging/SSH. Este update documental cambia el HEAD y requiere una última ejecución antes de integrar en `main`. |
 
 ## Matriz de cobertura CIS local
 
@@ -57,12 +57,13 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 - [x] Añadidos al baseline y al módulo `kernel-hardening.sh` los controles de redirects ICMPv6 (RHEL 9 CIS v3.0.0 3.3.5), con explicación y confirmación individual; sin IPv6 quedan como N/A.
 - [x] Añadida auditoría de elección del stack journald/rsyslog en EL9/10. Si ambos están activos, advierte que debe elegirse/tailorearse el perfil y no detiene, deshabilita ni reinicia los servicios desde esa comprobación.
 - [x] El checker CIS ahora advierte en pantalla y reporte que las etiquetas numéricas locales son históricas; no garantiza equivalencia uno a uno con IDs oficiales de cada versión. El coverage map explica esa brecha.
-- [ ] Ejecutar/confirmar todos los tests y compatibilidad; el resultado de CI para la rama de trabajo aún no está verificado.
-- [ ] Integrar los cambios de esta rama en `main` tras validar CI y revisar diff.
+- [x] El último código funcional del commit `45d3cd2f5d2c658556bcc3ab9ed8fbd9d5b92e2c` pasó CI run `40402420319`: sintaxis, regresiones y compatibility smoke en CentOS 6/7 + AlmaLinux 8/9/10.
+- [ ] Confirmar una ejecución verde para el HEAD final después de actualizar el tablero/plan.
+- [ ] Integrar los cambios de esta rama en `main` solo después de confirmar ese CI y revisar el diff.
 
 ## Siguiente trabajo priorizado
 
-1. **P0 — Confirmar CI de esta rama y revisar el diff.** No integrar si falla sintaxis o cualquier prueba de regresión.
+1. **P0 — Confirmar CI del HEAD final y revisar el diff.** El código funcional validado pasó el run `40402420319`; la actualización de documentos necesita su propio CI antes de integrar.
 2. **P1 — Construir una matriz de trazabilidad CIS por distribución/versión.** Por cada recomendación: ID y versión exacta, nivel/perfil cuando aplique, evidencia verificada, módulo responsable, estado `implementado/parcial/pendiente/N/A`, y razón de cualquier excepción. En CIS RHEL 9 v3.0.0, la recomendación 3.3.1 cubre forwarding IPv4/IPv6; se agregó con confirmación por su impacto operativo. La numeración equivalente en otros perfiles aún debe verificarse.
 3. **P1 — Corregir evidencias CIS que puedan dar falso PASS.** Montajes exactos, SELinux runtime/persistencia y core dumps con overrides están corregidos en la rama; queda validar CI y continuar con evidencias de GRUB/permisos, AIDE activo y opciones PAM/SSH efectivas.
 4. **P1 — Completar controles faltantes de bajo impacto.** Añadir primero verificaciones de solo lectura y pruebas; no cambiar la configuración durante una auditoría.
