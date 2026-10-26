@@ -8,9 +8,9 @@ lfa_iptables_text_state() {
     function target(line,a,n,i) { n=split(line,a,/[[:space:]]+/); for(i=1;i<n;i++) if(a[i]=="-j"||a[i]=="-g") return a[i+1]; return "" }
     function terminal(t) { return t=="ACCEPT"||t=="DROP"||t=="REJECT" }
     function jump_uncond(line,t) { t=target(line); return t!=""&&!terminal(t)&&line ~ /^-A [^[:space:]]+ -[jg] [^[:space:]]+[[:space:]]*$/ }
-    function terminal_uncond(line,t) { t=target(line); return terminal(t)&&line ~ ("^-A [^[:space:]]+ -j " t "[[:space:]]*$") }
+    function terminal_uncond(line,t) { t=target(line); if(t=="REJECT")return line~/^-A [^[:space:]]+ -j REJECT([[:space:]]+--reject-with[[:space:]]+[[:alnum:]_-]+)?[[:space:]]*$/; return (t=="ACCEPT"||t=="DROP")&&line ~ ("^-A [^[:space:]]+ -j " t "[[:space:]]*$") }
     function ports(spec,wanted,a,n,i,r) { gsub(/[{}[:space:]]/,"",spec); n=split(spec,a,","); for(i=1;i<=n;i++){if(a[i]~/^[0-9]+:[0-9]+$/){split(a[i],r,":");if(wanted+0>=r[1]+0&&wanted+0<=r[2]+0)return 1}else if(a[i]~/^[0-9]+-[0-9]+$/){split(a[i],r,"-");if(wanted+0>=r[1]+0&&wanted+0<=r[2]+0)return 1}else if(a[i]~/^[0-9]+$/&&a[i]+0==wanted+0)return 1}return 0}
-    function established_only(line) { return (line~/--ctstate[[:space:]]+(RELATED,ESTABLISHED|ESTABLISHED,RELATED|RELATED|ESTABLISHED)([[:space:]]|$)/ || line~/--state[[:space:]]+(RELATED,ESTABLISHED|ESTABLISHED,RELATED|RELATED|ESTABLISHED)([[:space:]]|$)) && line!~/--(ctstate|state)[[:space:]]+[^[:space:]]*NEW/ }
+    function established_only(line,v) { v=line; if(v~/--ctstate[[:space:]]+/){sub(/^.*--ctstate[[:space:]]+/,"",v);sub(/[[:space:]].*$/,"",v)}else if(v~/--state[[:space:]]+/){sub(/^.*--state[[:space:]]+/,"",v);sub(/[[:space:]].*$/,"",v)}else{return 0} return v=="ESTABLISHED"||v=="RELATED"||v=="ESTABLISHED,RELATED"||v=="RELATED,ESTABLISHED" }
     function has_port(line,proto,wanted,a,n,i,rp,spec) {
       if(established_only(line))return 0
       n=split(line,a,/[[:space:]]+/);rp=""
@@ -73,7 +73,7 @@ lfa_nft_text_state() {
     function jump_uncond(line,s){s=strip(line);return s~/^(jump|goto)[[:space:]]+[[:alnum:]_.-]+[[:space:]]*;?$/}
     function terminal_uncond(line,s){s=strip(line);return s~/^(accept|drop|reject)[[:space:]]*;?$/}
     function scoped(line){return line~/((^|[[:space:]])(ip saddr|ip daddr|ip6 saddr|ip6 daddr|iifname|oifname|ether saddr|ether daddr|iif|oif)([[:space:]]|$))/}
-    function established_only(line){return line~/ct state[[:space:]]+(established,related|related,established|established|related)([[:space:];]|$)/&&line!~/ct state[[:space:]]+[^[:space:];]*new/}
+    function established_only(line,v){v=line;if(v~/ct state[[:space:]]+/){sub(/^.*ct state[[:space:]]+/,"",v);sub(/[[:space:];].*$/,"",v)}else{return 0}return v=="established"||v=="related"||v=="established,related"||v=="related,established"}
     function ports(spec,wanted,a,n,i,r){gsub(/[{}[:space:]]/,"",spec);n=split(spec,a,",");for(i=1;i<=n;i++){if(a[i]~/^[0-9]+-[0-9]+$/){split(a[i],r,"-");if(wanted+0>=r[1]+0&&wanted+0<=r[2]+0)return 1}else if(a[i]~/^[0-9]+:[0-9]+$/){split(a[i],r,":");if(wanted+0>=r[1]+0&&wanted+0<=r[2]+0)return 1}else if(a[i]~/^[0-9]+$/&&a[i]+0==wanted+0)return 1}return 0}
     function has_port(line,proto,wanted,s,pos,spec,a){if(established_only(line))return 0;if(proto=="tcp"&&line!~/(^|[[:space:]])tcp[[:space:]]+dport([[:space:]]|$)/)return 0;if(proto=="udp"&&line!~/(^|[[:space:]])udp[[:space:]]+dport([[:space:]]|$)/)return 0;pos=index(line,proto " dport");if(!pos)return 0;s=substr(line,pos+length(proto " dport"));sub(/^[[:space:]]*/,"",s);if(substr(s,1,1)=="!"||substr(s,1,2)=="!=")return 0;if(substr(s,1,1)=="{"){if(index(s,"}")==0)return 0;spec=substr(s,2,index(s,"}")-2)}else{split(s,a,/[[:space:];]+/);spec=a[1]}return ports(spec,wanted)}
     BEGIN{table="";tf="";ck="";nr=0;input_seen=0;complex=0;input_chains=0}
