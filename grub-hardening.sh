@@ -330,6 +330,81 @@ show_summary() {
   echo -e "${GREEN}============================================${NC}"
 }
 
+
+get_el_major() {
+  local major=""
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    major="${VERSION_ID%%.*}"
+  elif [ -r /etc/redhat-release ]; then
+    major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\\1/p' /etc/redhat-release | head -1)"
+  fi
+  printf '%s\\n' "$major"
+}
+
+audit_legacy_grub_readonly() {
+  local cfg="/boot/grub/grub.conf" perms owner group
+  echo -e "\\n${BLUE}[*] GRUB legacy: comprobaciones de solo lectura para EL6...${NC}"
+
+  if [ ! -f "$cfg" ]; then
+    echo -e "${RED}[!] No se encontró $cfg; no se puede verificar la configuración del bootloader${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  perms="$(stat -c '%a' "$cfg" 2>/dev/null)"
+  owner="$(stat -c '%U' "$cfg" 2>/dev/null)"
+  group="$(stat -c '%G' "$cfg" 2>/dev/null)"
+  if [ "$perms" = "600" ] && [ "$owner" = "root" ] && [ "$group" = "root" ]; then
+    echo -e "${GREEN}[✓] $cfg tiene permisos 600 root:root${NC}"
+  else
+    echo -e "${RED}[!] $cfg tiene permisos/propietario $perms $owner:$group; se recomienda 600 root:root${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  if grep -Eq '^[[:space:]]*password[[:space:]]+--(md5|encrypted)[[:space:]]+' "$cfg"; then
+    echo -e "${GREEN}[✓] GRUB legacy tiene una directiva password --md5/--encrypted${NC}"
+  else
+    echo -e "${RED}[!] GRUB legacy no tiene una directiva de contraseña detectada${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  if grep -Eq '^[[:space:]]*kernel[[:space:]].*[[:space:]]audit=1([[:space:]]|$)' "$cfg"; then
+    echo -e "${GREEN}[✓] audit=1 está persistido en una entrada de kernel de GRUB legacy${NC}"
+  else
+    echo -e "${YELLOW}[!] audit=1 no aparece en las entradas de kernel de $cfg${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  if grep -Eq '^[[:space:]]*kernel[[:space:]].*[[:space:]](selinux=0|enforcing=0)([[:space:]]|$)' "$cfg"; then
+    echo -e "${RED}[!] Se encontró selinux=0 o enforcing=0 en una entrada de kernel${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  else
+    echo -e "${GREEN}[✓] No se detectó SELinux deshabilitado en las entradas de kernel${NC}"
+  fi
+
+  if [ -r /proc/cmdline ] && grep -qw 'audit=1' /proc/cmdline; then
+    echo -e "${GREEN}[✓] El kernel actualmente iniciado contiene audit=1${NC}"
+  else
+    echo -e "${YELLOW}[!] El kernel actualmente iniciado no muestra audit=1 en /proc/cmdline${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  echo -e "${YELLOW}[N/A] No se auditan parámetros exclusivos de kernels modernos (slab_nomerge, page_alloc.shuffle, randomize_kstack_offset) en esta generación legacy.${NC}"
+}
+
+show_legacy_grub_summary() {
+  echo
+  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}  GRUB LEGACY - RESUMEN DE AUDITORÍA${NC}"
+  echo -e "${GREEN}============================================${NC}"
+  echo "Correcciones aplicadas: 0 (modo solo lectura)"
+  echo "Advertencias pendientes: $WARNINGS"
+  echo "Archivo revisado: /boot/grub/grub.conf"
+  echo "Verificación manual: grep -E '^[[:space:]]*(password|kernel)' /boot/grub/grub.conf"
+  echo -e "${GREEN}============================================${NC}"
+}
+
 # ==============================================
 # FUNCION PRINCIPAL
 # ==============================================
@@ -342,6 +417,19 @@ main() {
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
+  fi
+
+  local os_major
+  os_major="$(get_el_major)"
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -lt 7 ]; then
+    if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+      echo -e "${RED}[ERROR] --fix no está soportado para GRUB legacy; no se aplicaron cambios. Revise manualmente la salida de auditoría.${NC}" >&2
+      exit 2
+    fi
+    echo -e "${YELLOW}MODO AUDITORÍA LEGACY: no se aplicarán cambios${NC}"
+    audit_legacy_grub_readonly
+    show_legacy_grub_summary
+    return 0
   fi
 
   # Modo verificación (sin --fix)

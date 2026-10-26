@@ -189,8 +189,6 @@ run_audit_module() {
   if [[ "$OS_MAJOR" =~ ^[0-9]+$ ]] && [ "$OS_MAJOR" -lt 7 ]; then
     case "$name" in
       ssh-complete) skip_reason="declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10" ;;
-      grub-full) skip_reason="usa rutas y controles de GRUB2; CentOS 6 utiliza GRUB legacy" ;;
-      auditd-full) skip_reason="declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10" ;;
     esac
     if [ -n "$skip_reason" ]; then
       echo

@@ -524,6 +524,71 @@ show_summary() {
   echo -e "${GREEN}============================================${NC}"
 }
 
+
+# ==============================================
+# AUDITORÍA LEGACY CENTOS/RHEL 6 (SOLO LECTURA)
+# ==============================================
+legacy_audit_rules_check() {
+  echo -e "\\n${BLUE}[*] Reglas persistentes legacy de auditd (/etc/audit/audit.rules)...${NC}"
+  if [ -s /etc/audit/audit.rules ]; then
+    echo -e "${GREEN}[✓] /etc/audit/audit.rules existe y no está vacío${NC}"
+  else
+    echo -e "${RED}[!] /etc/audit/audit.rules no existe o está vacío${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+
+  local AUDITCTL check key desc
+  AUDITCTL="$(get_auditctl_path)"
+  if [ -z "$AUDITCTL" ]; then
+    echo -e "${RED}[!] auditctl no está disponible; no se pueden verificar las reglas cargadas${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  echo -e "\\n${BLUE}[*] Reglas legacy cargadas en memoria...${NC}"
+  local rules_checks=(
+    "time-change:Eventos de fecha/hora"
+    "identity:Eventos de usuario/grupo"
+    "system-locale:Eventos de red"
+    "MAC-policy:Eventos de MAC/SELinux"
+    "logins:Eventos de login/logout"
+    "session:Eventos de sesión"
+    "perm_mod:Eventos de cambios de permisos"
+    "access:Eventos de acceso fallido"
+    "mounts:Eventos de montaje"
+    "delete:Eventos de eliminación de archivos"
+    "scope:Eventos de cambios en sudoers"
+    "modules:Eventos de módulos del kernel"
+  )
+  for check in "${rules_checks[@]}"; do
+    key="${check%%:*}"
+    desc="${check#*:}"
+    if "$AUDITCTL" -l 2>/dev/null | grep -q -- "$key"; then
+      echo -e "${GREEN}[✓] $desc - OK${NC}"
+    else
+      echo -e "${RED}[!] $desc - NO CONFIGURADO${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  done
+
+  if "$AUDITCTL" -s 2>/dev/null | grep -q 'enabled 2'; then
+    echo -e "${GREEN}[✓] Configuración de auditd inmutable - OK${NC}"
+  else
+    echo -e "${YELLOW}[!] Configuración de auditd no está en modo inmutable (enabled 2)${NC}"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
+legacy_auditd_readonly() {
+  echo -e "${YELLOW}[N/A] CentOS/RHEL 6 usa SysV init y /etc/audit/audit.rules; se ejecutan comprobaciones legacy sin modificar archivos.${NC}"
+  check_auditd_installed
+  check_auditd_enabled
+  check_log_storage
+  check_log_retention
+  check_full_action
+  legacy_audit_rules_check
+}
+
 # ==============================================
 # FUNCION PRINCIPAL
 # ==============================================
@@ -535,6 +600,19 @@ main() {
   if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     show_usage
     exit 0
+  fi
+
+  local os_major
+  os_major="$(get_os_version)"
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -lt 7 ]; then
+    if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
+      echo -e "${RED}[ERROR] --fix no está soportado en EL6 por este módulo; no se aplicaron cambios. Use la auditoría de solo lectura y planifique una migración.${NC}" >&2
+      exit 2
+    fi
+    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN LEGACY - no se aplicarán cambios${NC}"
+    legacy_auditd_readonly
+    show_summary
+    return 0
   fi
 
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then

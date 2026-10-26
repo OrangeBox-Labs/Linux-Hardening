@@ -34,6 +34,8 @@ jobs:
           test -x ./ssh-hardening.sh
       - name: Test legacy OS release detection
         run: bash tests/test_os_detection_legacy.sh
+      - name: Test legacy auditd and GRUB coverage
+        run: bash tests/test_legacy_audit_modules.sh
       - name: Test Bash history deletion guard
         run: bash tests/test_bash_history_guard.sh
       - name: Test Bash FQDN prompt and Readline bindings
