@@ -1,0 +1,26 @@
+name: Task state consistency
+
+on:
+  push:
+    paths:
+      - ".task-status.md"
+      - ".task-journal.md"
+      - ".github/TASK-RESUMPTION-PROTOCOL.md"
+      - ".github/workflows/task-state-check.yml"
+      - "tests/test_task_state.sh"
+  pull_request:
+    paths:
+      - ".task-status.md"
+      - ".task-journal.md"
+      - ".github/TASK-RESUMPTION-PROTOCOL.md"
+      - ".github/workflows/task-state-check.yml"
+      - "tests/test_task_state.sh"
+
+jobs:
+  task-state:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate task state, journal and recovery protocol
+        run: bash tests/test_task_state.sh
