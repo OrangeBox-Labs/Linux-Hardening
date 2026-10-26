@@ -106,7 +106,7 @@ pass "PAM/password checks distinguish EL6 legacy modules and preserve the operat
 
 # fapolicyd is never installed or activated by the baseline; Wazuh is reported when found.
 grep -Fq 'Wazuh detectado:' "$CORE" || fail "no se informa cuando Wazuh está instalado"
-grep -Fq 'no instalará ni activará fapolicyd' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"
+grep -Fq 'el baseline no instalará ni activará fapolicyd automáticamente' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"
 if grep -Eq '(dnf|yum)[[:space:]]+install.*fapolicyd|systemctl[[:space:]]+(enable|start|restart).*fapolicyd' "$CORE"; then
   fail "el baseline intenta instalar o activar fapolicyd"
 fi

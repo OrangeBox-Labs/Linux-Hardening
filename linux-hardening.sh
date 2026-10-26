@@ -1321,7 +1321,7 @@ fapolicyd_module() {
   elif $installed; then
     info "fapolicyd está instalado pero inactivo; por política no se activa ni modifica."
   else
-    info "fapolicyd no está instalado. Puede restringir ejecución no autorizada, pero no se instala ni activa automáticamente; requiere inventario de software y validación en modo permisivo para evitar bloquear cargas legítimas."
+    info "fapolicyd no está instalado. Puede restringir ejecución no autorizada, pero el baseline no instalará ni activará fapolicyd automáticamente; requiere inventario de software y validación en modo permisivo para evitar bloquear cargas legítimas."
   fi
 }
 normalize_history_dotfile() {

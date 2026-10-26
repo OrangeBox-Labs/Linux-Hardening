@@ -23,8 +23,9 @@ fi
 printf '%s\n' "$confirm_body" | grep -Fq 'No hay terminal disponible para confirmar' ||
   fail "si no hay terminal, el cambio sensible no se omite explícitamente"
 
+consent_router="$(awk '/^companion_module_owns_parameter_consent\(\) \{/{p=1} p{print} p && /^}/{exit}' "$CORE")"
 for module in auditd-full cron-full grub-full rsyslog-full password-full sudo-full kernel-full network-full filesystem-full package-repos crypto-policies selinux-setup; do
-  grep -Fq "$module)" "$CORE" ||
+  printf '%s\n' "$consent_router" | grep -Fq "$module" ||
     fail "el enrutador no incluye el módulo $module en el grupo con consentimiento por control"
 done
 
