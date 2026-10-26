@@ -14,9 +14,9 @@ for file in "$STATE" "$JOURNAL" "$PROTOCOL"; do
 done
 
 grep -Fq '# Estado de tarea' "$STATE" || fail "el estado no tiene encabezado reconocido"
-grep -Eq '^- \*\*Estado:\*\* (IDLE|IN_PROGRESS|BLOCKED|PAUSED|READY_FOR_REVIEW)' "$STATE" ||
+grep -Eq '^- \*\*Estado:\*\* .*([[:space:]]|\`)(IDLE|IN_PROGRESS|BLOCKED|PAUSED|READY_FOR_REVIEW)' "$STATE" ||
   fail "el estado debe declarar un lifecycle state permitido"
-grep -Eq '^- \*\*ID de tarea:\*\* OB-LH-[0-9]{8}-[0-9]{3}' "$STATE" ||
+grep -Eq '^- \*\*ID de tarea:\*\* .*OB-LH-[0-9]{8}-[0-9]{3}' "$STATE" ||
   fail "falta un ID de tarea estable con formato OB-LH-YYYYMMDD-NNN"
 grep -Fq 'Siguiente acción exacta' "$STATE" || fail "el estado debe identificar la siguiente acción exacta"
 grep -Fq '## Decisiones tomadas' "$STATE" || fail "el estado debe conservar decisiones relevantes"
