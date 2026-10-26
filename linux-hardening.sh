@@ -874,6 +874,10 @@ kernel_module(){
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then
     echo -e "$BLUE[INFO]$NC El destino persistente sysctl está enlazado/no gestionado por OrangeBox; se auditan igualmente todos los valores y no se sobrescribe ese archivo."
   fi
+  # CIS Red Hat 9 v3.0.0 3.3.1 recommends disabling host forwarding.
+  # Routing/NAT/VPN/container gateways are legitimate exceptions, so sysctl-safe
+  # explains the effect and requires individual [s/N] consent before any change.
+  set_sysctl net.ipv4.ip_forward 0
   forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
   rp_filter=1
   if [ "$forwarding" = 1 ]; then
@@ -908,6 +912,8 @@ kernel_module(){
   set_sysctl net.ipv4.conf.default.rp_filter "$rp_filter"
 
   if [ -d /proc/sys/net/ipv6 ]; then
+    # IPv6 forwarding is also a routing role setting; never switch it without consent.
+    set_sysctl net.ipv6.conf.all.forwarding 0
     set_sysctl net.ipv6.conf.all.accept_source_route 0
     set_sysctl net.ipv6.conf.default.accept_source_route 0
     ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
@@ -1813,7 +1819,7 @@ risk_description() {
     selinux-setup) echo "solo cambia SELinux a Enforcing y/o persiste ese modo tras una confirmación específica; aplicaciones sin políticas/contextos adecuados pueden quedar bloqueadas. No habilita SELinux si está Disabled." ;;
     time-sync) echo "puede modificar ntpd/chronyd o ajustar el reloj; puede afectar Kerberos/Samba AD, certificados y correlación de logs. El baseline general lo audita, pero no cambia NTP automáticamente." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
-    kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
+    kernel) echo "audita y propone deshabilitar forwarding IPv4/IPv6 solo con confirmación individual. Puede interrumpir routing, NAT, VPN y redes de contenedores; si se conserva IPv4 forwarding, usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
     synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
     network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
