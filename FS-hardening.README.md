@@ -3,7 +3,7 @@
 ```
 git clone https://github.com/OrangeBox-Labs/Linux-Hardening.git
 cd Linux-Hardening
-chmod +x FS-hardening.README.md.sh
+chmod +x FS-hardening.sh
 ```
 
 # Script: FS-hardening.sh
@@ -71,17 +71,36 @@ Impide que usuarios vean procesos de otros.
 | Ubuntu Server | 20.04, 22.04, 24.04 | Verificar rutas |
 | Debian | 11, 12 | Verificar rutas |
 
-## Como Usar
+## Cómo usar
 
-Solo verificacion (no hace cambios):
-```
+El comportamiento predeterminado es **auditoría de solo lectura**: no remonta sistemas de archivos, no descarga módulos y no detiene servicios.
+
+```bash
+# Auditar el estado actual, sin cambios
 ./FS-hardening.sh
-```
 
-Verificacion y correccion automatica:
-```
+# Auditoría explícita
+./FS-hardening.sh --check
+
+# Solicitar correcciones; cada parámetro sensible pide confirmación [s/N]
 ./FS-hardening.sh --fix
 ```
+
+Si no existe una terminal interactiva, los cambios que requieren consentimiento se omiten. Las recomendaciones de crear particiones separadas son informativas y no se intentan aplicar automáticamente.
+
+### Parámetros y posibles efectos
+
+| Control | Qué aporta | Riesgo o impacto a validar |
+|---|---|---|
+| `noexec` | Impide ejecutar binarios directamente desde un punto de montaje | Puede romper scripts, instaladores, agentes o aplicaciones que ejecutan desde ese directorio |
+| `nosuid` | Ignora bits SUID/SGID | Puede impedir que programas que dependen de esos bits obtengan privilegios |
+| `nodev` | Impide interpretar nodos de dispositivo en el montaje | Puede afectar aplicaciones que usan dispositivos especiales |
+| Bloqueo de módulos de filesystem | Impide futuras cargas de sistemas de archivos no usados | Podría impedir montar medios/filesystems legacy; un módulo ya cargado no se descarga en caliente |
+| `hidepid=2` | Oculta procesos de otros usuarios | Puede afectar agentes de monitorización, supervisores y herramientas de soporte |
+| Sticky bit | Limita el borrado/renombrado de archivos en directorios compartidos | Puede alterar flujos que borran archivos de otros usuarios |
+| Deshabilitar `autofs` | Reduce la superficie de servicios no usados | Puede romper automontajes NFS, home directories u otros recursos remotos |
+
+Cada ajuste sensible se describe y pregunta individualmente antes de aplicarse. Los cambios en `/etc/fstab` cuentan con backup previo; los módulos cargados no se descargan automáticamente.
 
 ## Ejemplo de Salida
 

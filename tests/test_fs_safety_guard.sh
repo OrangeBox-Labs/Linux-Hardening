@@ -7,7 +7,7 @@ pass(){ printf '[PASS] %s\n' "$*"; }
 
 grep -Fq 'AUTO_FIX=false' "$FS" || fail "filesystem hardening debe iniciar en modo auditoría"
 grep -Fq 'case "$1" in' "$FS" || fail "FS-hardening debe discriminar --fix explícitamente"
-grep -Fq '--fix      - Aplicar cambios, con confirmación individual por parámetro' "$FS" || fail "ayuda no documenta --fix y consentimiento por parámetro"
+grep -Fq -- '--fix      - Aplicar cambios, con confirmación individual por parámetro' "$FS" || fail "ayuda no documenta --fix y consentimiento por parámetro"
 grep -Fq 'confirm_fs_change()' "$FS" || fail "faltan confirmaciones por parámetro"
 grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$FS" || fail "cambio no se omite en modo no interactivo"
 grep -Fq 'noexec) effect=' "$FS" || fail "noexec no explica que puede romper ejecución de aplicaciones"
