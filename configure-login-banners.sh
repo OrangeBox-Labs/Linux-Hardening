@@ -27,6 +27,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+LOGIN_BANNER_TMP=""
 
 BACKUP_DIR="/root/banners-backup-$(date +%Y%m%d-%H%M%S)"
 
@@ -197,7 +198,14 @@ configure_motd() {
   echo -e "\n$BLUE[*] CIS 1.7.1, 1.7.5 - Configurando MOTD dinámico$NC"
   local profile_tmp
   orangebox_motd_ensure_figlet "$AUTO_FIX" || true
-  profile_tmp="$(mktemp)" || { echo -e "$RED[!] No se pudo crear el perfil MOTD$NC"; return 1; }
+  LOGIN_BANNER_TMP="$(mktemp)" || { echo -e "$RED[!] No se pudo crear el banner previo al login$NC"; return 1; }
+  if ! orangebox_motd_write_login_banner "$LOGIN_BANNER_TMP"; then
+    rm -f "$LOGIN_BANNER_TMP"
+    LOGIN_BANNER_TMP=""
+    echo -e "$RED[!] No se pudo generar el banner previo al login$NC"
+    return 1
+  fi
+  profile_tmp="$(mktemp)" || { rm -f "$LOGIN_BANNER_TMP"; LOGIN_BANNER_TMP=""; echo -e "$RED[!] No se pudo crear el perfil MOTD$NC"; return 1; }
   if ! orangebox_motd_write_profile "$profile_tmp"; then
     rm -f "$profile_tmp"
     echo -e "$RED[!] No se pudo generar el perfil MOTD$NC"
@@ -214,7 +222,7 @@ configure_motd() {
 # ==============================================
 configure_issue() {
   echo -e "\n${BLUE}[*] CIS 1.7.2, 1.7.6 - Configurando /etc/issue${NC}"
-  configure_banner_file "/etc/issue" "Local login banner"
+  configure_banner_file "/etc/issue" "Local login banner" "$LOGIN_BANNER_TMP"
   configure_permissions "/etc/issue" "644" "root" "root"
 }
 
@@ -223,7 +231,7 @@ configure_issue() {
 # ==============================================
 configure_issue_net() {
   echo -e "\n${BLUE}[*] CIS 1.7.3, 1.7.7 - Configurando /etc/issue.net${NC}"
-  configure_banner_file "/etc/issue.net" "Remote login banner"
+  configure_banner_file "/etc/issue.net" "Remote login banner" "$LOGIN_BANNER_TMP"
   configure_permissions "/etc/issue.net" "644" "root" "root"
 }
 
@@ -366,6 +374,7 @@ main() {
   configure_issue
   configure_issue_net
   configure_ssh_banner
+  [ -z "$LOGIN_BANNER_TMP" ] || rm -f "$LOGIN_BANNER_TMP"
 
   show_summary
 
