@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.6 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.6
+SCRIPT_VERSION=1.4.7
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -554,23 +554,22 @@ banners_module() {
   # Aviso legal previo a la autenticación: no enumera tecnologías defensivas.
   cat > "$login_tmp" <<'ORANGEBOX_LOGIN_BANNER'
 *******************************************************************************
-  ___                         ___
- / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
-| (_) | '_/ _` | ' \/ _` / -_) _ \/ _ \ \ /
- \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
-                    |___/
                          SISTEMA DE ACCESO RESTRINGIDO
                            www.orangebox.cl
 *******************************************************************************
 
-Solo usuarios autorizados pueden acceder a este sistema.
-El acceso o uso no autorizado esta prohibido.
+Todas las conexiones y los comandos ejecutados quedan
+asociados a la IP de origen y se registran en sistemas
+remotos de auditoría.
 
-La actividad realizada en este sistema puede ser registrada y revisada
-conforme a las politicas de la organizacion y a la legislacion aplicable.
-Si no cuenta con autorizacion, desconectese inmediatamente.
+Todo acceso, uso o actividad no autorizada será
+documentado y reportado a las autoridades competentes.
+
+Si no cuenta con autorización, desconéctese
+inmediatamente.
 
 *******************************************************************************
+
 ORANGEBOX_LOGIN_BANNER
 
   # La IP remota cambia por sesión: un /etc/motd estático no puede conocerla.
