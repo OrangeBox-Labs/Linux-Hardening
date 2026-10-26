@@ -40,18 +40,13 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 El texto del banner es deliberadamente generico: no informa el estado de SELinux
 ni enumera el firewall, herramientas de integridad o mecanismos de deteccion.
 
-## Mensaje posterior al login (/etc/motd)
+## Mensaje posterior al login (MOTD dinámico)
 
-El MOTD es deliberadamente breve, porque se muestra después de autenticarse. El aviso legal completo aparece antes del login en `/etc/issue.net` por SSH y en `/etc/issue` por consola local.
+El banner se muestra desde /etc/profile.d/99-orangebox-motd.sh en shells interactivas. Incluye logotipo OrangeBox, aviso de acceso restringido, IP remota SSH cuando existe SSH_CONNECTION, IP local del servidor, uptime normalizado, carga promedio de 1/5/15 minutos y kernel activo.
 
-```text
-*******************************************************************************
-                         ORANGEBOX IT SERVICES
-*******************************************************************************
-Sesion iniciada en un sistema administrado por OrangeBox.
-Respete las politicas de uso de la organizacion.
-*******************************************************************************
-```
+/etc/motd se deja vacío para evitar duplicar el banner. Un archivo estático no puede conocer la IP remota específica de cada sesión. El perfil no se ejecuta para SFTP ni para comandos SSH no interactivos; el aviso previo de /etc/issue.net sigue aplicando.
+
+Si FIGlet está disponible con la fuente small, se utiliza el logotipo coloreado. En modo --fix, si falta, se intenta instalar desde los repositorios ya configurados; si la instalación falla o no existe la fuente, se muestra el ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
 
 ## Backup
 
