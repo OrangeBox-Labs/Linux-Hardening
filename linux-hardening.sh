@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.5 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.6 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,15 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.5
+if [ -r "$SCRIPT_DIR/lib/orangebox-motd.sh" ]; then
+  # Generador portable del MOTD dinámico y lógica opcional de FIGlet.
+  # shellcheck source=lib/orangebox-motd.sh
+  source "$SCRIPT_DIR/lib/orangebox-motd.sh"
+else
+  echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+SCRIPT_VERSION=1.4.6
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -501,10 +509,11 @@ configure_ssh_banner() {
 
 banners_module() {
   echo -e "\n$BLUE### BANNERS / MOTD ###$NC"
-  local login_tmp motd_tmp target content_tmp mode owner group
+  local login_tmp motd_tmp session_motd_tmp target content_tmp mode owner group
 
   login_tmp="$(mktemp)" || { warn "No se pudo crear el banner previo al login"; return; }
   motd_tmp="$(mktemp)" || { rm -f "$login_tmp"; warn "No se pudo crear el MOTD"; return; }
+  session_motd_tmp="$(mktemp)" || { rm -f "$login_tmp" "$motd_tmp"; warn "No se pudo crear el MOTD dinámico"; return; }
 
   # Aviso legal previo a la autenticación: no enumera tecnologías defensivas.
   cat > "$login_tmp" <<'ORANGEBOX_LOGIN_BANNER'
@@ -528,29 +537,22 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 *******************************************************************************
 ORANGEBOX_LOGIN_BANNER
 
-  # MOTD se presenta después del login: mantenerlo breve para no duplicar
-  # la advertencia legal que SSH ya muestra desde /etc/issue.net.
-  cat > "$motd_tmp" <<'ORANGEBOX_MOTD'
-+----------------------------------------------------------------------------+
-|                                                                            |
-|                           ORANGEBOX IT SERVICES                            |
-|             LINUX ENTERPRISE  /  INFRAESTRUCTURA  /  SEGURIDAD             |
-|                                                                            |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|                    Sistema administrado por OrangeBox.                     |
-|             Utilice esta cuenta solo para tareas autorizadas.              |
-|              Las sesiones pueden ser registradas y auditadas.              |
-|                                                                            |
-+----------------------------------------------------------------------------+
-ORANGEBOX_MOTD
+  # La IP remota cambia por sesión: un /etc/motd estático no puede conocerla.
+  # El banner posterior al login se genera desde /etc/profile.d en shells interactivas.
+  : > "$motd_tmp"
+  orangebox_motd_ensure_figlet "$AUTO_FIX" || true
+  if ! orangebox_motd_write_profile "$session_motd_tmp"; then
+    rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
+    warn "No se pudo generar el MOTD dinámico"
+    return
+  fi
 
-  for target in /etc/motd /etc/issue /etc/issue.net; do
-    if [ "$target" = "/etc/motd" ]; then
-      content_tmp="$motd_tmp"
-    else
-      content_tmp="$login_tmp"
-    fi
+  for target in /etc/motd /etc/profile.d/99-orangebox-motd.sh /etc/issue /etc/issue.net; do
+    case "$target" in
+      /etc/motd) content_tmp="$motd_tmp" ;;
+      /etc/profile.d/99-orangebox-motd.sh) content_tmp="$session_motd_tmp" ;;
+      *) content_tmp="$login_tmp" ;;
+    esac
 
     mode="$(stat -c '%a' "$target" 2>/dev/null || true)"
     owner="$(stat -c '%U' "$target" 2>/dev/null || true)"
@@ -576,7 +578,7 @@ ORANGEBOX_MOTD
     fi
   done
 
-  rm -f "$login_tmp" "$motd_tmp"
+  rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
   configure_ssh_banner
 }
 time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
