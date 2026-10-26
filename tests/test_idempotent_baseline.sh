@@ -91,7 +91,7 @@ grep -Fq 'Fecha/hora:' "$motd_profile_tmp" || fail "el perfil no muestra fecha y
 grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
 grep -Fq 'figlet -f small OrangeBox' "$motd_profile_tmp" || fail "el logo FIGlet no aparece primero en el MOTD de shell"
 grep -Fq 'ORANGEBOX_ASCII' "$motd_profile_tmp" || fail "falta el fallback ASCII del logo de shell"
-if grep -Eq 'AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexiones y los comandos ejecutados quedan|tput' "$motd_profile_tmp"; then
+if grep -Eq 'AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexiones y los comandos ejecutados quedan|tput[[:space:]]+(setaf|sgr0|colors)' "$motd_profile_tmp"; then
   fail "el MOTD de shell no debe duplicar el aviso pre-login ni depender de tput para colorear"
 fi
 grep -Fq "OB_CYAN=\$(printf" "$motd_profile_tmp" || fail "el MOTD no define la paleta ANSI común"
