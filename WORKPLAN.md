@@ -7,6 +7,18 @@ Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status` (fusion
 
 Este archivo es el punto de reanudación del trabajo. Actualizar estados y commit de referencia al terminar cada bloque coherente.
 
+
+## Control de tareas entre sesiones
+
+Antes de iniciar o continuar una tarea de modificación del repositorio, usar el control oculto:
+
+1. Leer [`.task-status.md`](.task-status.md) para ver la tarea activa y el siguiente paso exacto.
+2. Leer las últimas entradas de [`.task-journal.md`](.task-journal.md) y comprobar en GitHub el branch, HEAD, PR y CI actuales.
+3. Seguir [`.github/TASK-RESUMPTION-PROTOCOL.md`](.github/TASK-RESUMPTION-PROTOCOL.md) para registrar decisiones, evidencia y checkpoints. Los pasos completados se retiran de los pendientes y se guardan como eventos históricos.
+4. Cerrar cada tarea dejando `.task-status.md` en estado `IDLE` con la última tarea cerrada, la evidencia final y ninguna tarea pendiente.
+
+El control está validado por `tests/test_task_state.sh` y el workflow `.github/workflows/task-state-check.yml`. No guardar secretos ni datos sensibles en el estado o el journal.
+
 ## Objetivo y reglas invariables
 
 - El alcance es exclusivamente **hardening de un Linux genérico**. No crear perfiles por aplicación, servicio o combinaciones de software.
