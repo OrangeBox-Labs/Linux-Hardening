@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.13 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.14 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,6 +23,14 @@ else
   echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
   exit 1
 fi
+if [ -r "$SCRIPT_DIR/lib/firewall-detect.sh" ]; then
+  # Identificación de gestores y backends del firewall, exclusivamente de lectura.
+  # shellcheck source=lib/firewall-detect.sh
+  source "$SCRIPT_DIR/lib/firewall-detect.sh"
+else
+  echo "[ERROR] Falta lib/firewall-detect.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 if [ -r "$SCRIPT_DIR/lib/orangebox-motd.sh" ]; then
   # Generador portable del MOTD dinámico y lógica opcional de FIGlet.
   # shellcheck source=lib/orangebox-motd.sh
@@ -31,7 +39,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.13
+SCRIPT_VERSION=1.4.14
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -742,9 +750,8 @@ grub_module(){
 }
 firewall_module() {
   echo -e "\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
-  # Auditoría exclusivamente de lectura: nunca administrar el firewall desde
-  # este baseline. Solo se advierte un listener no loopback si la cobertura
-  # INPUT es verificablemente inexistente para su familia/protocolo/puerto.
+  # Inventario del gestor y correlación de sockets/reglas: siempre solo lectura.
+  firewall_report_detected
   lfa_audit_listener_firewall
   WARNINGS=$((WARNINGS + LFA_WARNINGS))
 }
