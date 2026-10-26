@@ -12,6 +12,11 @@ grep -Fq 'No se regeneran ni eliminan claves de host' "$SSH" || fail "el informe
 grep -Fq 'NO se modifica ninguna regla de firewall' "$SSH" || fail "el informe no informa que no toca el firewall"
 grep -Fq 'no se instala ni actualiza desde este script' "$SSH" || fail "ssh-audit puede instalar paquetes automáticamente"
 grep -Fq 'systemctl reload sshd' "$SSH" || fail "SSH avanzado debe usar reload"
+grep -Fq 'challengeresponseauthentication|kbdinteractiveauthentication)' "$SSH" || fail "SSH avanzado debe describir el riesgo de keyboard-interactive/MFA"
+grep -Fq 'usepam)' "$SSH" || fail "SSH avanzado debe describir el riesgo de UsePAM"
+if grep -Eq 'challenger[[:space:]]+esponseauthentication|us[[:space:]]+epam' "$SSH"; then
+  fail "SSH avanzado conserva etiquetas de impacto con espacios que rompen la sintaxis Bash"
+fi
 if grep -Eq 'rm -f /etc/ssh/ssh_host_|ssh-keygen -t|firewall-cmd --permanent|systemctl restart sshd|service sshd restart|>/etc/crypto-policies/back-ends/opensshserver.config|sed -i .*HostKey' "$SSH"; then
   fail "ssh-hardening-complete conserva una modificación destructiva de hostkeys, crypto-policy o firewall"
 fi
