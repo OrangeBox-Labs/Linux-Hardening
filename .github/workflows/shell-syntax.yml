@@ -36,6 +36,8 @@ jobs:
         run: bash tests/test_os_detection_legacy.sh
       - name: Test legacy auditd and GRUB coverage
         run: bash tests/test_legacy_audit_modules.sh
+      - name: Test auditd immutable state interpretation
+        run: bash tests/test_auditd_immutable_status.sh
       - name: Test legacy ntpd periodic refresh guard
         run: bash tests/test_time_sync_legacy_refresh.sh
       - name: Test CIS profile mapping and checker quality
@@ -135,6 +137,7 @@ jobs:
               find . -path "./.git" -prune -o -type f -name "*.sh" -print0 |
                 xargs -0 -r -n1 /bin/bash -n
               /bin/bash tests/test_os_detection_legacy.sh
+              /bin/bash tests/test_auditd_immutable_status.sh
               /bin/bash tests/test_time_sync_legacy_refresh.sh
               /bin/bash tests/test_cis_checker_quality.sh
               /bin/bash tests/test_cis_mountpoint_exact.sh

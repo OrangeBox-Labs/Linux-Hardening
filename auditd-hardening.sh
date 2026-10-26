@@ -85,6 +85,48 @@ get_auditctl_path() {
   fi
 }
 
+# Devuelve exactamente el valor de "enabled" expuesto por auditctl -s.
+# Retorna error si auditctl no está disponible, falla o no incluye ese campo.
+get_auditd_enabled_state() {
+  local auditctl="${1:-}" status=""
+  [ -n "$auditctl" ] || auditctl="$(get_auditctl_path)"
+  [ -n "$auditctl" ] || return 1
+
+  status="$("$auditctl" -s 2>/dev/null)" || return 1
+  printf '%s\n' "$status" | awk '
+    $1 == "enabled" { print $2; found = 1; exit }
+    END { if (!found) exit 1 }
+  '
+}
+
+# Presenta el estado real sin confundir auditoría habilitada con reglas inmutables.
+report_auditd_immutable_status() {
+  local auditctl="${1:-}" enabled_state=""
+  enabled_state="$(get_auditd_enabled_state "$auditctl" 2>/dev/null)" || enabled_state=""
+
+  case "$enabled_state" in
+    2)
+      echo -e "${GREEN}[✓] Configuración de auditd inmutable - OK (enabled 2)${NC}"
+      return 0
+      ;;
+    1)
+      echo -e "${YELLOW}[!] auditd está habilitado (enabled 1), pero las reglas siguen siendo modificables; no está en modo inmutable.${NC}"
+      ;;
+    0)
+      echo -e "${YELLOW}[!] auditd está deshabilitado (enabled 0); no está activo ni en modo inmutable.${NC}"
+      ;;
+    "")
+      echo -e "${YELLOW}[!] No se pudo determinar el estado de auditd mediante auditctl -s; revise la salida y el servicio.${NC}"
+      ;;
+    *)
+      echo -e "${YELLOW}[!] auditd reporta enabled ${enabled_state}; no se confirma modo inmutable (solo enabled 2 lo demuestra).${NC}"
+      ;;
+  esac
+
+  [ "$AUTO_FIX" = true ] || WARNINGS=$((WARNINGS + 1))
+  return 0
+}
+
 # ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
@@ -419,12 +461,7 @@ EOF
     fi
   done
 
-  if [ -n "$auditctl" ] && "$auditctl" -s 2>/dev/null | grep -q "enabled 2"; then
-    echo -e "${GREEN}[✓] Configuración inmutable ya activa${NC}"
-  else
-    echo -e "${YELLOW}[!] Configuración inmutable no está activa; se audita por separado y no se activa sin confirmación específica${NC}"
-    [ "$AUTO_FIX" = true ] || WARNINGS=$((WARNINGS + 1))
-  fi
+  report_auditd_immutable_status "$auditctl"
 }
 
 # ==============================================
@@ -480,13 +517,14 @@ restart_auditd() {
 
 configure_audit_immutable() {
   local auditctl="" rule_file="/etc/audit/rules.d/zzzzzzzz-orangebox-immutable.rules"
-  local effect="" state=""
+  local effect="" state="" enabled_state=""
   auditctl="$(get_auditctl_path)"
-  if [ -n "$auditctl" ] && "$auditctl" -s 2>/dev/null | grep -q "enabled 2"; then
+  enabled_state="$(get_auditd_enabled_state "$auditctl" 2>/dev/null)" || enabled_state=""
+  if [ "$enabled_state" = "2" ]; then
     echo -e "${GREEN}[✓] auditd ya está en modo inmutable (enabled 2)${NC}"
     return 0
   fi
-  echo -e "${YELLOW}[!] auditd no está en modo inmutable${NC}"
+  echo -e "${YELLOW}[!] auditd no está en modo inmutable (enabled ${enabled_state:-desconocido})${NC}"
   [ "$AUTO_FIX" = true ] || { WARNINGS=$((WARNINGS + 1)); return 0; }
 
   effect="La opción -e 2 bloquea cambios posteriores a las reglas de auditd hasta reiniciar el sistema. Refuerza la integridad, pero puede impedir corregir errores de reglas sin reinicio y complicar la recuperación remota. Solo se aplica después de las demás modificaciones y con una vía de consola/recuperación probada."
@@ -594,12 +632,7 @@ legacy_audit_rules_check() {
     fi
   done
 
-  if "$AUDITCTL" -s 2>/dev/null | grep -q 'enabled 2'; then
-    echo -e "${GREEN}[✓] Configuración de auditd inmutable - OK${NC}"
-  else
-    echo -e "${YELLOW}[!] Configuración de auditd no está en modo inmutable (enabled 2)${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  fi
+  report_auditd_immutable_status "$AUDITCTL"
 }
 
 legacy_auditd_readonly() {
@@ -669,9 +702,11 @@ main() {
   fi
 }
 
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}[!] Este script debe ejecutarse como root${NC}"
-  exit 1
+# Permite cargar funciones desde pruebas unitarias sin ejecutar el flujo principal.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}[!] Este script debe ejecutarse como root${NC}"
+    exit 1
+  fi
+  main "$@"
 fi
-
-main "$@"
