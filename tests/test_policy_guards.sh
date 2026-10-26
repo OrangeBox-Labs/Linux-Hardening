@@ -69,6 +69,12 @@ grep -Fq 'no mitiga DiagSpill (CVE-2026-74469)' "$LPE" || fail "user namespaces 
 grep -Fq 'NO prueba que falte el parche' "$LPE" || fail "la ausencia de una CVE en changelog se presenta como prueba de falta de parche"
 pass "el módulo LPE distingue la mitigación por user namespaces y el estado no concluyente del changelog"
 
+# Legacy EL6 PAM uses pam_cracklib/pam_tally2 rather than modern pwquality/authselect/faillock.
+grep -Fq 'pam_cracklib.so' "$PASSWORD" || fail "password-hardening no reconoce el control legacy pam_cracklib"
+grep -Fq 'pam_tally2.so' "$PASSWORD" || fail "password-hardening no reconoce el control legacy pam_tally2"
+grep -Fq '"99999")' "$PASSWORD" || fail "password-hardening sigue marcando PASS_MAX_DAYS=99999 como aging que requiere corrección"
+pass "PAM/password checks distinguish EL6 legacy modules and preserve the operational 99999-day policy"
+
 # fapolicyd is never installed or activated by the baseline; Wazuh is reported when found.
 grep -Fq 'Wazuh detectado:' "$CORE" || fail "no se informa cuando Wazuh está instalado"
 grep -Fq 'no instalará ni activará fapolicyd' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"

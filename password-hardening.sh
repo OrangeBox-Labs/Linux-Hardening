@@ -24,6 +24,17 @@ bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }
 die(){ echo -e "$RED[ERROR]$NC $*"; exit 1; }
 
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
+
+get_el_major(){
+  local major=""
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    major="${VERSION_ID%%.*}"
+  elif [ -r /etc/redhat-release ]; then
+    major="$(sed -n 's/.*release \([0-9][0-9]*\).*/\1/p' /etc/redhat-release | head -1)"
+  fi
+  printf '%s\n' "$major"
+}
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; cp -a "$src" "$BACKUP_DIR/$(basename "$src").before"; }
 
 set_conf_value(){
@@ -43,7 +54,20 @@ set_conf_value(){
 
 pwquality_module(){
   echo -e "\n$BLUE### PASSWORD QUALITY ###$NC"
-  [ -f "$PWQUALITY_CONF" ] || { warn "$PWQUALITY_CONF no existe; no se crea PAM a ciegas"; return; }
+  if [ ! -f "$PWQUALITY_CONF" ]; then
+    local os_major
+    os_major="$(get_el_major)"
+    if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 6 ]; then
+      if grep -q 'pam_cracklib.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null; then
+        info "EL6: pwquality.conf no aplica; se encontró pam_cracklib.so (mecanismo legacy). Revise sus parámetros por separado."
+      else
+        warn "EL6: pwquality.conf no aplica y no se encontró pam_cracklib.so en system-auth/password-auth; revisar calidad de contraseñas."
+      fi
+    else
+      warn "$PWQUALITY_CONF no existe; no se crea PAM a ciegas"
+    fi
+    return
+  fi
   # These settings affect password creation/change, not existing login credentials.
   set_conf_value "$PWQUALITY_CONF" minlen 14
   set_conf_value "$PWQUALITY_CONF" minclass 4
@@ -72,7 +96,7 @@ password_aging_module(){
       [ "$uid" -ge 1000 ] 2>/dev/null || continue
       case "$shell" in */nologin|*/false) continue;; esac
       max=$(chage -l "$user" 2>/dev/null | awk -F: '/Maximum number of days between password change/{gsub(/^[[:space:]]+/,"",$2); print $2}')
-      case "$max" in "Never"|"-1") ;; *) echo "  [AUDIT] $user: password max age=$max"; found=1;; esac
+      case "$max" in "Never"|"-1"|"99999") ;; *) echo "  [AUDIT] $user: password max age=$max"; found=1;; esac
     done < /etc/passwd
     [ "$found" -eq 0 ] && ok "No se detectaron cuentas locales humanas con expiración reportable" || warn "Hay cuentas existentes con aging; no se modifican automáticamente para evitar afectar cuentas operativas/cPanel"
   fi
@@ -80,6 +104,8 @@ password_aging_module(){
 
 pam_audit_module(){
   echo -e "\n$BLUE### PAM / AUTHSELECT ###$NC"
+  local os_major
+  os_major="$(get_el_major)"
   if command -v authselect >/dev/null 2>&1; then
     if authselect current >/dev/null 2>&1; then
       ok "authselect activo; PAM se considera administrado por authselect"
@@ -88,13 +114,29 @@ pam_audit_module(){
       warn "authselect instalado pero 'authselect current' falló"
     fi
   else
-    warn "authselect no disponible; PAM requiere revisión específica de la distribución"
+    if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 7 ]; then
+      info "authselect no aplica a esta generación; PAM se revisa mediante sus archivos nativos."
+    else
+      warn "authselect no disponible; PAM requiere revisión específica de la distribución"
+    fi
   fi
 
   local f
   for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
     [ -f "$f" ] || continue
-    grep -q 'pam_faillock.so' "$f" && ok "$f: pam_faillock ya presente" || warn "$f: pam_faillock no configurado"
+    if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 6 ]; then
+      if grep -q 'pam_tally2.so' "$f"; then
+        ok "$f: pam_tally2 legacy ya presente"
+      elif grep -q 'pam_faillock.so' "$f"; then
+        ok "$f: pam_faillock ya presente"
+      else
+        warn "$f: no se encontró pam_tally2 ni pam_faillock para control de intentos fallidos"
+      fi
+    elif [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -eq 7 ] && grep -Eq 'pam_(faillock|tally2)\.so' "$f"; then
+      ok "$f: módulo de bloqueo de intentos fallidos presente"
+    else
+      grep -q 'pam_faillock.so' "$f" && ok "$f: pam_faillock ya presente" || warn "$f: pam_faillock no configurado"
+    fi
   done
   info "No se inserta pam_faillock automáticamente. El orden de PAM es crítico y una modificación incorrecta puede bloquear todos los accesos."
 }
