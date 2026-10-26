@@ -237,7 +237,10 @@ audit_ss="$(lfa_audit_listener_firewall)"
 case "$audit_ss" in *"sockets=3;"*) ;; *) fail "el parser ss con cabecera no contabilizó 3 sockets: $audit_ss" ;; esac
 case "$audit_ss" in *"Sockets omitidos por formato no reconocido"*) fail "la cabecera ss no debe contar como socket omitido" ;; esac
 case "$audit_ss" in *"familia ipv6"*) fail "las direcciones IPv4 se clasificaron incorrectamente como IPv6" ;; esac
-case "$audit_ss" in *"LISTENERS TCP/UDP"* && *"service=sshd"* && *"service=named"* && *"service=node_exporter"*) ;; *) fail "no se listaron todos los servicios escuchando: $audit_ss" ;; esac
+case "$audit_ss" in *"LISTENERS TCP/UDP"*) ;; *) fail "falta cabecera de listeners: $audit_ss" ;; esac
+case "$audit_ss" in *"service=sshd"*) ;; *) fail "no se identificó sshd: $audit_ss" ;; esac
+case "$audit_ss" in *"service=named"*) ;; *) fail "no se identificó named: $audit_ss" ;; esac
+case "$audit_ss" in *"service=node_exporter"*) ;; *) fail "no se identificó node_exporter: $audit_ss" ;; esac
 case "$audit_ss" in *"listener limitado a loopback"*) ;; *) fail "no se identificó el listener local-only: $audit_ss" ;; esac
 
 ss() { return 1; }
