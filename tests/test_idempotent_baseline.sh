@@ -52,6 +52,21 @@ grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$login_banner_tmp" || fail "falta tít
 grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$login_banner_tmp" || fail "el aviso de auditoría no está en el banner pre-login"
 grep -Fq 'reportado a las autoridades competentes.' "$login_banner_tmp" || fail "falta el aviso sobre actividades no autorizadas"
 grep -Fq "| | | | '__/ _|" "$login_banner_tmp" || fail "falta el logo ASCII de fallback en el banner pre-login"
+awk '
+  length($0) == 79 && $0 ~ /^\\*+$/ { dividers++ }
+  /SISTEMA DE ACCESO RESTRINGIDO/ {
+    expected = int((79 - length("SISTEMA DE ACCESO RESTRINGIDO")) / 2) + 1
+    if (index($0, "SISTEMA DE ACCESO RESTRINGIDO") != expected) exit 1
+    title_ok = 1
+  }
+  /www.orangebox.cl/ {
+    expected = int((79 - length("www.orangebox.cl")) / 2) + 1
+    if (index($0, "www.orangebox.cl") != expected) exit 1
+    url_ok = 1
+  }
+  /    Todas las conexiones/ { if (substr($0, 1, 4) != "    ") exit 1; body_ok = 1 }
+  END { if (dividers != 3 || !title_ok || !url_ok || !body_ok) exit 1 }
+' "$login_banner_tmp" || fail "el banner pre-login debe tener logo/título centrados y el texto con sangría uniforme"
 
 orangebox_motd_write_profile "$motd_profile_tmp" || fail "no se pudo generar el perfil con métricas"
 [ -s "$motd_profile_tmp" ] || fail "el perfil de métricas está vacío"
