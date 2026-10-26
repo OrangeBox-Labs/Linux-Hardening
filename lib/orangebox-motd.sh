@@ -188,3 +188,4 @@ printf '  %s%-15s%s %s\n' "$OB_CYAN" "Usuario:" "$OB_RESET" "$OB_USERNAME"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Fecha/hora:" "$OB_RESET" "$OB_DATETIME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
+}
