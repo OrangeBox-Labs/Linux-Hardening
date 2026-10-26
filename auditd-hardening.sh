@@ -8,6 +8,13 @@ else
   echo "[ERROR] Falta lib/service-compat.sh; actualice el repositorio completo." >&2
   exit 1
 fi
+if [ -r "$OB_COMPAT_DIR/lib/hardening-confirm.sh" ]; then
+  # shellcheck source=lib/hardening-confirm.sh
+  . "$OB_COMPAT_DIR/lib/hardening-confirm.sh"
+else
+  echo "[ERROR] Falta lib/hardening-confirm.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
 
 # ==============================================
 # Script: auditd-hardening.sh
@@ -98,152 +105,158 @@ make_backup() {
 # FUNCION GENERICA PARA CONFIGURAR PARAMETROS DE AUDITD.CONF
 # ==============================================
 configure_auditd_param() {
-  local param="$1"
-  local expected="$2"
-  local description="$3"
-
-  if grep -q "^[#]*\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
-    if grep -q "^#\s*${param}\s*=\s*${expected}" "$AUDIT_CONF" 2>/dev/null; then
-      echo -e "${YELLOW}[!] $description esta comentado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i "s/^#\s*${param}\s*=\s*${expected}/${param} = ${expected}/" "$AUDIT_CONF"
-        echo -e "${GREEN}[✓] $description descomentado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    else
-      echo -e "${GREEN}[✓] $description = ${expected}${NC}"
-    fi
-    return 0
-  fi
-
-  if grep -q "^[#]*\s*${param}\s*=" "$AUDIT_CONF" 2>/dev/null; then
-    echo -e "${RED}[!] $description valor incorrecto${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i "s/^[#]*\s*${param}\s*=.*/${param} = ${expected}/" "$AUDIT_CONF"
-      echo -e "${GREEN}[✓] $description corregido a ${expected}${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 0
-  fi
-
-  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-  if [ "$AUTO_FIX" = true ]; then
-    echo "${param} = ${expected}" >>"$AUDIT_CONF"
-    echo -e "${GREEN}[✓] $description configurado como ${expected}${NC}"
-    FIXED=$((FIXED + 1))
-  else
+  local param="$1" expected="$2" description="$3" current="" effect="" tmp="" mode="640"
+  [ -f "$AUDIT_CONF" ] || {
+    echo -e "${RED}[!] $AUDIT_CONF no existe; no se puede auditar ni editar parámetros.${NC}"
     WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  current="$(awk -F= -v wanted="$param" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+    {
+      key=$1; gsub(/[[:space:]]/, "", key)
+      if (key==wanted) {
+        value=$2
+        sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        current=value
+      }
+    }
+    END {print current}
+  ' "$AUDIT_CONF")"
+
+  if [ "$current" = "$expected" ]; then
+    echo -e "${GREEN}[✓] $description = $expected (directiva activa)${NC}"
+    return 0
   fi
+
+  case "$param" in
+    max_log_file)
+      effect="Define el tamaño máximo de cada archivo de log de auditd en MB. Un valor bajo genera rotación frecuente; uno alto consume más espacio por archivo. No cambia por sí solo la retención total." ;;
+    max_log_file_action)
+      effect="Define qué hacer al llegar al tamaño máximo del log. keep_logs evita eliminar automáticamente logs antiguos y puede llenar /var/log/audit o el filesystem, lo que puede afectar servicios y el propio sistema." ;;
+    space_left_action)
+      effect="Define la acción de aviso cuando queda poco espacio. email intenta notificar; depende de la configuración de correo y no garantiza por sí sola que llegue una alerta." ;;
+    action_mail_acct)
+      effect="Define el destinatario de avisos de auditd. Si root no recibe correo local o no hay MTA/forwarding, el aviso puede no llegar." ;;
+    admin_space_left_action)
+      effect="Se ejecutaría al alcanzar el umbral crítico de espacio para auditd. halt detiene el host y puede dejar inaccesible un servidor remoto; hay que validar monitorización de disco, alertas y vía de consola/recuperación antes de habilitarlo." ;;
+    *)
+      effect="Cambia una directiva del servicio de auditoría y debe validarse contra la configuración operativa del servidor." ;;
+  esac
+
+  echo -e "${YELLOW}[!] $description: actual=${current:-no definido}, recomendado=$expected${NC}"
+  if [ "$AUTO_FIX" != true ]; then
+    echo "Qué hace/riesgo: $effect"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if ! ob_confirm_hardening_change "auditd.conf: $param" "${current:-no definido}" "$expected" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  tmp="$(mktemp "$(dirname "$AUDIT_CONF")/.auditd.conf.orangebox.XXXXXX")" || {
+    echo -e "${RED}[!] No se pudo crear archivo temporal; no se cambia $param.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  awk -v wanted="$param" -v value="$expected" '
+    function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
+    /^[ \t]*#/ || /^[ \t]*$/ {print; next}
+    {
+      line=$0
+      sub(/[ \t]+#.*/, "", line)
+      equal=index(line, "=")
+      key=equal ? trim(substr(line,1,equal-1)) : ""
+      if (key==wanted) {
+        if (!written) print wanted " = " value
+        written=1
+        next
+      }
+      print
+    }
+    END {if (!written) print wanted " = " value}
+  ' "$AUDIT_CONF" > "$tmp" || {
+    rm -f "$tmp"
+    echo -e "${RED}[!] No se pudo preparar $AUDIT_CONF; no se cambia $param.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  mode="$(stat -c %a "$AUDIT_CONF" 2>/dev/null || echo 640)"
+  chmod "$mode" "$tmp" && chown root:root "$tmp" || {
+    rm -f "$tmp"
+    echo -e "${RED}[!] No se pudieron preservar permisos de $AUDIT_CONF.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  }
+  if ! mv "$tmp" "$AUDIT_CONF"; then
+    rm -f "$tmp"
+    echo -e "${RED}[!] No se pudo instalar la configuración actualizada.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  echo -e "${GREEN}[✓] $param actualizado a $expected${NC}"
+  FIXED=$((FIXED + 1))
 }
 
 # ==============================================
 # 4.1.1.1 - ENSURE AUDITD IS INSTALLED
 # ==============================================
 check_auditd_installed() {
-  echo -e "\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd instalado...${NC}"
+  echo -e "\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd instalado... ${NC}"
+  local package="" reason="" os_version="" installed=false
 
-  # Instalar paquete principal audit
-  if rpm -q audit &>/dev/null; then
+  if rpm -q audit >/dev/null 2>&1; then
     echo -e "${GREEN}[✓] audit instalado${NC}"
   else
-    echo -e "${RED}[!] audit no instalado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if command -v dnf &>/dev/null; then
-        dnf install audit -y 2>/dev/null
-      else
-        yum install audit -y 2>/dev/null
-      fi
-      echo -e "${GREEN}[✓] audit instalado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: Instalar audit${NC}"
+    reason="Instala el demonio de auditoría y puede iniciar la generación de eventos y consumo de disco/CPU. Se instalará desde los repositorios configurados."
+    if [ "$AUTO_FIX" != true ] || ! ob_confirm_hardening_change "instalar audit" "no instalado" "dnf/yum install audit" "$reason"; then
       WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  # Instalar audit-libs (generalmente viene como dependencia, pero por las dudas)
-  if rpm -q audit-libs &>/dev/null; then
-    echo -e "${GREEN}[✓] audit-libs instalado${NC}"
-  else
-    echo -e "${RED}[!] audit-libs no instalado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if command -v dnf &>/dev/null; then
-        dnf install audit-libs -y 2>/dev/null
-      else
-        yum install audit-libs -y 2>/dev/null
-      fi
-      echo -e "${GREEN}[✓] audit-libs instalado${NC}"
-      FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: Instalar audit-libs${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  # Verificar e instalar auditctl (nombre del paquete varia segun version)
-  if command -v auditctl &>/dev/null || [ -x /usr/sbin/auditctl ]; then
-    echo -e "${GREEN}[✓] auditctl disponible${NC}"
-  else
-    echo -e "${RED}[!] auditctl no disponible${NC}"
-
-    if [ "$AUTO_FIX" = true ]; then
-      echo -e "${YELLOW}[*] Instalando auditctl...${NC}"
-
-      OS_VERSION=$(get_os_version)
-      INSTALLED=false
-
-      # Para RHEL 7, 8, 9 (audit-tools)
-      if [ -n "$OS_VERSION" ] && [ "$OS_VERSION" -le 9 ] 2>/dev/null; then
-        if command -v dnf &>/dev/null; then
-          dnf install audit-tools -y 2>/dev/null && INSTALLED=true
-        else
-          yum install audit-tools -y 2>/dev/null && INSTALLED=true
-        fi
-      fi
-
-      # Para RHEL 10 (audit-rules)
-      if [ "$INSTALLED" = false ] && [ -n "$OS_VERSION" ] && [ "$OS_VERSION" -ge 10 ] 2>/dev/null; then
-        if command -v dnf &>/dev/null; then
-          dnf install audit-rules -y 2>/dev/null && INSTALLED=true
-        else
-          yum install audit-rules -y 2>/dev/null && INSTALLED=true
-        fi
-      fi
-
-      # Fallback: intentar con audit-tools (para sistemas sin version detectada)
-      if [ "$INSTALLED" = false ]; then
-        if command -v dnf &>/dev/null; then
-          dnf install audit-tools -y 2>/dev/null && INSTALLED=true
-        else
-          yum install audit-tools -y 2>/dev/null && INSTALLED=true
-        fi
-      fi
-
-      # Segundo fallback: audit-rules
-      if [ "$INSTALLED" = false ]; then
-        if command -v dnf &>/dev/null; then
-          dnf install audit-rules -y 2>/dev/null && INSTALLED=true
-        else
-          yum install audit-rules -y 2>/dev/null && INSTALLED=true
-        fi
-      fi
-
-      if [ "$INSTALLED" = true ]; then
-        echo -e "${GREEN}[✓] auditctl instalado correctamente${NC}"
+      if command -v dnf >/dev/null 2>&1; then dnf install audit -y
+      else yum install audit -y; fi
+      if rpm -q audit >/dev/null 2>&1; then
+        echo -e "${GREEN}[✓] audit instalado${NC}"
         FIXED=$((FIXED + 1))
       else
-        echo -e "${RED}[!] No se pudo instalar auditctl automaticamente${NC}"
-        echo -e "${YELLOW}    Instalacion manual: dnf install audit-tools o audit-rules${NC}"
+        echo -e "${RED}[!] No se confirmó la instalación de audit${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
+    fi
+  fi
+
+  if rpm -q audit-libs >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] audit-libs instalado${NC}"
+  else
+    reason="Instala bibliotecas de auditoría usadas por herramientas del sistema. Puede incorporar dependencias de paquetes; no habilita el servicio por sí sola."
+    if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar audit-libs" "no instalado" "dnf/yum install audit-libs" "$reason"; then
+      if command -v dnf >/dev/null 2>&1; then dnf install audit-libs -y
+      else yum install audit-libs -y; fi
+      if rpm -q audit-libs >/dev/null 2>&1; then FIXED=$((FIXED + 1); else WARNINGS=$((WARNINGS + 1)); fi
     else
-      echo -e "${YELLOW}    Recomendacion: Instalar audit-tools (RHEL 7-9) o audit-rules (RHEL 10)${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
+  fi
+
+  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then
+    echo -e "${GREEN}[✓] auditctl disponible${NC}"
+    return
+  fi
+
+  os_version="$(get_os_version)"
+  if [[ "$os_version" =~ ^[0-9]+$ ]] && [ "$os_version" -ge 10 ]; then
+    package="audit-rules"
+  else
+    package="audit-tools"
+  fi
+  reason="Instala auditctl y utilidades de administración de reglas. El gestor de paquetes puede actualizar dependencias y el repositorio debe estar disponible."
+  if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar $package" "auditctl no disponible" "dnf/yum install $package" "$reason"; then
+    if command -v dnf >/dev/null 2>&1; then dnf install "$package" -y
+    else yum install "$package" -y; fi
+    if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then FIXED=$((FIXED + 1); else WARNINGS=$((WARNINGS + 1)); fi
+  else
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -251,29 +264,26 @@ check_auditd_installed() {
 # 4.1.1.2 - ENSURE AUDITD IS ENABLED AND RUNNING
 # ==============================================
 check_auditd_enabled() {
-  echo -e "\n${BLUE}[*] CIS 4.1.1.2 - Verificando auditd habilitado...${NC}"
+  echo -e "\n${BLUE}[*] CIS 4.1.1.2 - Verificando auditd habilitado y activo... ${NC}"
+  local effect="" state=""
 
   if ob_service_is_enabled auditd; then
-    echo -e "${GREEN}[✓] auditd habilitado${NC}"
+    echo -e "${GREEN}[✓] auditd habilitado al arranque${NC}"
   else
-    echo -e "${RED}[!] auditd no habilitado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      ob_service_enable auditd 2>/dev/null
-      echo -e "${GREEN}[✓] auditd habilitado${NC}"
-      FIXED=$((FIXED + 1))
+    effect="Configura auditd para iniciar en cada arranque. Aumenta la cobertura de auditoría, pero cambia el comportamiento de inicio y debe validarse con la política local."
+    if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "habilitar auditd al arranque" "deshabilitado/no confirmado" "habilitar auditd" "$effect"; then
+      if ob_service_enable auditd; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
     else
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
 
   if ob_service_is_active auditd; then
-    echo -e "${GREEN}[✓] auditd corriendo${NC}"
+    echo -e "${GREEN}[✓] auditd activo${NC}"
   else
-    echo -e "${RED}[!] auditd no corriendo${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      ob_service_start auditd 2>/dev/null
-      echo -e "${GREEN}[✓] auditd iniciado${NC}"
-      FIXED=$((FIXED + 1))
+    effect="Inicia el demonio de auditoría ahora; aumentará los eventos registrados, el uso de CPU/disco y puede cambiar los registros disponibles para soporte/seguridad."
+    if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "iniciar auditd ahora" "inactivo/no confirmado" "iniciar auditd" "$effect"; then
+      if ob_service_start auditd; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
     else
       WARNINGS=$((WARNINGS + 1))
     fi
@@ -310,43 +320,38 @@ check_full_action() {
 # AGREGAR TODAS LAS REGLAS DE AUDITORIA
 # ==============================================
 add_audit_rules() {
-  echo -e "\n${BLUE}[*] Verificando reglas de auditoria...${NC}"
+  echo -e "\n${BLUE}[*] Verificando reglas persistentes de auditoría... ${NC}"
+  local effect="" auditctl="" check key desc
+  local rules_checks=(
+    "time-change:Eventos de fecha/hora"
+    "identity:Eventos de usuario/grupo"
+    "system-locale:Eventos de red"
+    "MAC-policy:Eventos de MAC/SELinux"
+    "logins:Eventos de login/logout"
+    "session:Eventos de sesión"
+    "perm_mod:Eventos de cambios de permisos"
+    "access:Eventos de acceso fallido"
+    "mounts:Eventos de montaje"
+    "delete:Eventos de eliminación de archivos"
+    "scope:Eventos de cambios en sudoers"
+    "modules:Eventos de módulos del kernel"
+  )
 
-  # Crear directorio si no existe
-  if [ ! -d /etc/audit/rules.d ]; then
-    if [ "$AUTO_FIX" = true ]; then
-      mkdir -p /etc/audit/rules.d
-      echo -e "${GREEN}[✓] Directorio /etc/audit/rules.d creado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}[!] Directorio /etc/audit/rules.d no existe${NC}"
-    fi
-  fi
-
-  # Crear archivo de reglas en modo fix
-  if [ "$AUTO_FIX" = true ] && [ -d /etc/audit/rules.d ]; then
-    if [ -f "$AUDIT_RULES" ] && [ -s "$AUDIT_RULES" ]; then
-      echo -e "${GREEN}[✓] Archivo de reglas ya existe: $AUDIT_RULES${NC}"
-    else
-      cat >"$AUDIT_RULES" <<'EOF'
-# ==============================================
-# Reglas de auditoria - CIS Benchmark
-# Generado automaticamente
-# ==============================================
-
-# 4.1.2.1 - Modificaciones de fecha y hora
+  if [ ! -d /etc/audit/rules.d ] || [ ! -s "$AUDIT_RULES" ]; then
+    effect="Crea un conjunto de reglas persistentes para registrar cambios de identidad, tiempo, red, permisos, accesos fallidos, montajes, borrado de archivos, sudo y módulos del kernel. Puede aumentar el volumen de /var/log/audit y la carga de I/O; no se sobrescribirá un archivo de reglas existente que tenga contenido."
+    if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "crear conjunto de reglas auditd" "directorio/archivo ausente o vacío" "$AUDIT_RULES" "$effect"; then
+      mkdir -p /etc/audit/rules.d || { WARNINGS=$((WARNINGS + 1)); return 1; }
+      [ ! -L "$AUDIT_RULES" ] || { echo "[ERROR] $AUDIT_RULES es un enlace simbólico; no se modifica."; WARNINGS=$((WARNINGS+1)); return 1; }
+      cat > "$AUDIT_RULES" <<'EOF'
+# OrangeBox hardening audit rules (review volume and workload before deployment)
 -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
 -w /etc/localtime -p wa -k time-change
-
-# 4.1.2.2 - Modificaciones de usuario/grupo
 -w /etc/group -p wa -k identity
 -w /etc/passwd -p wa -k identity
 -w /etc/gshadow -p wa -k identity
 -w /etc/shadow -p wa -k identity
 -w /etc/security/opasswd -p wa -k identity
-
-# 4.1.2.3 - Modificaciones de red
 -w /etc/sysctl.conf -p wa -k system-locale
 -w /etc/sysctl.d -p wa -k system-locale
 -w /etc/issue -p wa -k system-locale
@@ -354,106 +359,63 @@ add_audit_rules() {
 -w /etc/hosts -p wa -k system-locale
 -w /etc/networks -p wa -k system-locale
 -w /etc/network -p wa -k system-locale
-
-# 4.1.2.4 - Modificaciones de MAC (SELinux)
 -w /etc/selinux -p wa -k MAC-policy
-
-# 4.1.2.5 - Eventos de login/logout
 -w /var/log/faillog -p wa -k logins
 -w /var/log/lastlog -p wa -k logins
 -w /var/log/tallylog -p wa -k logins
-
-# 4.1.2.6 - Informacion de sesion
 -w /var/run/utmp -p wa -k session
 -w /var/log/wtmp -p wa -k session
 -w /var/log/btmp -p wa -k session
-
-# 4.1.2.7 - Modificaciones de permisos DAC
 -a always,exit -F arch=b32 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
 -a always,exit -F arch=b64 -S chmod -S fchmod -S fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod
 -a always,exit -F arch=b32 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
 -a always,exit -F arch=b64 -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod
 -a always,exit -F arch=b32 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
 -a always,exit -F arch=b64 -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod
-
-# 4.1.2.8 - Intentos fallidos de acceso
 -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access
 -a always,exit -F arch=b32 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access
 -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access
 -a always,exit -F arch=b64 -S creat -S open -S openat -S truncate -S ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k access
-
-# 4.1.2.9 - Eventos de montaje
 -a always,exit -F arch=b32 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
 -a always,exit -F arch=b64 -S mount -F auid>=1000 -F auid!=4294967295 -k mounts
-
-# 4.1.2.10 - Eliminacion de archivos
 -a always,exit -F arch=b32 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
 -a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F auid!=4294967295 -k delete
-
-# 4.1.2.11 - Cambios en sudoers
 -w /etc/sudoers -p wa -k scope
 -w /etc/sudoers.d -p wa -k scope
-
-# 4.1.2.12 - Comandos ejecutados con sudo
 -w /var/log/sudo.log -p wa -k actions
-
-# 4.1.2.13 - Carga/descarga de modulos del kernel
 -w /sbin/insmod -p x -k modules
 -w /sbin/rmmod -p x -k modules
 -w /sbin/modprobe -p x -k modules
 -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
-
-# 4.1.2.14 - Configuracion inmutable (proteger reglas)
--e 2
 EOF
-      echo -e "${GREEN}[✓] Archivo de reglas creado: $AUDIT_RULES${NC}"
+      chmod 640 "$AUDIT_RULES" && chown root:root "$AUDIT_RULES" || { WARNINGS=$((WARNINGS+1)); return 1; }
       FIXED=$((FIXED + 1))
+      echo -e "${GREEN}[✓] Reglas persistentes escritas (sin activar inmutabilidad automáticamente)${NC}"
+    else
+      WARNINGS=$((WARNINGS+1))
     fi
+  elif [ -s "$AUDIT_RULES" ]; then
+    echo -e "${GREEN}[✓] Archivo de reglas existente conservado: $AUDIT_RULES${NC}"
   fi
 
-  # Verificar reglas existentes
-  echo -e "\n${BLUE}[*] Verificando reglas cargadas en memoria...${NC}"
-
-  local rules_checks=(
-    "time-change:Eventos de fecha/hora"
-    "identity:Eventos de usuario/grupo"
-    "system-locale:Eventos de red"
-    "MAC-policy:Eventos de MAC/SELinux"
-    "logins:Eventos de login/logout"
-    "session:Eventos de sesion"
-    "perm_mod:Eventos de cambios de permisos"
-    "access:Eventos de acceso fallido"
-    "mounts:Eventos de montaje"
-    "delete:Eventos de eliminacion de archivos"
-    "scope:Eventos de cambios en sudoers"
-    "modules:Eventos de modulos del kernel"
-  )
-
-  AUDITCTL=$(get_auditctl_path)
-
+  echo -e "\n${BLUE}[*] Verificando reglas cargadas en memoria... ${NC}"
+  auditctl="$(get_auditctl_path)"
   for check in "${rules_checks[@]}"; do
     key="${check%%:*}"
-    desc="${check##*:}"
-    if [ -n "$AUDITCTL" ] && $AUDITCTL -l 2>/dev/null | grep -q "$key"; then
+    desc="${check#*:}"
+    if [ -n "$auditctl" ] && "$auditctl" -l 2>/dev/null | grep -q -- "$key"; then
       echo -e "${GREEN}[✓] $desc - OK${NC}"
     else
-      echo -e "${RED}[!] $desc - NO CONFIGURADO${NC}"
-      if [ "$AUTO_FIX" = false ]; then
-        WARNINGS=$((WARNINGS + 1))
-      fi
+      echo -e "${RED}[!] $desc - NO CONFIGURADO EN MEMORIA${NC}"
+      [ "$AUTO_FIX" = true ] || WARNINGS=$((WARNINGS + 1))
     fi
   done
 
-  # Verificar configuracion inmutable
-  if [ -n "$AUDITCTL" ]; then
-    if $AUDITCTL -s 2>/dev/null | grep -q "enabled 2"; then
-      echo -e "${GREEN}[✓] Configuracion inmutable - OK${NC}"
-    else
-      echo -e "${RED}[!] Configuracion inmutable - NO CONFIGURADO${NC}"
-      if [ "$AUTO_FIX" = false ]; then
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
+  if [ -n "$auditctl" ] && "$auditctl" -s 2>/dev/null | grep -q "enabled 2"; then
+    echo -e "${GREEN}[✓] Configuración inmutable ya activa${NC}"
+  else
+    echo -e "${YELLOW}[!] Configuración inmutable no está activa; se audita por separado y no se activa sin confirmación específica${NC}"
+    [ "$AUTO_FIX" = true ] || WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -461,39 +423,90 @@ EOF
 # REINICIAR AUDITD Y CARGAR REGLAS
 # ==============================================
 restart_auditd() {
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "\n${BLUE}[*] Aplicando cambios...${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if [ "$FIXED" -eq 0 ]; then
+    echo -e "${GREEN}[✓] No hay cambios aceptados; no se recarga ni reinicia auditd.${NC}"
+    return 0
+  fi
 
-    if [ ! -d /etc/audit/rules.d ]; then
-      mkdir -p /etc/audit/rules.d
-      echo -e "${GREEN}[✓] Directorio /etc/audit/rules.d creado${NC}"
+  local effect auditctl=""
+  effect="Carga las reglas persistentes y reinicia auditd para aplicar parámetros. Puede cambiar el volumen de eventos, y si las reglas existentes son inmutables (-e 2) algunas operaciones de carga pueden ser rechazadas. La configuración se respalda en $BACKUP_DIR."
+  if ! ob_confirm_hardening_change "recargar reglas/reiniciar auditd" "servicio/configuración actual" "augenrules --load y reinicio de auditd" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  AUDITCTL="$(get_auditctl_path)"
+  if [ -n "$AUDITCTL" ] && [ -f "$AUDIT_RULES" ]; then
+    if "$AUDITCTL" -R "$AUDIT_RULES" 2>/dev/null; then
+      echo -e "${GREEN}[✓] Reglas cargadas con auditctl -R${NC}"
+    else
+      echo -e "${YELLOW}[WARN] auditctl -R rechazó reglas; revisar sintaxis/compatibilidad antes de continuar.${NC}"
+      WARNINGS=$((WARNINGS+1))
     fi
+  fi
 
-    AUDITCTL=$(get_auditctl_path)
-
-    # Cargar reglas con auditctl -R
-    if [ -n "$AUDITCTL" ] && [ -f "$AUDIT_RULES" ]; then
-      $AUDITCTL -R "$AUDIT_RULES" 2>/dev/null
-      if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[✓] Reglas cargadas correctamente${NC}"
-      else
-        echo -e "${YELLOW}[!] Error al cargar reglas, se cargaran al reiniciar auditd${NC}"
-      fi
+  if command -v augenrules >/dev/null 2>&1; then
+    if ! augenrules --load; then
+      echo -e "${YELLOW}[WARN] augenrules --load no pudo cargar reglas; no se fuerza un reinicio.${NC}"
+      WARNINGS=$((WARNINGS+1))
+      return 1
     fi
-
-    # Usar augenrules si existe
-    if command -v augenrules &>/dev/null; then
-      augenrules --load 2>/dev/null
-      echo -e "${GREEN}[✓] Reglas cargadas con augenrules${NC}"
-    elif [ -x /usr/sbin/augenrules ]; then
-      /usr/sbin/augenrules --load 2>/dev/null
-      echo -e "${GREEN}[✓] Reglas cargadas con augenrules${NC}"
+  elif [ -x /usr/sbin/augenrules ]; then
+    if ! /usr/sbin/augenrules --load; then
+      echo -e "${YELLOW}[WARN] augenrules --load no pudo cargar reglas; no se fuerza un reinicio.${NC}"
+      WARNINGS=$((WARNINGS+1))
+      return 1
     fi
+  fi
 
-    # Reiniciar auditd
-    ob_service_restart auditd 2>/dev/null
-    echo -e "${GREEN}[✓] Auditd reiniciado${NC}"
-    echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema${NC}"
+  if ob_service_is_active auditd; then
+    echo -e "${BLUE}[INFO] auditd está activo; la recarga de reglas ya se intentó. No se reinicia el demonio a la fuerza para evitar interrumpir la auditoría.${NC}"
+  elif ob_service_start auditd; then
+    echo -e "${GREEN}[✓] auditd iniciado${NC}"
+  else
+    echo -e "${YELLOW}[WARN] No se pudo iniciar auditd; revisar el servicio antes de continuar.${NC}"
+    WARNINGS=$((WARNINGS+1))
+  fi
+}
+
+configure_audit_immutable() {
+  local auditctl="" rule_file="/etc/audit/rules.d/zzzzzzzz-orangebox-immutable.rules"
+  local effect="" state=""
+  auditctl="$(get_auditctl_path)"
+  if [ -n "$auditctl" ] && "$auditctl" -s 2>/dev/null | grep -q "enabled 2"; then
+    echo -e "${GREEN}[✓] auditd ya está en modo inmutable (enabled 2)${NC}"
+    return 0
+  fi
+  echo -e "${YELLOW}[!] auditd no está en modo inmutable${NC}"
+  [ "$AUTO_FIX" = true ] || { WARNINGS=$((WARNINGS + 1)); return 0; }
+
+  effect="La opción -e 2 bloquea cambios posteriores a las reglas de auditd hasta reiniciar el sistema. Refuerza la integridad, pero puede impedir corregir errores de reglas sin reinicio y complicar la recuperación remota. Solo se aplica después de las demás modificaciones y con una vía de consola/recuperación probada."
+  if ! ob_confirm_hardening_change "activar inmutabilidad de reglas auditd (-e 2)" "auditctl enabled distinto de 2" "persistir -e 2 y cargar reglas" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  [ ! -L "$rule_file" ] || { echo "[ERROR] $rule_file es enlace simbólico; no se modifica."; WARNINGS=$((WARNINGS+1)); return 1; }
+  if [ -e "$rule_file" ]; then
+    echo -e "${YELLOW}[WARN] $rule_file ya existe; no se sobrescribe. Revise su contenido manualmente.${NC}"
+    WARNINGS=$((WARNINGS+1))
+    return 0
+  fi
+  printf '%s\n' '-e 2' > "$rule_file" || { WARNINGS=$((WARNINGS+1)); return 1; }
+  chmod 640 "$rule_file" && chown root:root "$rule_file" || { rm -f "$rule_file"; WARNINGS=$((WARNINGS+1)); return 1; }
+  FIXED=$((FIXED+1))
+
+  if command -v augenrules >/dev/null 2>&1; then
+    if augenrules --load; then
+      echo -e "${GREEN}[✓] Reglas cargadas; auditd queda inmutable hasta reinicio${NC}"
+    else
+      echo -e "${YELLOW}[WARN] La regla -e 2 quedó persistente, pero no se pudo cargar ahora. Se aplicará al próximo boot si las reglas son válidas.${NC}"
+      WARNINGS=$((WARNINGS+1))
+    fi
+  else
+    echo -e "${YELLOW}[WARN] La regla -e 2 quedó persistente para el próximo boot; augenrules no está disponible.${NC}"
+    WARNINGS=$((WARNINGS+1))
   fi
 }
 
@@ -637,6 +650,7 @@ main() {
   check_full_action
   add_audit_rules
   restart_auditd
+  configure_audit_immutable
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
