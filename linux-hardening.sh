@@ -128,7 +128,7 @@ prepare_backup() {
 # In --fix, a failed backup is fatal: several callers rely on this helper
 # immediately before replacing a configuration file.
 backup_once() {
-  local src="$1" dst backup
+  local src="$1" dst backup src_hash backup_hash
   [ -e "$src" ] || [ -L "$src" ] || return 0
   [ "${AUTO_FIX:-false}" = true ] || return 0
   [ ! -L "$src" ] || die "No se respalda automáticamente $src porque es un enlace simbólico; se aborta antes de modificarlo."
@@ -151,11 +151,13 @@ backup_once() {
   if [ ! -e "$backup" ] && [ ! -L "$backup" ]; then
     die "La copia de seguridad de $src no aparece en $backup; se aborta --fix."
   fi
-  if [ -f "$src" ] && ! cmp -s "$src" "$backup"; then
-    die "La copia de seguridad de $src no coincide con el original; se aborta --fix."
-  fi
-  if [ -d "$src" ] && [ ! -L "$src" ] && ! diff -qr "$src" "$backup" >/dev/null 2>&1; then
-    die "La copia de seguridad del directorio $src no coincide; se aborta --fix."
+  if [ -f "$src" ]; then
+    command -v sha256sum >/dev/null 2>&1 || die "sha256sum no está disponible para verificar el backup de $src; se aborta --fix."
+    src_hash="$(sha256sum "$src" 2>/dev/null | awk '{print $1}')"
+    backup_hash="$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')"
+    if [ -z "$src_hash" ] || [ -z "$backup_hash" ] || [ "$src_hash" != "$backup_hash" ]; then
+      die "La copia de seguridad de $src no coincide con el original; se aborta --fix."
+    fi
   fi
   return 0
 }
