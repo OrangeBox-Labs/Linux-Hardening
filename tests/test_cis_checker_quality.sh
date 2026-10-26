@@ -28,4 +28,11 @@ grep -Fq 'max_log_file activo no existe o no es un entero positivo' "$CIS" || fa
 
 [ -f "$ROOT_DIR/cis-profile-versions.md" ] || fail "no existe el mapa versionado CIS"
 grep -Fq '2026-10-26' "$ROOT_DIR/cis-profile-versions.md" || fail "el mapa CIS no declara fecha de revisión"
+grep -Fq 'cis_grub_param_check audit 1 exact' "$CIS" || fail "audit=1 must check generated GRUB kernel entries"
+grep -Fq 'runtime="yes"' "$CIS" || fail "audit=1 must verify the running kernel"
+grep -Fq 'audit=1 está activo en /proc/cmdline' "$CIS" || fail "audit=1 PASS must include active kernel evidence"
+grep -Fq 'cis_grub_param_check audit_backlog_limit 8192 min' "$CIS" || fail "audit backlog must check generated GRUB kernel entries"
+grep -Fq 'auditctl -s' "$CIS" || fail "audit backlog must check active kernel status"
+grep -Fq 'No se concede PASS sin ambas evidencias' "$CIS" || fail "audit backlog PASS must require active and persisted evidence"
+
 pass "perfil CIS versionado y falsos PASS principales corregidos"
