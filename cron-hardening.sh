@@ -78,6 +78,10 @@ make_backup() {
   fi
   for file in /etc/crontab /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.d /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny; do
     [ -e "$file" ] || [ -L "$file" ] || continue
+    if [ -L "$file" ]; then
+      echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica cron/at sin un backup seguro.${NC}" >&2
+      return 1
+    fi
     if ! cp -a "$file" "$BACKUP_DIR/"; then
       echo -e "${RED}[ERROR] No se pudo respaldar $file; no se modifica cron/at.${NC}" >&2
       return 1
