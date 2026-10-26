@@ -1241,24 +1241,113 @@ check_auditd_installed() {
 # ==============================================
 # 4.1.1.2 - ASEGURAR AUDITORIA EN PROCESOS PRE-AUDITD
 # ==============================================
+cis_grub_config_with_kernel_entries() {
+  local candidate
+  for candidate in /boot/grub2/grub.cfg /boot/grub/grub.cfg /boot/efi/EFI/*/grub.cfg; do
+    [ -r "$candidate" ] || continue
+    if awk '/^[ \t]*(linux|linuxefi|linux16)[ \t]+/ {found=1} END {exit(found ? 0 : 1)}' "$candidate" 2>/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Checks every non-commented kernel entry in generated GRUB.
+# 0 = all entries comply, 1 = at least one differs, 2 = inventory unavailable.
+cis_grub_param_check() {
+  local parameter="$1" expected="$2" comparison="$3" config=""
+  config="$(cis_grub_config_with_kernel_entries)" || return 2
+  awk -v parameter="$parameter" -v expected="$expected" -v comparison="$comparison" '
+    function compliant(line, n, fields, i, token, value) {
+      n=split(line, fields, /[ \t]+/)
+      for (i=1; i<=n; i++) {
+        if (fields[i] ~ ("^" parameter "=")) {
+          token=fields[i]
+          sub(/^[^=]*=/, "", token)
+          value=token
+          if (comparison == "exact" && value == expected) return 1
+          if (comparison == "min" && value ~ /^[0-9]+$/ && value+0 >= expected+0) return 1
+        }
+      }
+      return 0
+    }
+    /^[ \t]*#/ { next }
+    /^[ \t]*(linux|linuxefi|linux16)[ \t]+/ {
+      total++
+      if (!compliant($0)) missing++
+    }
+    END {
+      if (total == 0) exit 2
+      if (missing > 0) exit 1
+      exit 0
+    }
+  ' "$config"
+}
+
 check_audit_boot() {
-  if grep -q "audit=1" /boot/grub2/grub.cfg 2>/dev/null; then
-    log_result "PASS" "4.1.1.2 - Asegurar auditoria de procesos previos a auditd" "" "" "$GREEN"
+  local runtime="unknown" persisted_rc=2
+
+  if [ -r /proc/cmdline ]; then
+    runtime="no"
+    if awk '{
+      n=split($0, a, /[ \t]+/)
+      for (i=1; i<=n; i++) if (a[i] == "audit=1") found=1
+    } END {exit(found ? 0 : 1)}' /proc/cmdline; then
+      runtime="yes"
+    fi
+  fi
+
+  cis_grub_param_check audit 1 exact
+  persisted_rc=$?
+
+  if [ "$runtime" = "yes" ] && [ "$persisted_rc" -eq 0 ]; then
+    log_result "PASS" "4.1.1.2 - Asegurar auditoria de procesos previos a auditd" "audit=1 está activo en /proc/cmdline y en todas las entradas de kernel encontradas en la configuración GRUB generada." "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "4.1.1.2 - Asegurar auditoria de procesos previos a auditd" "audit=1 no encontrado en grub.cfg" "Agregar audit=1 a GRUB_CMDLINE_LINUX en /etc/default/grub. Ejecutar: grub2-mkconfig -o /boot/grub2/grub.cfg" "$RED"
-  return 1
+
+  if [ "$runtime" = "no" ] && [ "$persisted_rc" -eq 1 ]; then
+    log_result "FAIL" "4.1.1.2 - Asegurar auditoria de procesos previos a auditd" "audit=1 no está en el kernel activo y falta o difiere en una o más entradas de GRUB." "Agregar audit=1 a la configuración de arranque, regenerar GRUB y reiniciar solo en una ventana autorizada. Esta auditoría no modifica GRUB." "$RED"
+    return 1
+  fi
+
+  log_result "WARN" "4.1.1.2 - Asegurar auditoria de procesos previos a auditd" "Evidencia desalineada o incompleta: audit=1 activo=$runtime; resultado GRUB=$persisted_rc (0=cumple, 1=ausente/diferente, 2=no verificable)." "Un parámetro presente solo en GRUB no aplica al kernel ya iniciado. Validar el archivo efectivo, regenerar GRUB si corresponde y reiniciar en ventana autorizada; no se hizo ningún cambio." "$YELLOW"
+  return 2
 }
 
 # ==============================================
 # 4.1.1.3 - ASEGURAR audit_backlog_limit SUFICIENTE
 # ==============================================
 check_audit_backlog() {
-  if grep -q "audit_backlog_limit=8192" /boot/grub2/grub.cfg 2>/dev/null; then
-    log_result "PASS" "4.1.1.3 - Asegurar audit_backlog_limit suficiente" "" "" "$GREEN"
+  local active="" active_source="" persisted_rc=2 value=""
+
+  # Prefer auditctl's live kernel status; on legacy versions fall back to /proc/cmdline.
+  if command -v auditctl >/dev/null 2>&1; then
+    active="$(auditctl -s 2>/dev/null | awk '$1=="backlog_limit" && $2 ~ /^[0-9]+$/ {print $2; exit}')"
+    if [[ "$active" =~ ^[0-9]+$ ]]; then active_source="auditctl -s"; fi
+  fi
+  if ! [[ "$active" =~ ^[0-9]+$ ]] && [ -r /proc/cmdline ]; then
+    active="$(awk '{
+      n=split($0, a, /[ \t]+/)
+      for (i=1; i<=n; i++) if (a[i] ~ /^audit_backlog_limit=[0-9]+$/) {
+        split(a[i], b, "="); value=b[2]
+      }
+    } END {if (value != "") print value}' /proc/cmdline)"
+    if [[ "$active" =~ ^[0-9]+$ ]]; then active_source="/proc/cmdline"; fi
+  fi
+
+  cis_grub_param_check audit_backlog_limit 8192 min
+  persisted_rc=$?
+
+  if [[ "$active" =~ ^[0-9]+$ ]] && [ "$active" -ge 8192 ] && [ "$persisted_rc" -eq 0 ]; then
+    log_result "PASS" "4.1.1.3 - Asegurar audit_backlog_limit suficiente" "Valor activo=$active (fuente: $active_source) y todas las entradas GRUB contienen audit_backlog_limit >=8192." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "4.1.1.3 - Asegurar audit_backlog_limit suficiente" "audit_backlog_limit no configurado" "Agregar audit_backlog_limit=8192 a GRUB_CMDLINE_LINUX en /etc/default/grub. Ejecutar: grub2-mkconfig -o /boot/grub2/grub.cfg" "$YELLOW"
+
+  value="$active"
+  [ -n "$value" ] || value="no verificable"
+  [ -n "$active_source" ] || active_source="no disponible"
+  log_result "WARN" "4.1.1.3 - Asegurar audit_backlog_limit suficiente" "Valor activo=$value (fuente: $active_source); resultado GRUB=$persisted_rc (0=cumple, 1=ausente/insuficiente, 2=no verificable). No se concede PASS sin ambas evidencias." "Configurar audit_backlog_limit=8192 o superior en las entradas de arranque y reiniciar en una ventana autorizada. Un backlog mayor consume memoria; esta auditoría no modifica GRUB." "$YELLOW"
   return 2
 }
 
