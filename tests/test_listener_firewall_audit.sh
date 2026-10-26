@@ -35,6 +35,31 @@ assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" tcp 2222)" "regl
 assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" tcp 20201)" "política INPUT ACCEPT deja pasar un puerto sin bloqueo"
 assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" udp 2222)" "la política ACCEPT también permite UDP aunque no haya regla TCP"
 
+# Rule order is significant: an earlier unconditional terminal rule wins.
+rules_accept_first=$(cat <<'RULES'
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -j ACCEPT
+-A INPUT -p tcp --dport 20201 -j DROP
+COMMIT
+RULES
+)
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept_first" tcp 20201)" "ACCEPT incondicional anterior prevalece sobre DROP posterior para el mismo puerto"
+
+rules_drop_first=$(cat <<'RULES'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -j DROP
+-A INPUT -p tcp --dport 20202 -j ACCEPT
+COMMIT
+RULES
+)
+assert_state BLOCKED "$(lfa_iptables_text_state "$rules_drop_first" tcp 20202)" "DROP incondicional anterior prevalece sobre ACCEPT posterior para el mismo puerto"
+
 rules_child=$(cat <<'RULES'
 *filter
 :INPUT ACCEPT [0:0]
@@ -127,6 +152,30 @@ RULES
 assert_state ALLOWED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 20201)" "regla accept nft para puerto en conjunto permite acceso"
 assert_state ALLOWED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 11339)" "política nft accept permite puerto sin regla de bloqueo"
 
+nft_accept_first=$(cat <<'RULES'
+table inet orangebox {
+ chain input {
+  type filter hook input priority filter; policy drop;
+  accept
+  tcp dport 20201 drop
+ }
+}
+RULES
+)
+assert_state ALLOWED "$(lfa_nft_text_state "$nft_accept_first" ipv4 tcp 20201)" "accept nft incondicional anterior prevalece sobre drop posterior"
+
+nft_drop_first=$(cat <<'RULES'
+table inet orangebox {
+ chain input {
+  type filter hook input priority filter; policy accept;
+  drop
+  tcp dport 20202 accept
+ }
+}
+RULES
+)
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_drop_first" ipv4 tcp 20202)" "drop nft incondicional anterior prevalece sobre accept posterior"
+
 nft_child=$(cat <<'RULES'
 table inet orangebox {
  chain input {
@@ -181,12 +230,15 @@ ss() {
 Netid State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
 tcp   LISTEN 0      128    192.0.2.10:22       0.0.0.0:*       users:(("sshd",123,3))
 udp   UNCONN 0      0      192.0.2.10:53       0.0.0.0:*       users:(("named",456,7))
+tcp   LISTEN 0      128    127.0.0.1:9100      0.0.0.0:*       users:(("node_exporter",789,3))
 SSFIXTURE
 }
 audit_ss="$(lfa_audit_listener_firewall)"
-case "$audit_ss" in *"sockets=2;"*) ;; *) fail "el parser ss con cabecera no contabilizó 2 sockets: $audit_ss" ;; esac
+case "$audit_ss" in *"sockets=3;"*) ;; *) fail "el parser ss con cabecera no contabilizó 3 sockets: $audit_ss" ;; esac
 case "$audit_ss" in *"Sockets omitidos por formato no reconocido"*) fail "la cabecera ss no debe contar como socket omitido" ;; esac
 case "$audit_ss" in *"familia ipv6"*) fail "las direcciones IPv4 se clasificaron incorrectamente como IPv6" ;; esac
+case "$audit_ss" in *"LISTENERS TCP/UDP"* && *"service=sshd"* && *"service=named"* && *"service=node_exporter"*) ;; *) fail "no se listaron todos los servicios escuchando: $audit_ss" ;; esac
+case "$audit_ss" in *"listener limitado a loopback"*) ;; *) fail "no se identificó el listener local-only: $audit_ss" ;; esac
 
 ss() { return 1; }
 netstat() {
