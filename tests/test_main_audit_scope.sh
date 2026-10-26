@@ -65,7 +65,7 @@ grep -Fq '      --audit) AUDIT_MODE=true ;;' "$MAIN" || fail "falta el modo expl
 grep -Fq 'die "--audit y --fix son modos excluyentes."' "$MAIN" || fail "--audit debe rechazar la combinación ambigua con --fix"
 grep -Fq '      --audit) AUDIT_MODE=true ;;' "$MAIN" || fail "falta el modo explícito --audit"
 grep -Fq 'die "--audit y --fix son modos excluyentes."' "$MAIN" || fail "--audit debe rechazar la combinación ambigua con --fix"
-grep -Fq 'echo "No aplicables: $NOT_APPLICABLE_COUNT"' "$MAIN" || fail "falta resumen de controles no aplicables"
+grep -Fq 'echo "No aplicables (módulos internos): $NOT_APPLICABLE_COUNT"' "$MAIN" || fail "falta resumen de controles no aplicables"
 grep -Fq 'aide_audit_module' "$MAIN" || fail "la auditoría predeterminada omite el hardening opcional AIDE"
 grep -Fq 'Base de referencia AIDE inicializada' "$MAIN" || fail "AIDE no informa el estado de su base"
 grep -Fq 'Verificación periódica de AIDE configurada' "$MAIN" || fail "AIDE no informa el estado del cron"

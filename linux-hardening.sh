@@ -1909,8 +1909,6 @@ main() {
     for m in ssh bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
-    run_module services
-    run_module fapolicyd
     AUTO_FIX="$previous_fix"
     aide_audit_module
     echo
