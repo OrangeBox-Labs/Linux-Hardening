@@ -20,7 +20,7 @@ rules_drop=$(cat <<'RULES'
 COMMIT
 RULES
 )
-assert_state CONTROLLED "$(lfa_iptables_text_state "$rules_drop" tcp 20201)" "política INPUT DROP protege todos los puertos"
+assert_state BLOCKED "$(lfa_iptables_text_state "$rules_drop" tcp 20201)" "política INPUT DROP bloquea si no hay permiso específico"
 
 rules_accept=$(cat <<'RULES'
 *filter
@@ -31,9 +31,9 @@ rules_accept=$(cat <<'RULES'
 COMMIT
 RULES
 )
-assert_state CONTROLLED "$(lfa_iptables_text_state "$rules_accept" tcp 2222)" "regla INPUT explícita TCP"
-assert_state UNCONTROLLED "$(lfa_iptables_text_state "$rules_accept" tcp 20201)" "puerto sin regla con INPUT ACCEPT"
-assert_state UNCONTROLLED "$(lfa_iptables_text_state "$rules_accept" udp 2222)" "no confundir protocolo TCP con UDP"
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" tcp 2222)" "regla ACCEPT significa acceso permitido, no protegido"
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" tcp 20201)" "política INPUT ACCEPT deja pasar un puerto sin bloqueo"
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_accept" udp 2222)" "la política ACCEPT también permite UDP aunque no haya regla TCP"
 
 rules_child=$(cat <<'RULES'
 *filter
@@ -46,8 +46,8 @@ rules_child=$(cat <<'RULES'
 COMMIT
 RULES
 )
-assert_state CONTROLLED "$(lfa_iptables_text_state "$rules_child" tcp 11339)" "regla en cadena alcanzable desde INPUT"
-assert_state UNCONTROLLED "$(lfa_iptables_text_state "$rules_child" tcp 9995)" "no inventar regla para otro puerto"
+assert_state BLOCKED "$(lfa_iptables_text_state "$rules_child" tcp 11339)" "regla DROP en cadena alcanzable bloquea el puerto"
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_child" tcp 9995)" "otro puerto conserva la política ACCEPT"
 
 rules_restrictive_source=$(cat <<'RULES'
 *filter
@@ -58,7 +58,19 @@ rules_restrictive_source=$(cat <<'RULES'
 COMMIT
 RULES
 )
-assert_state UNCONTROLLED "$(lfa_iptables_text_state "$rules_restrictive_source" tcp 3000)" "allowlist parcial no protege a todos los orígenes"
+assert_state ALLOWED "$(lfa_iptables_text_state "$rules_restrictive_source" tcp 3000)" "allowlist no equivale a bloqueo cuando la política general es ACCEPT"
+
+
+rules_restricted=$(cat <<'RULES'
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -s 192.0.2.0/24 -p tcp --dport 3001 -j ACCEPT
+COMMIT
+RULES
+)
+assert_state RESTRICTED "$(lfa_iptables_text_state "$rules_restricted" tcp 3001)" "la regla ACCEPT con origen restringido se identifica como restringida"
 
 rules_fallback=$(cat <<'RULES'
 *filter
@@ -69,7 +81,7 @@ rules_fallback=$(cat <<'RULES'
 COMMIT
 RULES
 )
-assert_state CONTROLLED "$(lfa_iptables_text_state "$rules_fallback" udp 53)" "rechazo general desde INPUT"
+assert_state BLOCKED "$(lfa_iptables_text_state "$rules_fallback" udp 53)" "rechazo general desde INPUT bloquea el servicio"
 
 nft_drop=$(cat <<'RULES'
 table inet filter {
@@ -79,8 +91,8 @@ table inet filter {
 }
 RULES
 )
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_drop" ipv4 tcp 20201)" "política DROP en nft inet para IPv4"
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_drop" ipv6 udp 1514)" "política DROP en nft inet para IPv6"
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_drop" ipv4 tcp 20201)" "política DROP en nft inet bloquea IPv4"
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_drop" ipv6 udp 1514)" "política DROP en nft inet bloquea IPv6"
 
 nft_ipv4_drop=$(cat <<'RULES'
 table ip filter {
@@ -90,7 +102,7 @@ table ip filter {
 }
 RULES
 )
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_ipv4_drop" ipv4 tcp 20201)" "política DROP en tabla nft ip"
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_ipv4_drop" ipv4 tcp 20201)" "política DROP en tabla nft ip bloquea IPv4"
 assert_state UNKNOWN "$(lfa_nft_text_state "$nft_ipv4_drop" ipv6 tcp 20201)" "no confundir tabla ip con IPv6"
 
 nft_ipv6_drop=$(cat <<'RULES'
@@ -101,7 +113,7 @@ table ip6 filter {
 }
 RULES
 )
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_ipv6_drop" ipv6 tcp 20201)" "política DROP en tabla nft ip6"
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_ipv6_drop" ipv6 tcp 20201)" "política DROP en tabla nft ip6 bloquea IPv6"
 
 nft_port=$(cat <<'RULES'
 table inet orangebox {
@@ -112,8 +124,8 @@ table inet orangebox {
 }
 RULES
 )
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 20201)" "regla explícita nft para puerto en conjunto"
-assert_state UNCONTROLLED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 11339)" "nft INPUT accept sin regla para puerto"
+assert_state ALLOWED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 20201)" "regla accept nft para puerto en conjunto permite acceso"
+assert_state ALLOWED "$(lfa_nft_text_state "$nft_port" ipv4 tcp 11339)" "política nft accept permite puerto sin regla de bloqueo"
 
 nft_child=$(cat <<'RULES'
 table inet orangebox {
@@ -127,7 +139,7 @@ table inet orangebox {
 }
 RULES
 )
-assert_state CONTROLLED "$(lfa_nft_text_state "$nft_child" ipv4 tcp 11339)" "regla nft en cadena alcanzable"
+assert_state BLOCKED "$(lfa_nft_text_state "$nft_child" ipv4 tcp 11339)" "regla nft drop en cadena alcanzable bloquea"
 
 nft_source_filter=$(cat <<'RULES'
 table inet orangebox {
@@ -138,7 +150,19 @@ table inet orangebox {
 }
 RULES
 )
-assert_state UNCONTROLLED "$(lfa_nft_text_state "$nft_source_filter" ipv4 tcp 3000)" "regla nft limitada a ciertos orígenes no equivale a control global"
+assert_state ALLOWED "$(lfa_nft_text_state "$nft_source_filter" ipv4 tcp 3000)" "una allowlist parcial con policy accept no bloquea al resto"
+
+
+nft_restricted=$(cat <<'RULES'
+table inet orangebox {
+ chain input {
+  type filter hook input priority filter; policy drop;
+  ip saddr 192.0.2.0/24 tcp dport 3001 accept
+ }
+}
+RULES
+)
+assert_state RESTRICTED "$(lfa_nft_text_state "$nft_restricted" ipv4 tcp 3001)" "el permiso nft con origen restringido queda identificado como restringido"
 
 # Live command parser compatibility tests: synthetic fixtures only, no host firewall changes.
 lfa_load_firewall_snapshots() {
@@ -178,4 +202,4 @@ audit_netstat="$(lfa_audit_listener_firewall)"
 case "$audit_netstat" in *"sockets=2;"*) ;; *) fail "el fallback netstat no contabilizó sockets TCP/UDP: $audit_netstat" ;; esac
 case "$audit_netstat" in *"Sockets omitidos por formato no reconocido"*) fail "las cabeceras de netstat no deben contar como sockets omitidos" ;; esac
 
-pass "política INPUT, reglas por puerto, cadenas alcanzables, familia/protocolo y nftables"
+pass "permiso frente a bloqueo, política INPUT, allowlists parciales, cadenas alcanzables y nftables"
