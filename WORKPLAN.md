@@ -33,7 +33,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Cambiar `FS-hardening.sh` a auditoría por defecto y `--fix` explícito; pedir aprobación individual para restricciones de montaje, `hidepid=2`, bloqueo de módulos y deshabilitación de autofs; no descargar módulos cargados en caliente.
 - [x] Añadir al baseline principal los controles `kernel.yama.ptrace_scope`, `vm.mmap_min_addr`, `kernel.unprivileged_bpf_disabled` y `user.max_user_namespaces`, usando la ruta de validación/confirmación de sysctl.
 - [x] Añadir pruebas iniciales para los comportamientos de filesystem y calidad del verificador CIS.
-- [ ] Confirmar el resultado CI de commit `7d619b9f65687d214d7ce9d3c7bd9ad43f71575b` y corregir fallos si aparecen.
+- [ ] Confirmar CI de los cambios de este ciclo; el seguimiento vigente está en «Auditoría CIS / estado del repositorio» más abajo.
 
 ### Auditoría CIS / estado del repositorio — 2026-10-26
 
