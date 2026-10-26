@@ -22,11 +22,13 @@ Linux-Hardening está evolucionando hacia algo más útil que una colección de 
 
 La filosofía actual de OrangeBox es bastante simple: **primero comprobar, después preguntar y finalmente cambiar**. El baseline incorpora controles de idempotencia, preflight de configuración efectiva, auditorías de solo lectura y políticas especiales para ambientes donde romper SSH a las 3 de la mañana no es precisamente una feature.
 
+El estado detallado del proyecto, los módulos implementados, los controles pendientes y las brechas CIS está en [PROJECT-STATUS.md](PROJECT-STATUS.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
+
 ### Cambios recientes del baseline y los módulos
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.25: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
+| `linux-hardening.sh` | Baseline 1.4.26: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -208,7 +210,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.25; reporte de todos los controles corregibles, con estado y resumen. |
+| `linux-hardening.sh` | Baseline 1.4.26; reporte de todos los controles corregibles, con estado y resumen. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
