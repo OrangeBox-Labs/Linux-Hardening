@@ -40,13 +40,19 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 El texto del banner es deliberadamente generico: no informa el estado de SELinux
 ni enumera el firewall, herramientas de integridad o mecanismos de deteccion.
 
+## Aviso previo a la autenticación
+
+`/etc/issue` y `/etc/issue.net` muestran el aviso legal y de seguridad antes de autenticar. El logo no se repite en este banner previo: queda reservado para el MOTD de shell.
+
+La IP remota real no puede interpolarse dentro del `Banner` estático estándar de OpenSSH. Se debe comprobar en los logs de autenticación SSH. Mostrar la IP variable al cliente antes de autenticar requeriría una integración PAM específica y probada; este módulo no modifica automáticamente la pila PAM.
+
 ## Mensaje posterior al login (MOTD dinámico)
 
-El banner se muestra desde /etc/profile.d/99-orangebox-motd.sh en shells interactivas. Incluye logotipo OrangeBox, aviso de acceso restringido, IP remota SSH cuando existe SSH_CONNECTION, IP local del servidor, uptime normalizado, carga promedio de 1/5/15 minutos y kernel activo.
+El banner se muestra desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas. Incluye solo el logotipo OrangeBox (FIGlet si está disponible, ASCII como alternativa), la IP interna del servidor, uptime normalizado desde `/proc/uptime` y carga promedio de 1/5/15 minutos desde `/proc/loadavg`. El aviso de seguridad y el texto legal no se repiten en la shell.
 
-/etc/motd se deja vacío para evitar duplicar el banner. Un archivo estático no puede conocer la IP remota específica de cada sesión. El perfil no se ejecuta para SFTP ni para comandos SSH no interactivos; el aviso previo de /etc/issue.net sigue aplicando.
+`/etc/motd` se deja vacío para evitar duplicados. El perfil no se ejecuta para SFTP ni para comandos SSH no interactivos; `/etc/issue.net` sigue siendo el aviso previo al login.
 
-Si FIGlet está disponible con la fuente small, se utiliza el logotipo coloreado. En modo --fix, si falta, se intenta instalar desde los repositorios ya configurados; si la instalación falla o no existe la fuente, se muestra el ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
+Si FIGlet está disponible con la fuente `small`, se utiliza el logotipo coloreado. En modo `--fix`, si falta, se intenta instalar desde repositorios ya configurados; si la instalación falla o no existe la fuente, se muestra el ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
 
 ## Backup
 
