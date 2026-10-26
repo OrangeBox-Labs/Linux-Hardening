@@ -874,7 +874,8 @@ kernel_module(){
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then
     echo -e "$BLUE[INFO]$NC El destino persistente sysctl está enlazado/no gestionado por OrangeBox; se auditan igualmente todos los valores y no se sobrescribe ese archivo."
   fi
-  # CIS Red Hat 9 v3.0.0 3.3.1 recommends disabling host forwarding.
+  # CIS RHEL 9 v3.0.0 recommendation 3.3.1 covers IPv4 and IPv6 forwarding;
+  # exact cross-version/profile mapping is tracked in CIS-COVERAGE-MAP.md.
   # Routing/NAT/VPN/container gateways are legitimate exceptions, so sysctl-safe
   # explains the effect and requires individual [s/N] consent before any change.
   set_sysctl net.ipv4.ip_forward 0
