@@ -2086,6 +2086,16 @@ run_companion_module() {
     return 0
   fi
 
+  # auditd-hardening deliberately supports read-only checks only on EL6.
+  # Do not ask for consent to run an --fix path that will abort without changes.
+  if [ "$apply_fix" = true ] && [ "$name" = "auditd-full" ] &&
+     [[ "${OS_VERSION:-0}" =~ ^[0-9]+$ ]] && [ "$OS_VERSION" -lt 7 ]; then
+    echo "[INFO] auditd-full en EL6 queda en auditoría legacy: --fix no está soportado por este módulo; no se solicita aprobación ni se intenta aplicar."
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    [ "$child_rc" -eq 0 ] || COMPANION_MODULES_FAILED=$((COMPANION_MODULES_FAILED + 1))
+    return 0
+  fi
+
   if [ "$interactive" = true ]; then
     warn "$name no ofrece auditoría no interactiva; se omite."
     COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
@@ -2183,8 +2193,8 @@ main() {
   if [ "$AUTO_MODE" = true ] && [ "$ALLOW_RISKY" = true ]; then
     die "--auto y --allow-risky son incompatibles: --auto siempre omite controles críticos."
   fi
-  if [ "$ALLOW_SHOREWALL" = true ] && [ "$MODULE" != "network-full" ]; then
-    warn "--allow-shorewall solo se utiliza con --module network-full."
+  if [ "$ALLOW_SHOREWALL" = true ] && { [ "$MODULE" != "network-full" ] || [ "$AUTO_FIX" != true ]; }; then
+    die "--allow-shorewall requiere --module network-full --fix; se rechaza en el baseline global y en modo auditoría."
   fi
 
   if [ "$MODULE" = "repo-audit" ]; then
