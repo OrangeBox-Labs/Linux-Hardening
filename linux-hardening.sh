@@ -1310,7 +1310,7 @@ fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
   local installed=false active=false
   if [ -x /var/ossec/bin/wazuh-control ] || rpm -q wazuh-agent >/dev/null 2>&1 || rpm -q wazuh-manager >/dev/null 2>&1; then
-    info "Wazuh/FIM ayuda a detectar cambios, pero no sustituye el control de ejecución de fapolicyd. No se activa automáticamente: una política genérica sin inventario y pruebas permisivas puede bloquear aplicaciones, scripts y runtimes legítimos."
+    info "Wazuh detectado: FIM ayuda a detectar cambios, pero no sustituye el control de ejecución de fapolicyd. No se activa automáticamente: una política genérica sin inventario y pruebas permisivas puede bloquear aplicaciones, scripts y runtimes legítimos."
   fi
   rpm -q fapolicyd >/dev/null 2>&1 && installed=true
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet fapolicyd 2>/dev/null; then
@@ -1780,7 +1780,7 @@ Seguridad:
   --fix primero audita cada módulo complementario y muestra sus parámetros pendientes; después explica el riesgo y pide confirmación antes de modificar.
   --fix --auto no hace preguntas: aplica únicamente banners/MOTD; el resto queda en auditoría.
   El baseline global audita sincronización horaria pero no cambia ntpd/chronyd. Para ello usa explícitamente --module time-sync --fix.
-  --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
+  --allow-risky está obsoleto como bypass: ningún control sensible se aplica sin confirmación interactiva.
   --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
   aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
@@ -1848,10 +1848,9 @@ confirm_risky_change() {
     return 1
   fi
   if [ "$ALLOW_RISKY" = true ]; then
-    ok "--allow-risky autoriza aplicar este control sin confirmación adicional."
-    return 0
+    echo -e "$YELLOW[INFO] --allow-risky está obsoleto como bypass: este control sigue requiriendo confirmación interactiva.$NC"
   fi
-  if [ ! -r /dev/tty ]; then
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
     warn "No hay terminal disponible para confirmar; el cambio se omitirá por seguridad."
     return 1
   fi
@@ -1944,6 +1943,19 @@ run_internal_module_with_confirmation() {
   run_module "$name"
 }
 
+companion_module_owns_parameter_consent() {
+  # These modules explain each changed value and ask at the parameter/action
+  # level themselves. A second generic module prompt would duplicate consent.
+  case "$1" in
+    auditd-full|cron-full|grub-full|rsyslog-full|password-full|sudo-full|kernel-full|network-full|filesystem-full|package-repos|crypto-policies|selinux-setup)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 run_companion_module() {
   local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
   local apply_fix="$AUTO_FIX" child_rc=0
@@ -2033,7 +2045,9 @@ run_companion_module() {
 
   # AIDE has its own explicit installation consent when package/base is missing.
   if [ "$risky" = true ] && ! { [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; }; then
-    if ! confirm_risky_change "$name"; then
+    if companion_module_owns_parameter_consent "$name"; then
+      echo "[INFO] '$name' pide confirmación por parámetro/acción; se omite una confirmación global duplicada."
+    elif ! confirm_risky_change "$name"; then
       echo "[INFO] Se conserva la configuración actual de '$name'. La auditoría anterior muestra los pendientes."
       COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
       return 0
