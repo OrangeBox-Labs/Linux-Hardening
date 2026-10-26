@@ -12,6 +12,9 @@ grep -Fq 'legacy_auditd_readonly()' "$AUDITD" || fail "auditd-hardening no ofrec
 grep -Fq '/etc/audit/audit.rules' "$AUDITD" || fail "auditd legacy no verifica la ruta de reglas EL6"
 grep -Fq 'audit_legacy_grub_readonly()' "$GRUB" || fail "grub-hardening no ofrece auditoría de GRUB legacy"
 grep -Fq '/boot/grub/grub.conf' "$GRUB" || fail "GRUB legacy no verifica grub.conf"
+if grep -Fq '.*release[[:space:]]+([0-9]+).*/\\1/p' "$GRUB"; then
+  fail "el detector GRUB legacy tiene una referencia sed con doble escape"
+fi
 if grep -Fq 'grub-full) skip_reason=' "$AGGREGATOR" || grep -Fq 'auditd-full) skip_reason=' "$AGGREGATOR"; then
   fail "el agregador sigue omitiendo controles auditd/GRUB en EL6"
 fi

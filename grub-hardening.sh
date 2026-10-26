@@ -337,7 +337,7 @@ get_el_major() {
     . /etc/os-release
     major="${VERSION_ID%%.*}"
   elif [ -r /etc/redhat-release ]; then
-    major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\\1/p' /etc/redhat-release | head -1)"
+    major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\1/p' /etc/redhat-release | head -1)"
   fi
   printf '%s\n' "$major"
 }
