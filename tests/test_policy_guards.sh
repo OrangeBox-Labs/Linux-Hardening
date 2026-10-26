@@ -33,6 +33,15 @@ grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$CRON
 grep -Fq 'No se reinicia crond' "$CRON" || fail "cron fix should not unconditionally restart the daemon after permission changes"
 if grep -Fq 'ob_service_restart crond' "$CRON"; then fail "cron hardening should not unconditionally restart crond"; fi
 
+
+GRUB="$ROOT_DIR/grub-hardening.sh"
+grep -Fq 'confirm_grub_change()' "$GRUB" || fail "GRUB changes must require explicit terminal consent"
+grep -Fq 'grub_config_has_param()' "$GRUB" || fail "GRUB must verify active GRUB_CMDLINE_LINUX values, not comments"
+grep -Fq 'remove_kernel_param "selinux=0"' "$GRUB" || fail "SELinux boot-argument removal must use the guarded parameter helper"
+grep -Fq 'confirm_grub_change "regenerar la configuración de GRUB' "$GRUB" || fail "GRUB regeneration must explain risk and require confirmation"
+grep -Fq 'múltiples grub.cfg en particiones EFI' "$GRUB" || fail "ambiguous EFI GRUB targets must not be selected by a wildcard"
+grep -Fq 'if [ "$AUTO_FIX" = true ] && [ "$GRUB_PARAMS_CHANGED" = true ]; then' "$GRUB" || fail "GRUB should not regenerate solely because file permissions changed"
+
 pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o propone 0->1"
 
 # All interactive confirmations use the Spanish [s/N] convention, with No as default.
