@@ -11,7 +11,10 @@ sysctl_safe_log() {
   local level="$1"
   shift
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    case "$level" in OK|INFO|CAMBIO\ PROPUESTO) return 0 ;; esac
+    if [ "$level" = "OK" ]; then
+      OK_COUNT=$((${OK_COUNT:-0}+1))
+    fi
+    case "$level" in INFO|CAMBIO\ PROPUESTO) return 0 ;; esac
   fi
   local color reset="${NC:-$'\033[0m'}"
   case "$level" in
@@ -244,7 +247,10 @@ sysctl_safe_apply() {
       [ "$cfg_value" = "$expected" ] && expected_definition=true
     done <<< "$defs"
     if [ "$expected_definition" = true ]; then
-      if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi
+      if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+        sysctl_safe_log "OK" "$key=$expected activo con definición persistente objetivo; se conserva la precedencia actual."
+        return 0
+      fi
       sysctl_safe_log "OK" "$key=$expected ya está activo y existe una definición persistente con ese valor."
       echo "  Se conservan las demás definiciones sin crear un override innecesario:"
       while IFS='|' read -r cfg_file cfg_line cfg_value; do
@@ -285,7 +291,10 @@ sysctl_safe_apply() {
     case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     need_persist=true
   elif [ "$current" = "$expected" ] && [ "$any_defs" = true ]; then
-    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+      sysctl_safe_log "OK" "$key=$expected; valor activo y persistente alineados."
+      return 0
+    fi
     sysctl_safe_log "OK" "$key=$expected; valor activo y persistente alineados."
     while IFS='|' read -r cfg_file cfg_line cfg_value; do
       [ -n "$cfg_value" ] && printf '  - conservado: %s:%s = %s\n' "$cfg_file" "$cfg_line" "$cfg_value"

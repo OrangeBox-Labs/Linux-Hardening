@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.16 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.17 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.16
+SCRIPT_VERSION=1.4.17
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -32,12 +32,18 @@ MODULE=all
 RUN_ID=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
 FIXED=0
+OK_COUNT=0
 WARNINGS=0
 ERRORS=0
 PENDING_ONLY_AUDIT=false
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-section(){ [ "${PENDING_ONLY_AUDIT:-false}" = true ] && return 0; echo -e "\n$BLUE### $1 ###$NC"; }
-ok(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$GREEN[OK]$NC $*"; }
+section(){ echo -e "\n$BLUE### $1 ###$NC"; }
+ok(){
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    OK_COUNT=$((OK_COUNT+1))
+  fi
+  echo -e "$GREEN[OK]$NC $*"
+}
 info(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$BLUE[INFO]$NC $*"; }
 warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
@@ -1429,7 +1435,7 @@ main() {
     # Its installer owns the consent prompt and must explain that tradeoff.
     run_module aide
   elif [ "$MODULE" = "all" ]; then
-    ok "MODO AUDITORÍA: sin cambios"
+    info "MODO AUDITORÍA: sin cambios"
     local m
     for m in ssh sudo kernel synflood rsyslog banners bash; do
       run_module "$m"
@@ -1460,13 +1466,14 @@ main() {
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
   if $PENDING_ONLY_AUDIT; then
+    echo "Controles correctos: $OK_COUNT"
+    echo "Pendientes: $WARNINGS"
+    echo "Errores: $ERRORS"
     if [ "$WARNINGS" -eq 0 ]; then
       echo "No se detectaron correcciones pendientes."
     else
-      echo "Pendientes corregibles: $WARNINGS"
       echo "Ejecuta ./linux-hardening.sh --fix para revisar y confirmar los cambios."
     fi
-    echo "Errores: $ERRORS"
   else
     echo "Correcciones: $FIXED"
     echo "Advertencias: $WARNINGS"
