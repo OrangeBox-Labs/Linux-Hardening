@@ -30,7 +30,8 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
-| `audit-firewall-listeners.sh` | Auditoría independiente de gestores, backends, sockets y reglas INPUT. Solo lectura; fuera del flujo del baseline. |\n| `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
+| `audit-firewall-listeners.sh` | Auditoría independiente de gestores, backends, sockets y reglas INPUT. Solo lectura; fuera del flujo del baseline. |
+| `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
 | `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
 | `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict` y `kernel.kptr_restrict`. |
@@ -199,7 +200,8 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.16; reporte predeterminado de pendientes corregibles mediante `--fix`. |\n| `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
+| `linux-hardening.sh` | Baseline 1.4.16; reporte predeterminado de pendientes corregibles mediante `--fix`. |
+| `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
 | `post-install.sh` | Preparación inicial |
