@@ -22,6 +22,8 @@ jobs:
         run: |
           find . -path './.git' -prune -o -type f -name '*.sh' -print0 \
             | xargs -0 -r -n1 bash -n
+      - name: Test legacy OS release detection
+        run: bash tests/test_os_detection_legacy.sh
       - name: Test Bash history deletion guard
         run: bash tests/test_bash_history_guard.sh
       - name: Test Bash FQDN prompt and Readline bindings
@@ -84,6 +86,7 @@ jobs:
               /bin/bash --version | head -n 1
               find . -path "./.git" -prune -o -type f -name "*.sh" -print0 |
                 xargs -0 -r -n1 /bin/bash -n
+              /bin/bash tests/test_os_detection_legacy.sh
               /bin/bash tests/test_bash_history_guard.sh
               if command -v script >/dev/null 2>&1; then
                 /bin/bash tests/test_bash_prompt_fqdn.sh
