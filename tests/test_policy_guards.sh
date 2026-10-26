@@ -84,4 +84,10 @@ grep -Fq 'update-crypto-policies no aplica a CentOS/RHEL 6/7' "$CORE" || fail "c
 grep -Fq 'sysctl -n "$key"' "$CORE" || fail "los sysctl ausentes siguen contándose como controles fallidos"
 pass "auditorías de auditd, NTP, GRUB, crypto-policy y sysctl distinguen EL6"
 
+# PAM tooling differs on older CentOS/RHEL; it remains read-only.
+grep -Fq 'pam_tally2.so' "$CORE" || fail "CentOS 6 no contempla el mecanismo legacy pam_tally2"
+grep -Fq 'pam_faillock.so' "$CORE" || fail "las versiones modernas deben conservar la comprobación pam_faillock"
+grep -Fq 'authselect no aplica al stack PAM legacy de CentOS/RHEL 6/7' "$CORE" || fail "authselect ausente en CentOS 6 sigue generando un falso positivo"
+pass "PAM se comprueba según la generación sin modificar la pila de autenticación"
+
 pass "fapolicyd no se instala ni activa y se informa la detección de Wazuh"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.11 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.12 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.11
+SCRIPT_VERSION=1.4.12
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -361,8 +361,22 @@ password_module() {
   local max
   max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' /etc/login.defs)
   info "PASS_MAX_DAYS=${max:-no definido}; se conserva sin cambios por política operacional para evitar expiraciones que puedan bloquear accesos."
-  command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1 && ok "authselect operativo; PAM no se edita a ciegas" || warn "PAM requiere revisión; no se insertan reglas automáticamente"
-  grep -Rqs 'pam_faillock.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null && ok "pam_faillock presente" || warn "pam_faillock no presente; se deja en auditoría"
+  if command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1; then
+    ok "authselect operativo; PAM no se edita a ciegas"
+  elif [ "${OS_VERSION:-0}" = 6 ] || [ "${OS_VERSION:-0}" = 7 ]; then
+    info "authselect no aplica al stack PAM legacy de CentOS/RHEL 6/7; no se modifican reglas PAM automáticamente"
+  else
+    warn "PAM requiere revisión; no se insertan reglas automáticamente"
+  fi
+  if [ "${OS_VERSION:-0}" = 6 ]; then
+    grep -Rqs 'pam_tally2.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null &&
+      ok "pam_tally2 presente (mecanismo legacy de bloqueo)" ||
+      warn "pam_tally2 no presente; revisar bloqueo de intentos fallidos en PAM legacy"
+  else
+    grep -Rqs 'pam_faillock.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null &&
+      ok "pam_faillock presente" ||
+      warn "pam_faillock no presente; se deja en auditoría"
+  fi
   getent group wheel >/dev/null 2>&1 && ok "wheel existe" || warn "wheel no existe"
 }
 kernel_module(){
