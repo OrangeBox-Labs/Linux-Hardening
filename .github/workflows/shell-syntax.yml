@@ -68,6 +68,8 @@ jobs:
         run: bash tests/test_fs_safety_guard.sh
       - name: Test companion module consent routing
         run: bash tests/test_companion_consent_routing.sh
+      - name: Test sudo consent and syntax validation
+        run: bash tests/test_sudo_consent.sh
       - name: Test SELinux guarded transition
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
@@ -133,4 +135,5 @@ jobs:
               /bin/bash tests/test_kptr_restrict_policy.sh
               /bin/bash tests/test_selinux_fix_guard.sh
               /bin/bash tests/test_companion_consent_routing.sh
+              /bin/bash tests/test_sudo_consent.sh
             '
