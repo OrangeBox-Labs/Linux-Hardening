@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.14 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.15 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -39,7 +39,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.14
+SCRIPT_VERSION=1.4.15
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -753,7 +753,7 @@ firewall_module() {
   # Inventario del gestor y correlación de sockets/reglas: siempre solo lectura.
   firewall_report_detected
   lfa_audit_listener_firewall
-  WARNINGS=$((WARNINGS + LFA_WARNINGS))
+  WARNINGS=$((WARNINGS + LFA_WARNINGS + FIREWALL_WARNINGS))
 }
 fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
@@ -1072,7 +1072,8 @@ risk_description() {
     synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
     network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
-    firewall|firewall-rules) echo "modifica o reemplaza el filtrado. El generador de iptables está bloqueado porque vacía reglas y establece INPUT DROP; no se ejecutará sobre Shorewall." ;;
+    firewall) echo "identifica el gestor/backend, inventaría listeners y contrasta su acceso con reglas INPUT; es estrictamente de solo lectura incluso con --fix." ;;
+    firewall-rules) echo "el generador de iptables vacía reglas y establece INPUT DROP; está bloqueado para evitar cortar accesos o interferir con Shorewall." ;;
     ssh-cis|ssh-complete) echo "modifica parámetros de SSH y/o algoritmos criptográficos. Puede dejar fuera clientes antiguos, automatizaciones o el acceso administrativo." ;;
     password|password-full) echo "cambia política de contraseñas o valores por defecto. No se editará PAM a ciegas, pero podría afectar autenticación o futuras contraseñas." ;;
     filesystem|filesystem-full) echo "puede restringir montajes, ocultar procesos con hidepid, bloquear módulos o deshabilitar autofs; podría afectar monitoreo y aplicaciones." ;;
