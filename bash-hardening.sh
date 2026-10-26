@@ -211,6 +211,21 @@ orangebox_history_guard() {
     bind '"\C-e": end-of-line' 2>/dev/null || true
     orangebox_set_prompt
 }
+
+# Retirar hooks heredados que borraban la lista de historial en cada prompt.
+# Se conserva cualquier otro comando del PROMPT_COMMAND existente.
+OB_PROMPT_COMMAND=${PROMPT_COMMAND-}
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -a; history -c; history -r;/}"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -a; history -c; history -r/}"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -c; history -r;/}"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -c; history -r/}"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//; ;/;}"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND#; }"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND%; }"
+OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND%;}"
+PROMPT_COMMAND="$OB_PROMPT_COMMAND"
+unset OB_PROMPT_COMMAND
+
 case ";${PROMPT_COMMAND:-};" in
     *";orangebox_history_guard;"*|*"; orangebox_history_guard;"*) ;;
     *)
@@ -479,13 +494,68 @@ EOF
 }
 
 # ==============================================
+# Migrar PROMPT_COMMAND heredado sin perder otros hooks
+# ==============================================
+install_root_history_prompt_migration() {
+  [ -f "$BASHRC_ROOT" ] || return 1
+  grep -Fq '# ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN' "$BASHRC_ROOT" 2>/dev/null && return 0
+
+  cat >>"$BASHRC_ROOT" <<'EOF'
+
+# ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN
+# Retirar el hook antiguo que limpiaba y recargaba el historial en cada prompt.
+OB_ROOT_PROMPT_COMMAND=${PROMPT_COMMAND-}
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND//history -a; history -c; history -r;/}"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND//history -a; history -c; history -r/}"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND//history -c; history -r;/}"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND//history -c; history -r/}"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND//; ;/;}"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND#; }"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND%; }"
+OB_ROOT_PROMPT_COMMAND="${OB_ROOT_PROMPT_COMMAND%;}"
+PROMPT_COMMAND="$OB_ROOT_PROMPT_COMMAND"
+unset OB_ROOT_PROMPT_COMMAND
+
+# Garantizar guardado incremental sin eliminar hooks personalizados.
+if declare -F orangebox_history_guard >/dev/null 2>&1; then
+    case " ${PROMPT_COMMAND:-} " in
+        *orangebox_history_guard*) ;;
+        *) PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND}; }orangebox_history_guard" ;;
+    esac
+else
+    case " ${PROMPT_COMMAND:-} " in
+        *"history -a"*) ;;
+        *) PROMPT_COMMAND="${PROMPT_COMMAND:+${PROMPT_COMMAND}; }history -a" ;;
+    esac
+fi
+export PROMPT_COMMAND
+# ORANGEBOX HISTORY PROMPT MIGRATION V1 END
+EOF
+}
+
+# ==============================================
 # CONFIGURAR BASHRC DE ROOT
 # ==============================================
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
   if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V4 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
-    echo -e "${GREEN}[✓] /root/.bashrc ya configurado${NC}"
+    if grep -Fq '# ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
+      echo -e "${GREEN}[✓] /root/.bashrc ya configurado; migración de historial verificada${NC}"
+      return 0
+    fi
+    echo -e "${YELLOW}[!] Actualizando migración del PROMPT_COMMAND en /root/.bashrc${NC}"
+    if [ "$AUTO_FIX" = true ]; then
+      if install_root_history_prompt_migration; then
+        echo -e "${GREEN}[✓] Migración del historial instalada en /root/.bashrc${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${RED}[ERROR] No se pudo instalar la migración del historial en /root/.bashrc${NC}" >&2
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
     return 0
   fi
 
@@ -583,6 +653,11 @@ alias reboot='echo "Use shutdown -r now to reboot"'
 alias poweroff='echo "Use shutdown -h now to poweroff"'
 # ORANGEBOX BASH ROOT CONFIG V4 END
 EOF
+    if ! install_root_history_prompt_migration; then
+      echo -e "${RED}[ERROR] No se pudo instalar la migración del historial en /root/.bashrc${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
     echo -e "${GREEN}[✓] /root/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
   else
