@@ -74,6 +74,8 @@ jobs:
         run: bash tests/test_fs_safety_guard.sh
       - name: Test companion module consent routing
         run: bash tests/test_companion_consent_routing.sh
+      - name: Test optional companion script arguments under nounset
+        run: bash tests/test_companion_args.sh
       - name: Test sudo consent and syntax validation
         run: bash tests/test_sudo_consent.sh
       - name: Test USB storage hardening safety
@@ -154,6 +156,7 @@ jobs:
               /bin/bash tests/test_kptr_restrict_policy.sh
               /bin/bash tests/test_selinux_fix_guard.sh
               /bin/bash tests/test_companion_consent_routing.sh
+              /bin/bash tests/test_companion_args.sh
               /bin/bash tests/test_sudo_consent.sh
               /bin/bash tests/test_usb_storage_safety.sh
               /bin/bash tests/test_aide_consent.sh
