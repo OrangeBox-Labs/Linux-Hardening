@@ -73,50 +73,174 @@ firewall_service_state() {
   printf '%s\n' indeterminado
 }
 
+firewall_add_active_manager() {
+  local name="$1"
+  if [ -z "$FIREWALL_ACTIVE_MANAGERS" ]; then
+    FIREWALL_ACTIVE_MANAGERS="$name"
+  else
+    FIREWALL_ACTIVE_MANAGERS="$FIREWALL_ACTIVE_MANAGERS + $name"
+  fi
+  FIREWALL_ACTIVE_MANAGER_COUNT=$((FIREWALL_ACTIVE_MANAGER_COUNT+1))
+}
+
+# Inventario conservador de solo lectura. Un binario instalado por sí solo no
+# demuestra que administre las reglas cargadas actualmente.
 firewall_report_detected() {
-  local out rc state rules_count hooks backend save_cmd service_state
-  local csf_status=no_detectado shorewall_status=no_detectado firewalld_status=no_detectado nft_status=no_detectado imunify_status=no_detectado
+  local out rc state service_state backend rules_count hooks ruleset_present=false
+  local csf_status=no_detectado shorewall_status=no_detectado firewalld_status=no_detectado
+  local nft_status=no_detectado iptables_services_status=no_detectado ufw_status=no_detectado
+  local imunify_status=no_detectado
+
+  FIREWALL_WARNINGS=0
+  FIREWALL_ACTIVE_MANAGERS=""
+  FIREWALL_ACTIVE_MANAGER_COUNT=0
 
   echo "### INVENTARIO DE FIREWALL (solo lectura) ###"
 
+  # CSF has no dedicated firewall daemon; require visible CSF chains in its
+  # read-only listing before claiming that its rules are active.
   if command -v csf >/dev/null 2>&1; then
-    out="$(csf -l 2>&1)"; rc=$?
-    if [ "$rc" -eq 0 ]; then csf_status="instalado; csf -l consultable"; else csf_status="instalado; reglas no verificables (rc=$rc)"; fi
+    rc=0
+    out="$(csf -l 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eiq '(^|[^[:alnum:]_])(LOCALINPUT|ALLOWIN|DENYIN|LOGDROPIN|LOCALOUTPUT|DENYOUT|CC_ALLOW|CC_DENY)([^[:alnum:]_]|$)|CSF'; then
+      csf_status="instalado; actividad confirmada por cadenas/listado CSF"
+      firewall_add_active_manager "CSF"
+    elif [ "$rc" -eq 0 ]; then
+      csf_status="instalado; csf -l funciona, reglas CSF activas no confirmadas"
+    else
+      csf_status="instalado; listado no verificable (rc=$rc)"
+    fi
   fi
   echo "CSF: $csf_status"
 
   if command -v shorewall >/dev/null 2>&1; then
-    out="$(shorewall status 2>&1 || true)"
-    if printf '%s\n' "$out" | grep -Eiq 'stopped|not running|inactive|is down'; then shorewall_status="instalado; inactivo"
-    elif printf '%s\n' "$out" | grep -Eiq 'running|started|active'; then shorewall_status="instalado; activo"
-    else service_state="$(firewall_service_state shorewall)"; shorewall_status="instalado; estado=$service_state"; fi
+    rc=0
+    out="$(shorewall status 2>&1)" || rc=$?
+    if printf '%s\n' "$out" | grep -Eiq 'not running|stopped|inactive|is down'; then
+      shorewall_status="instalado; inactivo"
+    elif printf '%s\n' "$out" | grep -Eiq 'running|started|active|is up'; then
+      shorewall_status="instalado; activo"
+      firewall_add_active_manager "Shorewall"
+    else
+      service_state="$(firewall_service_state shorewall)"
+      if [ "$service_state" = activo ]; then
+        shorewall_status="instalado; servicio activo"
+        firewall_add_active_manager "Shorewall"
+      else
+        shorewall_status="instalado; actividad no confirmada (rc=$rc, servicio=$service_state)"
+      fi
+    fi
+  else
+    service_state="$(firewall_service_state shorewall)"
+    if [ "$service_state" = activo ]; then
+      shorewall_status="servicio activo, comando shorewall no disponible"
+      firewall_add_active_manager "Shorewall"
+    fi
   fi
   echo "Shorewall: $shorewall_status"
 
+  state=""
   if command -v firewall-cmd >/dev/null 2>&1; then
     state="$(firewall-cmd --state 2>/dev/null || true)"
-    if [ "$state" = running ]; then firewalld_status="herramienta presente; activo"
-    else firewalld_status="herramienta presente; estado no activo/no verificable"; fi
-  else
-    service_state="$(firewall_service_state firewalld)"
-    if [ "$service_state" != indeterminado ]; then firewalld_status="servicio $service_state"; fi
+  fi
+  service_state="$(firewall_service_state firewalld)"
+  if [ "$state" = running ] || [ "$service_state" = activo ]; then
+    firewalld_status="activo"
+    firewall_add_active_manager "firewalld"
+  elif command -v firewall-cmd >/dev/null 2>&1; then
+    firewalld_status="herramienta presente; servicio no activo/no confirmado"
+  elif [ "$service_state" = inactivo ]; then
+    firewalld_status="inactivo/no detectado"
   fi
   echo "firewalld: $firewalld_status"
 
   if command -v nft >/dev/null 2>&1; then
-    out="$(nft list ruleset 2>/dev/null)"; rc=$?
+    rc=0
+    out="$(nft list ruleset 2>/dev/null)" || rc=$?
     if [ "$rc" -eq 0 ]; then
       hooks="$(printf '%s\n' "$out" | grep -Ec 'hook[[:space:]]+input' || true)"
       rules_count="$(printf '%s\n' "$out" | grep -Ec '^[[:space:]]*(accept|drop|reject|jump|goto|tcp dport|udp dport|ip |ip6 )' || true)"
-      nft_status="herramienta presente; hooks INPUT=$hooks; reglas relevantes visibles=$rules_count"
-    else nft_status="herramienta presente; ruleset no consultable"; fi
+      nft_status="ruleset consultable; hooks INPUT=$hooks; reglas relevantes visibles=$rules_count"
+      if printf '%s\n' "$out" | grep -Eiq 'hook[[:space:]]+input|chain[[:space:]]+(INPUT|input)[[:space:]]*\{'; then
+        ruleset_present=true
+      fi
+    else
+      nft_status="herramienta presente; ruleset no consultable"
+    fi
+  fi
+  service_state="$(firewall_service_state nftables)"
+  if [ "$service_state" = activo ]; then
+    nft_status="$nft_status; servicio nftables activo"
+    firewall_add_active_manager "servicio nftables"
   fi
   echo "nftables: $nft_status"
 
-  if firewall_has_imunify360_rules; then imunify_status="reglas/cadenas de Imunify360 detectadas"; fi
+  service_state="$(firewall_service_state iptables)"
+  if [ "$service_state" != activo ]; then
+    service_state="$(firewall_service_state ip6tables)"
+  fi
+  if [ "$service_state" = activo ]; then
+    iptables_services_status="servicio iptables/ip6tables activo"
+    firewall_add_active_manager "iptables-services"
+  else
+    iptables_services_status="servicio no activo/no confirmado"
+  fi
+  echo "iptables-services: $iptables_services_status"
+
+  if command -v ufw >/dev/null 2>&1; then
+    rc=0
+    out="$(ufw status 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eiq 'Status:[[:space:]]*active'; then
+      ufw_status="activo"
+      firewall_add_active_manager "UFW"
+    elif [ "$rc" -eq 0 ]; then
+      ufw_status="instalado; inactivo"
+    else
+      ufw_status="instalado; estado no verificable"
+    fi
+  fi
+  echo "UFW: $ufw_status"
+
+  if firewall_has_imunify360_rules; then
+    imunify_status="reglas/cadenas de integración detectadas"
+  fi
   echo "Imunify360: $imunify_status"
 
+  # Use loaded INPUT chains as evidence of a filtering ruleset, not as proof
+  # that a particular daemon owns it. Do not conflate iptables-nft with nft's
+  # own service: on modern RHEL both frontends may describe the same kernel.
+  for save_cmd in iptables-save iptables-legacy-save ip6tables-save ip6tables-legacy-save; do
+    if command -v "$save_cmd" >/dev/null 2>&1; then
+      rc=0
+      out="$("$save_cmd" 2>/dev/null)" || rc=$?
+      if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eq '^-A INPUT([[:space:]]|$)|^:INPUT[[:space:]]'; then
+        ruleset_present=true
+      fi
+    fi
+  done
+
+  backend="$(firewall_frontend_backend iptables)"
+  case "$backend" in
+    nf_tables) echo "Backend iptables observado: nf_tables (iptables-nft)" ;;
+    legacy) echo "Backend iptables observado: legacy (iptables-legacy)" ;;
+    no_disponible) echo "Backend iptables observado: no disponible" ;;
+    *) echo "Backend iptables observado: no identificado" ;;
+  esac
+
+  if [ "$FIREWALL_ACTIVE_MANAGER_COUNT" -eq 1 ]; then
+    printf '[OK] Gestor activo detectado: %s. La detección identifica actividad, no modifica ni valida por sí sola cada regla.\n' "$FIREWALL_ACTIVE_MANAGERS"
+  elif [ "$FIREWALL_ACTIVE_MANAGER_COUNT" -gt 1 ]; then
+    printf '[WARN] Gestores activos ambiguos: %s. Revisar coexistencia y orden de hooks; no se elegirá ni cambiará ninguno.\n' "$FIREWALL_ACTIVE_MANAGERS"
+    FIREWALL_WARNINGS=$((FIREWALL_WARNINGS+1))
+  elif [ "$ruleset_present" = true ]; then
+    echo "[WARN] Hay un ruleset de entrada visible, pero no se confirmó qué gestor lo administra (puede ser configuración manual o una integración externa)."
+    FIREWALL_WARNINGS=$((FIREWALL_WARNINGS+1))
+  else
+    echo "[WARN] No se pudo confirmar un gestor activo ni un ruleset INPUT verificable."
+    FIREWALL_WARNINGS=$((FIREWALL_WARNINGS+1))
+  fi
+
   firewall_print_backend_diagnostics
-  echo "[INFO] El inventario identifica gestores/herramientas; la decisión de acceso se estima desde los rulesets legibles y puede quedar indeterminada si las reglas son complejas."
-  echo "[INFO] Solo lectura: no se ejecutan comandos de bloqueo, reinicio, recarga ni escritura de reglas."
+  echo "[INFO] El contraste de listeners se hace aparte, usando solo reglas consultables; reglas complejas pueden producir estado indeterminado."
+  echo "[INFO] Solo lectura: no se ejecutan comandos para bloquear, editar, habilitar, detener, reiniciar ni recargar firewalls."
 }
