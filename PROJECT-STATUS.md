@@ -30,8 +30,8 @@ Este documento es el tablero operativo del repositorio. No confundir “módulo 
 |---|---|---|
 | Filesystem, particiones y opciones de montaje | `FS-hardening.sh` cubre más rutas y opciones que el verificador | Parcial. Se detectó un falso positivo: `findmnt --kernel /ruta` puede devolver el filesystem padre. La rama de trabajo lo reemplaza por coincidencia exacta de mountpoint y agrega una regresión automatizada. |
 | Gestión de paquetes y repositorios | Baseline comprueba `gpgcheck` global y conflictos por repositorio | Parcial; no debe aprobar por directivas comentadas ni ignorar overrides. |
-| Integridad de archivos | Instalador/configuración de AIDE; Wazuh FIM puede cubrir una función similar | Parcial. Se valida ejecución periódica, pero AIDE sigue siendo opcional y exige consentimiento por el posible solapamiento/costo. |
-| Bootloader y core dumps | Módulos GRUB/kernel presentes | Parcial. Revisar BLS/EFI, parámetros activos del kernel, directivas efectivas y permisos; no basta con encontrar una palabra en un archivo generado. |
+| Integridad de archivos | Instalador/configuración de AIDE; Wazuh FIM puede cubrir una función similar | Parcial. Se valida ejecución periódica; AIDE sigue siendo opcional y exige consentimiento por posible solapamiento/costo. Los checks de core dumps ahora leen `systemd-analyze cat-config` para considerar drop-ins; si no pueden resolver la precedencia, no conceden PASS. |
+| Bootloader y core dumps | Módulos GRUB/kernel presentes | Parcial. El control SELinux de arranque ahora revisa `/proc/cmdline`, `grubby --info=ALL` y fuentes BLS/GRUB/EFI; si no puede comprobar runtime y persistencia, devuelve WARN en vez de PASS. La trazabilidad de otros controles de GRUB/permisos sigue pendiente. |
 | SELinux | Auditoría separada y controles en el baseline; el módulo dedicado de setup es de solo lectura | Parcial. El modo efectivo es importante; hay que validar contexto runtime, configuración persistente y argumentos de arranque sin habilitar Enforcing a ciegas. |
 | Servicios y clientes no requeridos | Auditoría de servicios más módulos de eliminación optativos | Parcial. Nunca quitar/deshabilitar DNS, web, correo, NFS, Samba, SNMP u otros componentes solo por no coincidir con un baseline genérico: confirmar que no son necesarios. |
 | Red y firewall | Sysctl y módulo de red; auditoría independiente de listeners/firewall | Parcial en CIS. La auditoría de firewall es solo lectura y no reemplaza una evaluación completa de reglas/políticas de nftables según el perfil de CIS. |
@@ -47,6 +47,9 @@ Este documento es el tablero operativo del repositorio. No confundir “módulo 
 - [x] Identificado riesgo de falso PASS en checks de mountpoints: una consulta de montaje para una ruta puede devolver la partición que contiene esa ruta, aunque no sea un mountpoint dedicado.
 - [x] Añadido a la rama de trabajo un helper que exige coincidencia exacta del punto de montaje y obtiene opciones del mountpoint exacto.
 - [x] Añadida la prueba `tests/test_cis_mountpoint_exact.sh` y conectada al workflow de CI.
+- [x] Corregido otro falso PASS de SELinux en bootloader: se valida el kernel activo y fuentes persistentes BLS/GRUB/EFI; evidencia incompleta queda en WARN.
+- [x] Core dumps ahora se evalúa con `systemd-analyze cat-config` y reconoce overrides; cuando la precedencia de drop-ins no puede resolverse, el resultado queda en WARN.
+- [x] Añadida `tests/test_cis_effective_config.sh` para probar overrides efectivos y detección de argumentos de arranque, y conectada al workflow.
 - [ ] Ejecutar/confirmar todos los tests y compatibilidad; el resultado de CI para la rama de trabajo aún no está verificado.
 - [ ] Integrar los cambios de esta rama en `main` tras validar CI y revisar diff.
 
@@ -54,7 +57,7 @@ Este documento es el tablero operativo del repositorio. No confundir “módulo 
 
 1. **P0 — Confirmar CI de esta rama y revisar el diff.** No integrar si falla sintaxis o cualquier prueba de regresión.
 2. **P1 — Construir una matriz de trazabilidad CIS por distribución/versión.** Por cada recomendación: ID y versión exacta, nivel/perfil cuando aplique, evidencia verificada, módulo responsable, estado `implementado/parcial/pendiente/N/A`, y razón de cualquier excepción.
-3. **P1 — Corregir evidencias CIS que puedan dar falso PASS.** Prioridad: montajes exactos (cambio ya preparado), GRUB/BLS y argumentos de arranque efectivos, core dumps con overrides, SELinux runtime/persistencia, AIDE activo y opciones PAM/SSH efectivas.
+3. **P1 — Corregir evidencias CIS que puedan dar falso PASS.** Montajes exactos, SELinux runtime/persistencia y core dumps con overrides están corregidos en la rama; queda validar CI y continuar con evidencias de GRUB/permisos, AIDE activo y opciones PAM/SSH efectivas.
 4. **P1 — Completar controles faltantes de bajo impacto.** Añadir primero verificaciones de solo lectura y pruebas; no cambiar la configuración durante una auditoría.
 5. **P2 — Aplicar cambios CIS de bajo riesgo de forma idempotente.** Mantener backup, comprobación efectiva y no tocar cuando ya cumple.
 6. **P2 — Cambios con riesgo operativo.** Incluirlos solo con mensaje breve sobre efecto e impacto, confirmación individual por terminal y omisión segura sin TTY. Especial atención a SSH/MFA/forwarding, PAM/lockout, GRUB, montajes `noexec`, bloqueo de módulos, SELinux, firewall, cron/at, `rp_filter`, IPv6 RA, user namespaces/BPF, y acciones de auditd `single`/ `halt`.
