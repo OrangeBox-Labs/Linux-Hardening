@@ -38,7 +38,8 @@ PENDING_ONLY_AUDIT=false
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 section(){ [ "${PENDING_ONLY_AUDIT:-false}" = true ] && return 0; echo -e "\n$BLUE### $1 ###$NC"; }
 ok(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$GREEN[OK]$NC $*"; }
-info(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$BLUE[INFO]$NC $*"; } warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
+info(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$BLUE[INFO]$NC $*"; }
+warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
 detect_os(){
   local os_release_file="${ORANGEBOX_OS_RELEASE_FILE:-/etc/os-release}"
