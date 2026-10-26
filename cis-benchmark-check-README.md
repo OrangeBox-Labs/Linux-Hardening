@@ -35,6 +35,8 @@ Sabemos que existen herramientas como Lynis y OpenSCAP, y son excelentes. Pero e
 
 El script ejecuta un subconjunto de controles basado en CIS Benchmark, organizado en las siguientes secciones. La cantidad de pruebas implementadas no implica cobertura completa ni certificación de cumplimiento del benchmark oficial.
 
+**Importante:** las etiquetas numéricas que aparecen en los resultados son referencias locales históricas. No están validadas uno a uno contra los IDs de todos los benchmarks oficiales vigentes, cuyas recomendaciones y numeración varían por versión y perfil. Consulta [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md) para ver el inventario local y las brechas de trazabilidad. No uses el porcentaje de este script como porcentaje oficial de cumplimiento CIS.
+
 Los controles de `gpgcheck`, `max_log_file`, las acciones de `auditd` y `rpcbind` verifican directivas activas y valores utilizables; una línea comentada o la mera presencia de un paquete no cuenta como evidencia suficiente. El control que actúa al llenarse el disco se separa del aviso cuando el espacio es bajo. Estas comprobaciones siguen siendo un subconjunto local, no una evaluación CIS completa por versión.
 
 | Sección | Descripción |
