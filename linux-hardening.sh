@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.17 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.18 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.17
+SCRIPT_VERSION=1.4.18
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -206,7 +206,8 @@ ssh_state_status() {
   if [ ! -f /etc/ssh/sshd_config ] || ! command -v sshd >/dev/null 2>&1; then
     case "$report" in
       preflight) info "No se puede verificar SSH (sshd_config o sshd ausente); se omite aplicación automática." ;;
-      audit|apply) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
+      audit) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
+      apply) info "No se puede verificar SSH (sshd_config o sshd ausente); no se modificará." ;;
     esac
     return 2
   fi
@@ -214,14 +215,16 @@ ssh_state_status() {
   output="$(sshd -T 2>/dev/null)" || {
     case "$report" in
       preflight) info "sshd -T no pudo interpretar la configuración; no se aplicará SSH automáticamente." ;;
-      audit|apply) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
+      audit) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
+      apply) info "sshd -T no pudo interpretar la configuración; no se modificará SSH." ;;
     esac
     return 2
   }
   [ -n "$output" ] || {
     case "$report" in
       preflight) info "sshd -T no devolvió valores; no se aplicará SSH automáticamente." ;;
-      audit|apply) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
+      audit) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
+      apply) info "sshd -T no devolvió valores; no se modificará SSH." ;;
     esac
     return 2
   }
@@ -238,7 +241,8 @@ ssh_state_status() {
       SSH_PENDING_DIRECTIVES+=("$directive $desired")
       case "$report" in
         preflight) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
-        audit|apply) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+        audit) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+        apply) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
       esac
     elif [ "$report" = "audit" ] || [ "$report" = "apply" ]; then
       ok "SSH $directive=$actual"
@@ -247,46 +251,231 @@ ssh_state_status() {
   return "$status"
 }
 
-# Only prompt when sshd is readable, settings are known to differ, and the
-# module can create its managed drop-in without overwriting existing config.
-ssh_module_can_apply() {
-  [ "${OS_VERSION:-0}" -ge 8 ] &&
-    [ -d /etc/ssh/sshd_config.d ] &&
-    [ -f /etc/ssh/sshd_config ] &&
-    grep -Eiq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' /etc/ssh/sshd_config &&
-    [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
-    command -v sshd >/dev/null 2>&1
+# OpenSSH reads the first value for most global directives. Prefer a drop-in
+# only when sshd_config includes it before any Match block. Otherwise use a
+# marked block at the top of sshd_config, with backup, validation and rollback.
+SSH_MANAGED_BEGIN="# BEGIN ORANGEBOX SSH HARDENING MANAGED BLOCK"
+SSH_MANAGED_END="# END ORANGEBOX SSH HARDENING MANAGED BLOCK"
+
+ssh_dropin_include_enabled() {
+  [ "${OS_VERSION:-0}" -ge 8 ] || return 1
+  [ -d /etc/ssh/sshd_config.d ] && [ -f /etc/ssh/sshd_config ] || return 1
+  awk '
+    /^[[:space:]]*#/ { next }
+    tolower($1) == "match" { seen_match=1 }
+    tolower($1) == "include" && $2 == "/etc/ssh/sshd_config.d/*.conf" && !seen_match { found=1 }
+    END { exit(found ? 0 : 1) }
+  ' /etc/ssh/sshd_config
 }
-ssh_module(){
-  local perms policy ssh_status output
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    ssh_module_can_apply || return 0
-    output="$(sshd -T 2>/dev/null)" || return 0
-    [ -n "$output" ] || return 0
+
+# Prints a reason only when no safe application path is available.
+ssh_module_apply_block_reason() {
+  local main=/etc/ssh/sshd_config begin_count end_count
+  [ -f "$main" ] || { echo "$main no existe"; return 0; }
+  [ -r "$main" ] || { echo "$main no se puede leer"; return 0; }
+  command -v sshd >/dev/null 2>&1 || { echo "el binario sshd no está disponible"; return 0; }
+  sshd -t -f "$main" >/dev/null 2>&1 || { echo "sshd -t falla con la configuración actual; primero hay que corregir ese error"; return 0; }
+
+  if ssh_dropin_include_enabled &&
+     [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
+     [ -w /etc/ssh/sshd_config.d ]; then
+    return 1
   fi
+  [ ! -L "$main" ] || { echo "$main es un enlace simbólico y no se usará para insertar un bloque gestionado"; return 0; }
+  [ -w "$main" ] && [ -w "$(dirname "$main")" ] || { echo "$main o su directorio no permiten una actualización atómica"; return 0; }
+  begin_count="$(grep -Fc "$SSH_MANAGED_BEGIN" "$main" 2>/dev/null || true)"
+  end_count="$(grep -Fc "$SSH_MANAGED_END" "$main" 2>/dev/null || true)"
+  [ "$begin_count" -eq "$end_count" ] && [ "$begin_count" -le 1 ] ||
+    { echo "los marcadores del bloque gestionado OrangeBox en $main están incompletos o duplicados"; return 0; }
+  return 1
+}
+
+ssh_module_can_apply() {
+  local reason
+  reason="$(ssh_module_apply_block_reason || true)"
+  [ -z "$reason" ]
+}
+
+ssh_print_manual_remediation() {
+  local directive
+  if [ "${#SSH_PENDING_DIRECTIVES[@]}" -eq 0 ]; then
+    info "Revisión manual SSH: comprueba la causa indicada y valida con 'sshd -t' antes de recargar el servicio."
+    return 0
+  fi
+  echo -e "$BLUE[INFO]$NC Remediación manual de los parámetros SSH pendientes:"
+  echo "  1. Mantén abierta esta sesión SSH y crea un respaldo:"
+  echo '     cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d-%H%M%S)'
+  echo "  2. Edita /etc/ssh/sshd_config con vi y coloca estas directivas en la sección global,"
+  echo "     al inicio y antes del primer Include o Match. No las agregues simplemente al final:"
+  for directive in "${SSH_PENDING_DIRECTIVES[@]}"; do printf '     %s\n' "$directive"; done
+  echo "  3. Valida y recarga sin cerrar esta sesión:"
+  echo "     sshd -t && (systemctl reload sshd || service sshd reload)"
+  echo "  4. Prueba una segunda conexión antes de cerrar la sesión actual."
+}
+
+ssh_reload_service() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet sshd 2>/dev/null; then
+    systemctl reload sshd >/dev/null 2>&1 && return 0
+  fi
+  if command -v service >/dev/null 2>&1; then
+    service sshd reload >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+ssh_restore_failed_change() {
+  local mode="$1" backup="${2:-}"
+  case "$mode" in
+    dropin) rm -f "$SSH_DROPIN" ;;
+    main)
+      [ -n "$backup" ] && [ -f "$backup" ] || return 1
+      cp -a "$backup" /etc/ssh/sshd_config
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+ssh_apply_pending_settings() {
+  local main=/etc/ssh/sshd_config tmp="" clean="" backup="" mode="" pending_count
+  local begin_count end_count directive
+  local -a directives=()
+  directives=("${SSH_PENDING_DIRECTIVES[@]}")
+  pending_count="${#directives[@]}"
+  [ "$pending_count" -gt 0 ] || return 0
+
+  if ssh_dropin_include_enabled &&
+     [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
+     [ -w /etc/ssh/sshd_config.d ]; then
+    mode=dropin
+    tmp="$(mktemp "${SSH_DROPIN}.XXXXXX")" || { warn "No se pudo crear el drop-in SSH temporal"; return 1; }
+    {
+      printf '# OrangeBox Linux Hardening %s\n' "$SCRIPT_VERSION"
+      for directive in "${directives[@]}"; do printf '%s\n' "$directive"; done
+    } > "$tmp" || { rm -f "$tmp"; warn "No se pudo preparar el drop-in SSH"; return 1; }
+    chmod 600 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
+    if [ -e "$SSH_DROPIN" ] || [ -L "$SSH_DROPIN" ] || ! mv "$tmp" "$SSH_DROPIN"; then
+      rm -f "$tmp"
+      warn "El drop-in SSH apareció o no pudo instalarse; no se sobrescribió ningún archivo existente"
+      return 1
+    fi
+  else
+    mode=main
+    if [ -L "$main" ] || [ ! -w "$main" ] || [ ! -w "$(dirname "$main")" ]; then
+      warn "No es seguro editar $main automáticamente; no se modificó SSH"
+      SSH_PENDING_DIRECTIVES=("${directives[@]}")
+      ssh_print_manual_remediation
+      return 1
+    fi
+    begin_count="$(grep -Fc "$SSH_MANAGED_BEGIN" "$main" 2>/dev/null || true)"
+    end_count="$(grep -Fc "$SSH_MANAGED_END" "$main" 2>/dev/null || true)"
+    if [ "$begin_count" -ne "$end_count" ] || [ "$begin_count" -gt 1 ]; then
+      warn "Los marcadores OrangeBox de $main están incompletos o duplicados; no se modificó SSH"
+      SSH_PENDING_DIRECTIVES=("${directives[@]}")
+      ssh_print_manual_remediation
+      return 1
+    fi
+
+    backup_once "$main" || { warn "No se pudo respaldar $main; no se modificó SSH"; return 1; }
+    backup="$BACKUP_DIR$main"
+    [ -f "$backup" ] || { warn "No se verificó el backup de $main; no se modificó SSH"; return 1; }
+    clean="$(mktemp)" || { warn "No se pudo crear temporal para filtrar el bloque SSH"; return 1; }
+    if ! awk -v begin="$SSH_MANAGED_BEGIN" -v end="$SSH_MANAGED_END" '
+      $0 == begin { if (inside || seen) { bad=1; exit }; inside=1; seen=1; next }
+      $0 == end { if (!inside) { bad=1; exit }; inside=0; next }
+      !inside { print }
+      END { if (inside || bad) exit 1 }
+    ' "$main" > "$clean"; then
+      rm -f "$clean"
+      warn "No se pudo interpretar el bloque gestionado existente; no se modificó SSH"
+      return 1
+    fi
+    tmp="$(mktemp "${main}.XXXXXX")" || { rm -f "$clean"; warn "No se pudo crear temporal para $main"; return 1; }
+    {
+      printf '%s\n' "$SSH_MANAGED_BEGIN"
+      for directive in "${directives[@]}"; do printf '%s\n' "$directive"; done
+      printf '%s\n\n' "$SSH_MANAGED_END"
+      cat "$clean"
+    } > "$tmp" || {
+      rm -f "$clean" "$tmp"
+      warn "No se pudo preparar $main; no se modificó SSH"
+      return 1
+    }
+    rm -f "$clean"
+    chmod --reference="$main" "$tmp" 2>/dev/null || chmod 600 "$tmp"
+    chown --reference="$main" "$tmp" 2>/dev/null || chown root:root "$tmp"
+    if ! mv "$tmp" "$main"; then
+      rm -f "$tmp"
+      warn "No se pudo instalar el bloque gestionado en $main"
+      return 1
+    fi
+  fi
+
+  if ! sshd -t -f "$main" >/dev/null 2>&1 || ! ssh_state_status quiet; then
+    if ! ssh_restore_failed_change "$mode" "$backup"; then
+      warn "CRÍTICO: SSH no validó y no se pudo restaurar automáticamente el archivo anterior; revisar $main y el backup"
+    else
+      warn "La configuración SSH no validó los valores objetivo; se revirtió el cambio"
+    fi
+    SSH_PENDING_DIRECTIVES=("${directives[@]}")
+    ssh_print_manual_remediation
+    return 1
+  fi
+  if ! ssh_reload_service; then
+    if ! ssh_restore_failed_change "$mode" "$backup"; then
+      warn "CRÍTICO: no se pudo recargar sshd ni restaurar la configuración anterior; revisar manualmente"
+    else
+      ssh_reload_service >/dev/null 2>&1 || true
+      warn "No se pudo recargar sshd; se revirtió el cambio para conservar el servicio en su estado anterior"
+    fi
+    SSH_PENDING_DIRECTIVES=("${directives[@]}")
+    ssh_print_manual_remediation
+    return 1
+  fi
+  if ssh_state_status quiet; then
+    ssh_state_status apply || true
+    FIXED=$((FIXED+pending_count))
+    ok "SSH: $pending_count parámetro(s) corregido(s); sshd -t validó la configuración y el servicio fue recargado"
+    return 0
+  fi
+  if ! ssh_restore_failed_change "$mode" "$backup"; then
+    warn "CRÍTICO: los valores SSH siguen pendientes tras recargar y falló la restauración automática"
+  else
+    ssh_reload_service >/dev/null 2>&1 || true
+    warn "Los valores SSH siguen pendientes tras recargar; se revirtió el cambio"
+  fi
+  SSH_PENDING_DIRECTIVES=("${directives[@]}")
+  ssh_print_manual_remediation
+  return 1
+}
+
+ssh_module() {
+  local perms policy ssh_status reason
   section "SSH"
   [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }
   command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
   if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
     perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true)
     [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
-  if command -v update-crypto-policies >/dev/null 2>&1; then
-    policy="$(update-crypto-policies --show 2>/dev/null || echo unknown)"
-    case "$policy" in
-      LEGACY*) warn "Crypto policy=$policy: revisar migración" ;;
-      unknown) warn "No se pudo determinar crypto policy" ;;
-      *) ok "Crypto policy=$policy" ;;
-    esac
-  else
-    case "${OS_VERSION:-0}" in
-      6|7) info "update-crypto-policies no aplica a CentOS/RHEL 6/7; se auditan los algoritmos efectivos de SSH." ;;
-      *) warn "No se pudo determinar crypto policy" ;;
-    esac
-  fi
-  [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"; [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"; [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
+    if command -v update-crypto-policies >/dev/null 2>&1; then
+      policy="$(update-crypto-policies --show 2>/dev/null || echo unknown)"
+      case "$policy" in
+        LEGACY*) warn "Crypto policy=$policy: revisar migración" ;;
+        unknown) warn "No se pudo determinar crypto policy" ;;
+        *) ok "Crypto policy=$policy" ;;
+      esac
+    else
+      case "${OS_VERSION:-0}" in
+        6|7) info "update-crypto-policies no aplica a CentOS/RHEL 6/7; se auditan los algoritmos efectivos de SSH." ;;
+        *) warn "No se pudo determinar crypto policy" ;;
+      esac
+    fi
+    [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"
+    [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"
+    [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
   fi
 
-  # Safe SSH controls only. Existing crypto/auth/forwarding choices are preserved.
+  # Never hide SSH in the compact baseline audit just because the preferred
+  # drop-in path is unavailable: report every baseline directive as [OK]/[WARN].
   if $AUTO_FIX; then
     ssh_state_status apply
   else
@@ -294,40 +483,22 @@ ssh_module(){
   fi
   ssh_status=$?
 
-  if $AUTO_FIX && [ "$OS_VERSION" -ge 8 ] && [ -d /etc/ssh/sshd_config.d ]; then
-    local drop="$SSH_DROPIN" tmp
-    if [ "$ssh_status" -eq 0 ]; then
-      ok "Los controles SSH ya cumplen los objetivos efectivos; no se crea un drop-in redundante"
-    elif [ "$ssh_status" -eq 2 ]; then
-      warn "No se puede verificar de forma segura la configuración SSH; no se modifica"
-    elif [ -e "$drop" ] || [ -L "$drop" ]; then
-      warn "$drop ya existe; no se sobrescribe para preservar configuración existente"
-    else
-      tmp=$(mktemp "$drop.XXXXXX") || { warn "No se pudo crear SSH temporal"; return; }
-      {
-        echo "# OrangeBox Linux Hardening $SCRIPT_VERSION"
-        local directive
-        for directive in "${SSH_PENDING_DIRECTIVES[@]}"; do
-          printf '%s\n' "$directive"
-        done
-      } > "$tmp"
-      chmod 600 "$tmp"; chown root:root "$tmp" 2>/dev/null||true; mv "$tmp" "$drop"
-      if sshd -t >/dev/null 2>&1 && ssh_state_status apply; then
-        ok "sshd -t válido; se verificaron los controles modificados y los demás permanecen intactos"
-        FIXED=$((FIXED+1))
-      else
-        bad "Los controles SSH pendientes no quedaron efectivos; se elimina el drop-in recién creado"
-        rm -f "$drop"
-      fi
-    fi
-  elif $AUTO_FIX; then
-    if [ "$OS_VERSION" -lt 8 ]; then
-      warn "RHEL/CentOS <8: no se edita sshd_config automáticamente para evitar riesgo de perder acceso"
-    elif [ ! -d /etc/ssh/sshd_config.d ]; then
-      warn "/etc/ssh/sshd_config.d no existe; no se modifica sshd_config automáticamente para evitar riesgo de perder acceso"
-    else
-      warn "No se cumplen las condiciones para instalar el drop-in SSH; no se modifica sshd_config automáticamente"
-    fi
+  if $AUTO_FIX; then
+    case "$ssh_status" in
+      0) ok "Los controles SSH ya cumplen los objetivos efectivos; no se modifica la configuración" ;;
+      1) ssh_apply_pending_settings ;;
+      2)
+        reason="$(ssh_module_apply_block_reason || true)"
+        warn "No se modificó SSH porque no se pudo verificar la configuración efectiva: ${reason:-motivo no identificado}"
+        ssh_print_manual_remediation
+        ;;
+    esac
+  elif [ "$ssh_status" -eq 1 ] && [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    ssh_print_manual_remediation
+  elif [ "$ssh_status" -eq 2 ] && [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    reason="$(ssh_module_apply_block_reason || true)"
+    info "Motivo por el que no puede aplicarse SSH automáticamente: ${reason:-no se pudo determinar}"
+    ssh_print_manual_remediation
   fi
   info "No se fuerzan PasswordAuthentication, PubkeyAuthentication, PermitRootLogin, AllowUsers/AllowGroups, forwarding, GSSAPI/Kerberos ni algoritmos criptográficos sin inventario de clientes e integraciones."
 }

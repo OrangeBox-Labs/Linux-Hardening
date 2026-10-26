@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.17: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
+| `linux-hardening.sh` | Baseline 1.4.18: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -65,11 +65,13 @@ Esto permite ejecutar las comprobaciones repetidamente sin convertir cada ejecuc
 
 ## 🔐 SSH con preflight
 
-Los módulos de SSH verifican primero la configuración efectiva. Si los controles ya cumplen, no se solicita confirmación. Si existen cambios pendientes, el sistema evalúa primero si puede aplicarlos de forma segura.
+El módulo SSH siempre muestra los estados `[OK]` y `[WARN]` de los nueve controles del baseline en la auditoría compacta; no oculta los pendientes cuando no puede usar el directorio de drop-ins.
 
-Esto reduce el riesgo de modificar SSH sin necesidad y evita el clásico:
+En `--fix`, los cambios requieren confirmación y se intenta primero el drop-in únicamente si `sshd_config` lo incluye antes de cualquier bloque `Match`. Si esa vía no está disponible, el script crea un bloque gestionado al inicio de `/etc/ssh/sshd_config`, con backup previo. Después valida la sintaxis con `sshd -t`, comprueba los valores efectivos y recarga `sshd`; si la validación o la recarga falla, intenta revertir el cambio. No sobrescribe un drop-in existente.
 
-> "Funcionaba hasta que ejecuté el script."
+Cuando no puede modificar los archivos con seguridad, la salida indica el motivo específico y muestra las directivas pendientes, dónde colocarlas y cómo validar/recargar SSH manualmente. Mantén abierta la sesión actual y prueba una segunda conexión antes de cerrar.
+
+Esto evita dejar un mensaje genérico de “se mantiene en auditoría” sin explicar qué bloqueó la aplicación ni cómo resolverlo.
 
 ## 🧱 Kernel, sysctl y SYN flood
 
@@ -200,7 +202,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.17; reporte de todos los controles corregibles, con estado y resumen. |
+| `linux-hardening.sh` | Baseline 1.4.18; reporte de todos los controles corregibles, con estado y resumen. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |

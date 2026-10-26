@@ -16,6 +16,15 @@ grep -Fq 'firewall) die "La auditoría de firewall es independiente:' "$MAIN" ||
 grep -Fq 'listening) die "El inventario de sockets es independiente:' "$MAIN" || fail "listeners no remite al comando independiente"
 grep -Fq 'source "$SCRIPT_DIR/lib/firewall-detect.sh"' "$FIREWALL" || fail "falta detección de backend"
 grep -Fq 'source "$SCRIPT_DIR/lib/listener-firewall-audit.sh"' "$FIREWALL" || fail "falta auditoría de listeners"
+# SSH stays in the compact audit when the drop-in route is unavailable.
+grep -Fq 'section "SSH"' "$MAIN" || fail "el módulo SSH no genera su sección de auditoría"
+if grep -Fq 'ssh_module_can_apply || return 0' "$MAIN"; then
+  fail "la auditoría compacta todavía oculta SSH si el drop-in no es aplicable"
+fi
+grep -Fq 'ssh_apply_pending_settings' "$MAIN" || fail "falta el flujo de aplicación segura de SSH"
+grep -Fq 'SSH_MANAGED_BEGIN="# BEGIN ORANGEBOX SSH HARDENING MANAGED BLOCK"' "$MAIN" || fail "falta el bloque gestionado alternativo de sshd_config"
+grep -Fq 'ssh_print_manual_remediation' "$MAIN" || fail "falta la guía de remediación manual SSH"
+grep -Fq 'systemctl reload sshd' "$MAIN" || fail "falta la recarga de sshd tras validar el cambio"
 grep -Fq 'firewall_report_detected' "$FIREWALL" || fail "falta inventario de firewall"
 grep -Fq 'lfa_audit_listener_firewall' "$FIREWALL" || fail "falta correlación de INPUT/listeners"
 # Default audit must present both success and pending counts.
