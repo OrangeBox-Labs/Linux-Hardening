@@ -339,12 +339,12 @@ get_el_major() {
   elif [ -r /etc/redhat-release ]; then
     major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\\1/p' /etc/redhat-release | head -1)"
   fi
-  printf '%s\\n' "$major"
+  printf '%s\n' "$major"
 }
 
 audit_legacy_grub_readonly() {
   local cfg="/boot/grub/grub.conf" perms owner group
-  echo -e "\\n${BLUE}[*] GRUB legacy: comprobaciones de solo lectura para EL6...${NC}"
+  echo -e "\n${BLUE}[*] GRUB legacy: comprobaciones de solo lectura para EL6...${NC}"
 
   if [ ! -f "$cfg" ]; then
     echo -e "${RED}[!] No se encontró $cfg; no se puede verificar la configuración del bootloader${NC}"

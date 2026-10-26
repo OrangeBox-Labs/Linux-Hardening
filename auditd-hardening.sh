@@ -55,12 +55,14 @@ show_usage() {
 # FUNCION PARA OBTENER VERSION DEL SISTEMA
 # ==============================================
 get_os_version() {
-  if [ -f /etc/redhat-release ]; then
-    VERSION=$(rpm -q --qf "%{VERSION}" $(rpm -q --whatprovides redhat-release) 2>/dev/null | cut -d: -f1 | cut -d. -f1)
-    echo "$VERSION"
-  else
-    echo ""
+  local version=""
+  if [ -r /etc/redhat-release ]; then
+    version="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\1/p' /etc/redhat-release | head -1)"
   fi
+  if [ -z "$version" ] && rpm -q --whatprovides redhat-release >/dev/null 2>&1; then
+    version="$(rpm -q --qf '%{VERSION}\n' "$(rpm -q --whatprovides redhat-release)" 2>/dev/null | cut -d. -f1 | head -1)"
+  fi
+  printf '%s\n' "$version"
 }
 
 # ==============================================
@@ -529,7 +531,7 @@ show_summary() {
 # AUDITORÍA LEGACY CENTOS/RHEL 6 (SOLO LECTURA)
 # ==============================================
 legacy_audit_rules_check() {
-  echo -e "\\n${BLUE}[*] Reglas persistentes legacy de auditd (/etc/audit/audit.rules)...${NC}"
+  echo -e "\n${BLUE}[*] Reglas persistentes legacy de auditd (/etc/audit/audit.rules)...${NC}"
   if [ -s /etc/audit/audit.rules ]; then
     echo -e "${GREEN}[✓] /etc/audit/audit.rules existe y no está vacío${NC}"
   else
@@ -545,7 +547,7 @@ legacy_audit_rules_check() {
     return 0
   fi
 
-  echo -e "\\n${BLUE}[*] Reglas legacy cargadas en memoria...${NC}"
+  echo -e "\n${BLUE}[*] Reglas legacy cargadas en memoria...${NC}"
   local rules_checks=(
     "time-change:Eventos de fecha/hora"
     "identity:Eventos de usuario/grupo"
@@ -580,7 +582,7 @@ legacy_audit_rules_check() {
 }
 
 legacy_auditd_readonly() {
-  echo -e "${YELLOW}[N/A] CentOS/RHEL 6 usa SysV init y /etc/audit/audit.rules; se ejecutan comprobaciones legacy sin modificar archivos.${NC}"
+  echo -e "${BLUE}[INFO] CentOS/RHEL 6 usa SysV init y /etc/audit/audit.rules; se ejecutan comprobaciones legacy de solo lectura.${NC}"
   check_auditd_installed
   check_auditd_enabled
   check_log_storage
