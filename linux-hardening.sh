@@ -1947,7 +1947,7 @@ companion_module_owns_parameter_consent() {
   # These modules explain each changed value and ask at the parameter/action
   # level themselves. A second generic module prompt would duplicate consent.
   case "$1" in
-    auditd-full|cron-full|grub-full|rsyslog-full|password-full|sudo-full|kernel-full|network-full|filesystem-full|package-repos|crypto-policies|selinux-setup)
+    auditd-full|cron-full|grub-full|rsyslog-full|password-full|sudo-full|kernel-full|network-full|filesystem-full|package-repos|crypto-policies|selinux-setup|usb-storage)
       return 0
       ;;
     *)

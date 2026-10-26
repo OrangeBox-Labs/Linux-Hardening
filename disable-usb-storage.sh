@@ -102,13 +102,18 @@ apply_usb_storage_block() {
   local current="" output="" tmp="" backup="" had_file=false mode="644"
   local effect="Bloquea futuras cargas del módulo de almacenamiento masivo USB mediante modprobe. Puede impedir el uso de discos/pendrives USB y medios externos de backup o recuperación. Si usb-storage está ya cargado, no se descarga en caliente; el bloqueo runtime requiere una ventana de mantenimiento/reinicio autorizada."
 
-  if module_effectively_blocked && module_blacklisted && ! module_loaded; then
-    echo -e "${GREEN}[✓] usb-storage ya está bloqueado; no se modifica.${NC}"
+  if module_effectively_blocked && module_blacklisted; then
+    if module_loaded; then
+      echo -e "${YELLOW}[WARN] El bloqueo persistente ya existe, pero usb-storage continúa cargado. No se cambia ni descarga en caliente; programe una ventana de mantenimiento.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    else
+      echo -e "${GREEN}[✓] usb-storage ya está bloqueado; no se modifica.${NC}"
+    fi
     return 0
   fi
 
   output="$(modprobe -n -v usb-storage 2>/dev/null || true)"
-  if printf '%s\n' "$output" | grep -Eq '^[[:space:]]*install[[:space:]]+(?!/bin/(true|false))'; then
+  if printf '%s\n' "$output" | grep -Eq '^[[:space:]]*install[[:space:]]+' && ! printf '%s\n' "$output" | grep -Eq '^[[:space:]]*install[[:space:]]+/bin/(true|false)([[:space:]]|$)'; then
     echo -e "${YELLOW}[WARN] Existe una directiva install personalizada para usb-storage; no se sobrescribe automáticamente.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 1
