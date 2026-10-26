@@ -72,6 +72,8 @@ jobs:
         run: bash tests/test_sudo_consent.sh
       - name: Test USB storage hardening safety
         run: bash tests/test_usb_storage_safety.sh
+      - name: Test AIDE consent and scheduling safety
+        run: bash tests/test_aide_consent.sh
       - name: Test SELinux guarded transition
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
@@ -139,4 +141,5 @@ jobs:
               /bin/bash tests/test_companion_consent_routing.sh
               /bin/bash tests/test_sudo_consent.sh
               /bin/bash tests/test_usb_storage_safety.sh
+              /bin/bash tests/test_aide_consent.sh
             '
