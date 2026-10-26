@@ -44,39 +44,53 @@ orangebox_motd_ensure_figlet() {
   return 1
 }
 
+orangebox_motd_center_login_line() {
+  local text="$1"
+  local width="\${2:-79}"
+  local pad=$(( (width - \${#text}) / 2 ))
+  [ "$pad" -ge 0 ] || pad=0
+  printf '%*s%s\n' "$pad" '' "$text"
+}
+
 orangebox_motd_write_login_banner() {
   local output="$1"
   local force_ascii=false
+  local logo logo_line
   [ "$#" -ge 2 ] && force_ascii="$2"
   [ -n "$output" ] || return 2
 
-  {
-    printf '%s\n' '*******************************************************************************'
-    if [ "$force_ascii" != true ] && command -v figlet >/dev/null 2>&1 && figlet -f small OrangeBox >/dev/null 2>&1; then
-      figlet -f small OrangeBox
-    else
-      cat <<'ORANGEBOX_ASCII'
+  if [ "$force_ascii" != true ] && command -v figlet >/dev/null 2>&1 && figlet -f small OrangeBox >/dev/null 2>&1; then
+    logo="$(figlet -f small OrangeBox)"
+  else
+    logo="$(cat <<'ORANGEBOX_ASCII'
    ___                        ____
   / _ \ _ __ __ _ _ __   __ _ | __ )
  | | | | '__/ _| | '_ \ / _| ||  _ \
  | |_| | | | (_| | | | | (_| || |_) |
-  \___/|_|  \__,_|_| |_|\__,_||____/
+  \___/|_|  \__,_|_| |_| \__,_||____/
 ORANGEBOX_ASCII
-    fi
+)"
+  fi
+
+  {
+    printf '%s\n' '*******************************************************************************'
+    while IFS= read -r logo_line; do
+      orangebox_motd_center_login_line "$logo_line" 79
+    done <<< "$logo"
     printf '\n'
-    printf '%s\n' '                         SISTEMA DE ACCESO RESTRINGIDO'
-    printf '%s\n' '                           www.orangebox.cl'
+    orangebox_motd_center_login_line 'SISTEMA DE ACCESO RESTRINGIDO' 79
+    orangebox_motd_center_login_line 'www.orangebox.cl' 79
     printf '%s\n' '*******************************************************************************'
     printf '\n'
-    printf '%s\n' 'Todas las conexiones y los comandos ejecutados quedan'
-    printf '%s\n' 'asociados a la IP de origen y se registran en sistemas'
-    printf '%s\n' 'remotos de auditoría.'
+    printf '    %s\n' 'Todas las conexiones y los comandos ejecutados quedan'
+    printf '    %s\n' 'asociados a la IP de origen y se registran en sistemas'
+    printf '    %s\n' 'remotos de auditoría.'
     printf '\n'
-    printf '%s\n' 'Todo acceso, uso o actividad no autorizada será'
-    printf '%s\n' 'documentado y reportado a las autoridades competentes.'
+    printf '    %s\n' 'Todo acceso, uso o actividad no autorizada será'
+    printf '    %s\n' 'documentado y reportado a las autoridades competentes.'
     printf '\n'
-    printf '%s\n' 'Si no cuenta con autorización, desconéctese'
-    printf '%s\n' 'inmediatamente.'
+    printf '    %s\n' 'Si no cuenta con autorización, desconéctese'
+    printf '    %s\n' 'inmediatamente.'
     printf '\n'
     printf '%s\n' '*******************************************************************************'
   } > "$output"
