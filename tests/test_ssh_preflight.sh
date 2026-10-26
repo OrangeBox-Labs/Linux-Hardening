@@ -26,7 +26,7 @@ grep -Fq 'ssh_report_unverifiable_settings()' "$ORCHESTRATOR" || fail "el audit 
 grep -Fq '      --audit) AUDIT_MODE=true ;;' "$ORCHESTRATOR" || fail "falta opción explícita de auditoría"
 grep -Fq '      --audit) AUDIT_MODE=true ;;' "$ORCHESTRATOR" || fail "falta opción explícita de auditoría"
 grep -Fq 'elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then' "$ORCHESTRATOR" || fail "la confirmación no está limitada a diferencias verificadas y aplicables"
-grep -Fq 'Los nueve controles SSH ya cumplen los objetivos efectivos' "$ORCHESTRATOR" || fail "falta omitir la pregunta cuando SSH ya cumple"
+grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes.' "$ORCHESTRATOR" || fail "falta omitir la pregunta cuando SSH ya cumple"
 grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; no se modifica la configuración' "$ORCHESTRATOR" || fail "falta confirmar que no se reescribe SSH conforme"
 grep -Fq 'SSH_PENDING_DIRECTIVES+=("$directive $desired")' "$ORCHESTRATOR" || fail "no se registra cada directiva pendiente"
 grep -Fq 'for directive in "${SSH_PENDING_DIRECTIVES[@]}"' "$ORCHESTRATOR" || fail "la remediación no muestra las directivas pendientes"
