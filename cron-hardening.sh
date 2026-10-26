@@ -33,6 +33,23 @@ BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)"
 # ==============================================
 # FUNCION PARA MOSTRAR AYUDA
 # ==============================================
+confirm_cron_change() {
+  local control="$1" effect="$2" answer=""
+  echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then return 1; fi
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "$YELLOW[WARN] No hay terminal interactiva; se omite el cambio por seguridad.$NC"
+    return 1
+  fi
+  printf '¿Aplicar este cambio? [s/N]: ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) echo -e "$BLUE[INFO] Cambio rechazado; se conserva el estado actual.$NC"; return 1 ;;
+  esac
+}
+
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
@@ -212,113 +229,123 @@ check_unauthorized_crons() {
 # ==============================================
 
 apply_cron_enabled() {
-  echo -e "\n${BLUE}[*] Aplicando: Habilitar e iniciar cron...${NC}"
+  local rc effect
+  ob_service_is_enabled crond
+  rc=$?
+  case "$rc" in
+    0) echo -e "$GREEN[OK] crond ya está habilitado al arranque$NC" ;;
+    1)
+      effect="Habilita crond para que ejecute tareas programadas después de cada arranque. Comprueba que el servidor deba ofrecer cron; habilitarlo puede hacer que tareas existentes vuelvan a ejecutarse."
+      if confirm_cron_change "habilitar crond al arranque" "$effect"; then
+        if ob_service_enable crond; then echo -e "$GREEN[✓] crond habilitado$NC"; FIXED=$((FIXED + 1)); else echo -e "$RED[!] No se pudo habilitar crond$NC"; WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
+      ;;
+    *) echo -e "$YELLOW[WARN] Estado de inicio de crond no verificable; no se modifica.$NC"; WARNINGS=$((WARNINGS + 1)) ;;
+  esac
 
-  if ! ob_service_is_enabled crond; then
-    if ob_service_enable crond; then
-      echo -e "${GREEN}[✓] crond habilitado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] No se pudo habilitar crond${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  if ! ob_service_is_active crond; then
-    if ob_service_start crond; then
-      echo -e "${GREEN}[✓] crond iniciado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] No se pudo iniciar crond${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  ob_service_is_active crond
+  rc=$?
+  case "$rc" in
+    0) echo -e "$GREEN[OK] crond ya está activo$NC" ;;
+    1)
+      effect="Inicia el demonio que ejecuta tareas cron pendientes. Esto puede disparar tareas existentes y generar carga o efectos de aplicaciones; verifica los crontabs antes de activarlo."
+      if confirm_cron_change "iniciar crond ahora" "$effect"; then
+        if ob_service_start crond; then echo -e "$GREEN[✓] crond iniciado$NC"; FIXED=$((FIXED + 1)); else echo -e "$RED[!] No se pudo iniciar crond$NC"; WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
+      ;;
+    *) echo -e "$YELLOW[WARN] Estado de ejecución de crond no verificable; no se modifica.$NC"; WARNINGS=$((WARNINGS + 1)) ;;
+  esac
 }
 
 apply_permissions() {
-  local file="$1"
-  local perms="$2"
-  local owner="$3"
-  local group="$4"
-  local description="$5"
+  local file="$1" perms="$2" owner="$3" group="$4" description="$5"
+  local current_perms="" current_owner="" current_group="" effect="" failed=false
+  [ -e "$file" ] || return 1
+  current_perms="$(stat -c "%a" "$file" 2>/dev/null || true)"
+  current_owner="$(stat -c "%U" "$file" 2>/dev/null || true)"
+  current_group="$(stat -c "%G" "$file" 2>/dev/null || true)"
 
-  if [ ! -e "$file" ]; then
-    return 1
+  if [ "$current_perms" = "$perms" ] && [ "$current_owner" = "$owner" ] && [ "$current_group" = "$group" ]; then
+    echo -e "$GREEN[OK] $description: $current_perms $current_owner:$current_group$NC"
+    return 0
   fi
 
-  local current_perms=$(stat -c "%a" "$file" 2>/dev/null)
-  local current_owner=$(stat -c "%U" "$file" 2>/dev/null)
-  local current_group=$(stat -c "%G" "$file" 2>/dev/null)
-
-  local changed=false
-
-  if [ "$current_perms" != "$perms" ]; then
-    chmod "$perms" "$file" 2>/dev/null
-    echo -e "${GREEN}[✓] $description permisos corregido: $perms${NC}"
-    changed=true
+  effect="Cambiaría $file de $current_perms $current_owner:$current_group a $perms $owner:$group. Protege configuraciones y tareas programadas; permisos más restrictivos pueden impedir que usuarios o procesos no-root lean/accedan a ese fichero o directorio."
+  if ! confirm_cron_change "ajustar permisos/propiedad de $file" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
   fi
 
-  if [ "$current_owner" != "$owner" ]; then
-    chown "$owner:$group" "$file" 2>/dev/null
-    echo -e "${GREEN}[✓] $description propietario corregido: $owner${NC}"
-    changed=true
-  fi
-
-  if [ "$changed" = true ]; then
+  if [ "$current_perms" != "$perms" ] && ! chmod "$perms" "$file"; then failed=true; fi
+  if { [ "$current_owner" != "$owner" ] || [ "$current_group" != "$group" ]; } && ! chown "$owner:$group" "$file"; then failed=true; fi
+  if [ "$failed" = false ] &&
+     [ "$(stat -c "%a" "$file" 2>/dev/null)" = "$perms" ] &&
+     [ "$(stat -c "%U:%G" "$file" 2>/dev/null)" = "$owner:$group" ]; then
+    echo -e "$GREEN[✓] $description corregido: $perms $owner:$group$NC"
     FIXED=$((FIXED + 1))
+  else
+    echo -e "$RED[!] No se pudo validar la corrección de $file$NC"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
 apply_user_restriction() {
-  local allow_file="$1"
-  local deny_file="$2"
-  local service="$3"
-
-  echo -e "\n${BLUE}[*] Aplicando restriccion de usuarios para $service...${NC}"
+  local allow_file="$1" deny_file="$2" service="$3" effect=""
+  echo -e "\n$BLUE[*] Restricción de usuarios para $service$NC"
 
   if [ -f "$deny_file" ]; then
-    rm -f "$deny_file"
-    echo -e "${GREEN}[✓] $deny_file eliminado${NC}"
-    FIXED=$((FIXED + 1))
+    effect="Eliminar $deny_file. Una lista allow explícita debe ser la fuente de autorización; borrar la deny no debe ampliar permisos una vez que exista allow, pero cambia el mecanismo usado para controlar altas de tareas."
+    if confirm_cron_change "eliminar $deny_file" "$effect"; then
+      if rm -f "$deny_file"; then echo -e "$GREEN[✓] $deny_file eliminado$NC"; FIXED=$((FIXED + 1)); else echo -e "$RED[!] No se pudo eliminar $deny_file$NC"; WARNINGS=$((WARNINGS + 1)); fi
+    else WARNINGS=$((WARNINGS + 1)); fi
   fi
 
   if [ ! -f "$allow_file" ]; then
-    echo "root" >"$allow_file"
-    chmod 640 "$allow_file"
-    chown root:root "$allow_file"
-    echo -e "${GREEN}[✓] $allow_file creado con usuario root (permisos 640)${NC}"
-    FIXED=$((FIXED + 1))
+    effect="Crear $allow_file con solo root. En sistemas cron/at que respetan allow, esto limita quién puede crear o gestionar tareas programadas; puede romper flujos de aplicaciones, hosting y cuentas de servicio. Añade usuarios autorizados después de revisar sus necesidades."
+    if confirm_cron_change "crear $allow_file con root como único usuario permitido" "$effect"; then
+      if printf '%s\n' root > "$allow_file" && chmod 640 "$allow_file" && chown root:root "$allow_file"; then
+        echo -e "$GREEN[✓] $allow_file creado con root (0640 root:root)$NC"
+        FIXED=$((FIXED + 1))
+      else
+        rm -f "$allow_file"
+        echo -e "$RED[!] No se pudo configurar $allow_file$NC"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else WARNINGS=$((WARNINGS + 1)); fi
   else
-    if ! grep -q "^root$" "$allow_file"; then
-      echo "root" >>"$allow_file"
-      echo -e "${GREEN}[✓] root agregado a $allow_file${NC}"
-      FIXED=$((FIXED + 1))
+    if ! grep -qx 'root' "$allow_file"; then
+      effect="Añade root a la lista autorizada actual sin eliminar sus demás usuarios. Asegura que el administrador pueda gestionar tareas, pero la lista existente sigue determinando quién puede crearlas."
+      if confirm_cron_change "agregar root a $allow_file" "$effect"; then
+        if printf '%s\n' root >> "$allow_file"; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
     fi
-    # Asegurar permisos 640
     apply_permissions "$allow_file" "640" "root" "root" "Archivo $allow_file"
   fi
 }
 
-# ==============================================
-# FUNCION PARA APLICAR PERMISOS A LOGS DE CRON
-# ==============================================
 apply_cron_log_permissions() {
-  local cron_log="/var/log/cron"
-
-  if [ -f "$cron_log" ]; then
-    local current_perms=$(stat -c "%a" "$cron_log" 2>/dev/null)
-    if { [ "$current_perms" != "640" ] && [ "$current_perms" != "600" ]; } || [ "$(stat -c "%U:%G" "$cron_log" 2>/dev/null)" != "root:root" ]; then
-      chmod 640 "$cron_log"
-      chown root:root "$cron_log"
-      echo -e "${GREEN}[✓] $cron_log permisos corregidos a 640${NC}"
-      FIXED=$((FIXED + 1))
-    fi
+  local cron_log="/var/log/cron" perms owner_group effect
+  [ -f "$cron_log" ] || return 0
+  perms="$(stat -c "%a" "$cron_log" 2>/dev/null || true)"
+  owner_group="$(stat -c "%U:%G" "$cron_log" 2>/dev/null || true)"
+  if { [ "$perms" = "640" ] || [ "$perms" = "600" ]; } && [ "$owner_group" = "root:root" ]; then
+    echo -e "$GREEN[OK] $cron_log permisos $perms $owner_group$NC"
+    return 0
   fi
+  effect="Restringe la lectura del log de cron a root y al grupo propietario. Puede afectar agentes de monitorización o recolectores de logs que dependan de permisos/grupos actuales."
+  if confirm_cron_change "ajustar $cron_log a 0640 root:root" "$effect"; then
+    if chmod 640 "$cron_log" && chown root:root "$cron_log" &&
+       [ "$(stat -c "%a" "$cron_log" 2>/dev/null)" = "640" ] &&
+       [ "$(stat -c "%U:%G" "$cron_log" 2>/dev/null)" = "root:root" ]; then
+      echo -e "$GREEN[✓] $cron_log protegido$NC"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "$RED[!] No se pudo validar el hardening de $cron_log$NC"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  else WARNINGS=$((WARNINGS + 1)); fi
 }
 
-# ==============================================
-# FUNCION PRINCIPAL
-# ==============================================
 main() {
 
   echo -e "${GREEN}============================================${NC}"
@@ -373,9 +400,8 @@ main() {
     apply_user_restriction "/etc/at.allow" "/etc/at.deny" "at"
     apply_cron_log_permissions
 
-    # Reiniciar servicio
-    ob_service_restart crond
-    echo -e "\n${GREEN}[✓] crond reiniciado${NC}"
+    # Permisos y allow/deny no requieren reiniciar crond; evitar interrupciones innecesarias.
+    echo -e "\n$BLUE[INFO] No se reinicia crond: los cambios de permisos y allow/deny no requieren recarga del servicio.$NC"
 
     # Resumen
     echo -e "\n${GREEN}============================================${NC}"
