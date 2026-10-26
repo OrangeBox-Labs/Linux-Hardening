@@ -31,32 +31,23 @@ AUTO_FIX=false
 BACKUP_DIR="/root/banners-backup-$(date +%Y%m%d-%H%M%S)"
 
 # ==============================================
-# ASCII DE ORANGEBOX
-# ==============================================
-ORANGEBOX_ASCII="
-  ___                         ___          
- / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __
-| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /
- \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\
-                    |___/                  
-"
-
-# ==============================================
 # BANNER PREDETERMINADO CON ORANGEBOX
 # ==============================================
 BANNER_TEXT="
 *******************************************************************************
-$ORANGEBOX_ASCII
                          SISTEMA DE ACCESO RESTRINGIDO
                            www.orangebox.cl
 *******************************************************************************
 
-Solo usuarios autorizados pueden acceder a este sistema.
-El acceso o uso no autorizado esta prohibido.
+Todas las conexiones y los comandos ejecutados quedan
+asociados a la IP de origen y se registran en sistemas
+remotos de auditoría.
 
-La actividad realizada en este sistema puede ser registrada y revisada
-conforme a las politicas de la organizacion y a la legislacion aplicable.
-Si no cuenta con autorizacion, desconectese inmediatamente.
+Todo acceso, uso o actividad no autorizada será
+documentado y reportado a las autoridades competentes.
+
+Si no cuenta con autorización, desconéctese
+inmediatamente.
 
 *******************************************************************************
 "
