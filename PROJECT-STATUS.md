@@ -7,6 +7,8 @@
 
 Este documento es el tablero operativo del repositorio. No confundir “módulo implementado” con “cumplimiento completo de CIS”: el verificador local es un subconjunto y no certifica cumplimiento.
 
+El inventario por sección de los 143 checks locales, los dominios que no tienen checks directos y la evaluación inicial de impacto se mantiene en [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md). Ese inventario local todavía no es el mapping uno a uno contra cada recomendación oficial.
+
 ## Resumen ejecutivo
 
 | Área | Estado | Qué existe / qué falta |
@@ -44,6 +46,7 @@ Este documento es el tablero operativo del repositorio. No confundir “módulo 
 
 - [x] Contrastado el mapa local de versiones con la publicación CIS disponible: RHEL 8/9/10, AlmaLinux 8/9/10, Rocky Linux 8/9/10 y Oracle Linux 8/9/10 están catalogados localmente; no asignar una referencia RHEL a CentOS/Stream por defecto.
 - [x] Confirmado que el verificador tiene **143 funciones/controles locales**, por lo que su porcentaje solo describe ese subconjunto.
+- [x] Añadido `CIS-COVERAGE-MAP.md` con el inventario de 143 checks por sección y el listado de secciones CIS sin checks directos en el informe actual (3.2/3.3 y 4.2).
 - [x] Identificado riesgo de falso PASS en checks de mountpoints: una consulta de montaje para una ruta puede devolver la partición que contiene esa ruta, aunque no sea un mountpoint dedicado.
 - [x] Añadido a la rama de trabajo un helper que exige coincidencia exacta del punto de montaje y obtiene opciones del mountpoint exacto.
 - [x] Añadida la prueba `tests/test_cis_mountpoint_exact.sh` y conectada al workflow de CI.
