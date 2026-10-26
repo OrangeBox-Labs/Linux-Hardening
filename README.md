@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.6, ejecución idempotente, preflight efectivo y MOTD dinámico con IP remota SSH, uptime normalizado, load average y fallback ASCII. |
+| `linux-hardening.sh` | Baseline 1.4.7, detección compatible con CentOS 6, controles idempotentes y separación del aviso pre-login frente al MOTD de shell. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -387,6 +387,11 @@ Copyright (c) 2025 Felipe Roman - OrangeBox Labs
 
 ## MOTD dinámico por sesión
 
-El banner se genera al abrir una shell interactiva desde /etc/profile.d/99-orangebox-motd.sh. Así puede mostrar la IP remota de la sesión SSH mediante SSH_CONNECTION, además de la IP del servidor, uptime calculado desde /proc/uptime, load average desde /proc/loadavg y kernel activo. Un archivo /etc/motd estático no puede conocer qué cliente lo está leyendo, por lo que se mantiene vacío para evitar duplicados. Las sesiones SFTP y las conexiones SSH no interactivas no ejecutan /etc/profile.d; el aviso previo al login en /etc/issue.net permanece separado.
+El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra el logo OrangeBox, IP interna del servidor, uptime calculado desde `/proc/uptime` y load average desde `/proc/loadavg`. No muestra la IP remota ni el aviso de seguridad, que pertenecen al aviso previo a la autenticación.
 
-FIGlet es una mejora opcional. Durante --fix, si FIGlet o la fuente small no están disponibles, el instalador intenta instalar el paquete desde los repositorios ya configurados. No habilita EPEL ni otros repositorios automáticamente y no ejecuta una actualización completa del sistema. Si no puede instalarse, el perfil utiliza un logo ASCII embebido. El uptime y la carga se obtienen de /proc, por lo que no dependen de que uptime -p exista en sistemas antiguos como CentOS 6.
+FIGlet es una mejora opcional. Durante `--fix`, si FIGlet o la fuente `small` no están disponibles, el instalador intenta instalar el paquete desde los repositorios ya configurados. No habilita EPEL ni otros repositorios automáticamente y no ejecuta una actualización completa del sistema. Si no puede instalarse, el perfil utiliza un logo ASCII embebido. El uptime y la carga se obtienen de `/proc`, por lo que no dependen de `uptime -p` en CentOS 6.
+
+
+### Limitación de la IP remota antes del login
+
+El `Banner` estándar de OpenSSH envía el contenido estático de `/etc/issue.net`; no expande una variable distinta por conexión. Por eso el aviso previo al login no puede imprimir la IP concreta del cliente usando solamente ese archivo. La IP de origen debe verificarse en los registros de autenticación SSH. Mostrarla interactivamente antes de autenticar requeriría una integración PAM específica, que no se aplica automáticamente porque modifica la cadena de autenticación.
