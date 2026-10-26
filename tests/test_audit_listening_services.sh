@@ -50,7 +50,7 @@ assert_netstat_socket() {
 }
 
 assert_netstat_socket 'tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN 123/sshd' tcp 22 0.0.0.0:22 sshd ADMINISTRACION TODAS_INTERFACES
-assert_netstat_socket 'udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd' udp 161 0.0.0.0:161 snmpd NO_CLASIFICADO TODAS_INTERFACES
+assert_netstat_socket 'udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd' udp 161 0.0.0.0:161 snmpd MONITOREO TODAS_INTERFACES
 assert_netstat_socket 'tcp6 0 0 :::443 :::* LISTEN 456/httpd' tcp 443 ':::443' httpd WEB TODAS_INTERFACES
 
 unknown="$(parse_ss_socket_line 'tcp LISTEN 0 32 0.0.0.0:45678 0.0.0.0:* users:(("custom-agent",pid=107,fd=10))')"

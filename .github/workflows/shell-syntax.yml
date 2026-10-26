@@ -36,6 +36,8 @@ jobs:
         run: bash tests/test_bash_prompt_fqdn.sh
       - name: Test socket audit classification
         run: bash tests/test_audit_listening_services.sh
+      - name: Test systemd and SysV service compatibility helpers
+        run: bash tests/test_service_compat.sh
       - name: Test firewall backend and Imunify detection
         run: bash tests/test_firewall_detect.sh
       - name: Test listener firewall coverage audit
