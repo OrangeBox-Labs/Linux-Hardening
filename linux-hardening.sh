@@ -996,9 +996,35 @@ rsyslog_legacy_is_active() {
   return 1
 }
 
+audit_logging_stack_selection() {
+  local journal_active=false rsyslog_active=false
+  if [ "${OS_VERSION:-0}" = 6 ] || ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ "${OS_VERSION:-0}" -lt 9 ] 2>/dev/null; then
+    info "No se evalúa exclusividad journald/rsyslog para esta generación en el baseline genérico."
+    return 0
+  fi
+
+  systemctl is-active --quiet systemd-journald 2>/dev/null && journal_active=true
+  systemctl is-active --quiet rsyslog 2>/dev/null && rsyslog_active=true
+
+  if [ "$journal_active" = true ] && [ "$rsyslog_active" = true ]; then
+    warn "systemd-journald y rsyslog están activos simultáneamente. Los perfiles CIS RHEL 9/10 separan las rutas journald/rsyslog; el uso dual debe ser una decisión consciente/tailoring."
+    echo "Qué hace/riesgo: deshabilitar cualquiera puede cortar persistencia, forwarding remoto, ingestión de Wazuh o procesos que leen logs. No se detiene ni deshabilita ningún servicio desde esta auditoría."
+  elif [ "$journal_active" = true ]; then
+    ok "Stack de logging activo: systemd-journald; rsyslog no está activo."
+  elif [ "$rsyslog_active" = true ]; then
+    info "Stack de logging activo: rsyslog sin systemd-journald; validar que coincide con el perfil operativo/CIS seleccionado."
+  else
+    warn "No se verificó un stack journald/rsyslog activo; no se habilita ni instala ningún servicio automáticamente."
+  fi
+}
+
 rsyslog_module(){
   local conf=/etc/systemd/journald.conf
   section "JOURNAL / SYSLOG"
+  audit_logging_stack_selection
   if [ "${OS_VERSION:-}" = 6 ]; then
     na "journald no aplica a CentOS/RHEL 6; Storage=persistent está excluido porque se usa el stack legacy."
     na "/var/log/journal como persistencia de journald no aplica a CentOS/RHEL 6."
