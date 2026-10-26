@@ -96,8 +96,7 @@ sudo ./bash-hardening.sh
 
 ### 1. Configuración de Profile (/etc/profile.d/orangebox.sh)
 
-- Muestra banner de OrangeBox al inicio de sesión
-- Muestra información de conexión (IP, usuario, fecha/hora)
+- Delega el logo y la ficha de sesión al MOTD dinámico `/etc/profile.d/99-orangebox-motd.sh` para evitar duplicados
 - Configura prompt personalizado con formato [HH:MM] usuario@hostname directorio $
 - Activa HISTTIMEFORMAT para historial con fecha/hora
 - Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
@@ -186,7 +185,8 @@ bash-hardening.sh
 
 | Archivo | Propósito |
 |---------|-----------|
-| /etc/profile.d/orangebox.sh | Banner, prompt, timeout, umask |
+| /etc/profile.d/orangebox.sh | Prompt, historial, timeout y umask |
+| /etc/profile.d/99-orangebox-motd.sh | Logo FIGlet/ASCII y ficha de sesión ordenada con colores uniformes |
 | /etc/profile.d/aliases.sh | Alias de comandos |
 | /etc/profile.d/syslog_history.sh | Envío de comandos a syslog |
 | /etc/profile.d/history_secure.sh | Historial por usuario |
