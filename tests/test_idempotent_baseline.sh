@@ -29,37 +29,41 @@ grep -Fq 'if ! confirm_risky_change "$name"; then' "$CORE" || fail "se perdió c
 grep -Fq 'falta persistencia' "$SYSCTL" || fail "sysctl no distingue runtime correcto de persistencia ausente"
 grep -Fq '¿Confirmas persistir %s=%s en %s? [s/N]' "$SYSCTL" || fail "no hay confirmación para cambios solo de persistencia"
 
-# Session-aware MOTD: /etc/motd stays empty to avoid duplicate output.
+# Pre-authentication login banner owns the logo and security warning.
 MOTD_LIB="$ROOT_DIR/lib/orangebox-motd.sh"
-[ -r "$MOTD_LIB" ] || fail "falta la librería de MOTD dinámico"
+[ -r "$MOTD_LIB" ] || fail "falta la librería del banner OrangeBox"
 grep -Fq 'orangebox_motd_ensure_figlet "$AUTO_FIX"' "$CORE" || fail "el módulo no verifica/instala FIGlet según el modo"
-grep -Fq 'orangebox_motd_write_profile "$session_motd_tmp"' "$CORE" || fail "el módulo no genera el perfil dinámico"
+grep -Fq 'orangebox_motd_write_login_banner "$login_tmp"' "$CORE" || fail "el logo/aviso no se genera para el banner pre-login"
+grep -Fq 'orangebox_motd_write_profile "$session_motd_tmp"' "$CORE" || fail "el módulo no genera el perfil de métricas"
 grep -Fq ': > "$motd_tmp"' "$CORE" || fail "/etc/motd estático debe quedar vacío para evitar duplicados"
 grep -Fq 'figlet -f small OrangeBox' "$MOTD_LIB" || fail "falta FIGlet con la fuente small"
 grep -Fq 'yum -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con yum"
 grep -Fq 'dnf -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con dnf"
-grep -Fq 'SSH_CONNECTION' "$MOTD_LIB" || fail "el MOTD no detecta la IP local de la sesión SSH"
-grep -Fq '/proc/uptime' "$MOTD_LIB" || fail "uptime no es compatible con sistemas antiguos"
-grep -Fq '/proc/loadavg' "$MOTD_LIB" || fail "el MOTD no incluye load average"
-grep -Fq 'IP interna:' "$MOTD_LIB" || fail "el MOTD no rotula la IP interna"
-if grep -Eq 'IP remota:|OB_REMOTE_IP|AVISO DE SEGURIDAD|Todas las conexiones y los comandos ejecutados quedan|reportado a las autoridades' "$MOTD_LIB"; then
-  fail "el MOTD de shell todavía contiene la IP remota o el aviso pre-login"
-fi
-grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$CORE" || fail "falta el título del banner previo a autenticación"
-grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$CORE" || fail "el aviso de auditoría no está en el banner pre-login"
-grep -Fq 'reportado a las autoridades competentes.' "$CORE" || fail "falta el aviso de reporte de actividad no autorizada"
-login_banner_tmp="$(mktemp)"
-trap 'rm -f "$login_banner_tmp"' EXIT
-awk '
-  index($0, "cat >") && index($0, "ORANGEBOX_LOGIN_BANNER") { in_banner=1; next }
-  in_banner && $0 == "ORANGEBOX_LOGIN_BANNER" { exit }
-  in_banner { print }
-' "$CORE" > "$login_banner_tmp"
-[ -s "$login_banner_tmp" ] || fail "no se pudo extraer el banner pre-login"
-if grep -Fq '| (_) |' "$login_banner_tmp" || grep -Fq "ORANGEBOX_ASCII" "$login_banner_tmp" || grep -Fq "figlet" "$login_banner_tmp"; then
-  fail "el banner pre-login no debe repetir el logotipo ASCII/FIGlet"
-fi
 
+login_banner_tmp="$(mktemp)"
+motd_profile_tmp="$(mktemp)"
+trap 'rm -f "$login_banner_tmp" "$motd_profile_tmp"' EXIT
+# Force the built-in ASCII fallback so the banner is tested even on runners with FIGlet installed.
+# shellcheck source=lib/orangebox-motd.sh
+source "$MOTD_LIB"
+orangebox_motd_write_login_banner "$login_banner_tmp" true || fail "no se pudo generar el banner pre-login"
+[ -s "$login_banner_tmp" ] || fail "el banner pre-login quedó vacío"
+grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$login_banner_tmp" || fail "falta título en el banner pre-login"
+grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$login_banner_tmp" || fail "el aviso de auditoría no está en el banner pre-login"
+grep -Fq 'reportado a las autoridades competentes.' "$login_banner_tmp" || fail "falta el aviso sobre actividades no autorizadas"
+grep -Fq "| | | | '__/ _|" "$login_banner_tmp" || fail "falta el logo ASCII de fallback en el banner pre-login"
+
+orangebox_motd_write_profile "$motd_profile_tmp" || fail "no se pudo generar el perfil con métricas"
+[ -s "$motd_profile_tmp" ] || fail "el perfil de métricas está vacío"
+sh -n "$motd_profile_tmp" || fail "el perfil dinámico no es compatible con sintaxis sh"
+grep -Fq 'IP interna:' "$motd_profile_tmp" || fail "el perfil no muestra la IP interna"
+grep -Fq 'Uptime:' "$motd_profile_tmp" || fail "el perfil no muestra uptime"
+grep -Fq 'Load (1/5/15m):' "$motd_profile_tmp" || fail "el perfil no muestra load average"
+grep -Fq 'Fecha/hora:' "$motd_profile_tmp" || fail "el perfil no muestra fecha y hora"
+grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
+if grep -Eq 'figlet|ORANGEBOX_ASCII|AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexiones y los comandos ejecutados quedan|IP remota:' "$motd_profile_tmp"; then
+  fail "el banner de shell no debe repetir logo, aviso ni IP remota"
+fi
 # Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
 grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
 grep -Fq 'unset TMOUT 2>/dev/null || true' "$CORE" || fail "la shell root no elimina TMOUT heredado"
@@ -86,4 +90,4 @@ grep -Fq 'SSH_CONNECTION' "$motd_profile_tmp" || fail "el perfil MOTD generado n
 grep -Fq '/proc/uptime' "$motd_profile_tmp" || fail "el perfil MOTD generado no calcula uptime"
 grep -Fq '/proc/loadavg' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra load"
 
-pass "confirmaciones idempotentes, MOTD de marca y TMOUT=120 exclusivo para sesiones interactivas no-root"
+pass "banner pre-login con logo/aviso, métricas mínimas en shell y TMOUT=120 exclusivo para sesiones interactivas no-root"
