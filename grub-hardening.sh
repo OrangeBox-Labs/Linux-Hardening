@@ -26,7 +26,7 @@ GRUB_CONFIG="/etc/default/grub"
 GRUB_CFG="/boot/grub2/grub.cfg"
 GRUB_USER_CFG="/boot/grub2/user.cfg"
 GRUB_SCRIPT="/etc/grub.d/01_users"
-BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
@@ -82,13 +82,38 @@ show_usage() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    [ -f "$GRUB_CONFIG" ] && cp "$GRUB_CONFIG" "$BACKUP_DIR/"
-    [ -f "$GRUB_CFG" ] && cp "$GRUB_CFG" "$BACKUP_DIR/"
-    [ -f "$GRUB_USER_CFG" ] && cp "$GRUB_USER_CFG" "$BACKUP_DIR/"
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modifica GRUB.${NC}" >&2
+    return 1
   fi
+  local mode file backup source_hash backup_hash
+  mode="$(stat -c '%a' "$BACKUP_DIR" 2>/dev/null || true)"
+  [ "$mode" = 700 ] || {
+    echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup GRUB.${NC}" >&2
+    return 1
+  }
+  for file in "$GRUB_CONFIG" "$GRUB_CFG" "$GRUB_USER_CFG"; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    if [ -L "$file" ]; then
+      echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica GRUB sin un backup seguro.${NC}" >&2
+      return 1
+    fi
+    [ -f "$file" ] || continue
+    backup="$BACKUP_DIR/$(basename "$file")"
+    if ! cp -p "$file" "$backup"; then
+      echo -e "${RED}[ERROR] No se pudo respaldar $file; no se modifica GRUB.${NC}" >&2
+      return 1
+    fi
+    command -v sha256sum >/dev/null 2>&1 || { echo -e "${RED}[ERROR] sha256sum no está disponible para verificar $file; no se modifica GRUB.${NC}" >&2; return 1; }
+    source_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
+    backup_hash="$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')"
+    if [ -z "$source_hash" ] || [ -z "$backup_hash" ] || [ "$source_hash" != "$backup_hash" ]; then
+      echo -e "${RED}[ERROR] El backup de $file no coincide con el original; no se modifica GRUB.${NC}" >&2
+      return 1
+    fi
+  done
+  echo -e "${GREEN}[✓] Backup de GRUB verificado en: $BACKUP_DIR${NC}"
 }
 
 # ==============================================
@@ -581,7 +606,10 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
-    make_backup
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup de GRUB falló; se aborta antes de ejecutar controles con cambios.${NC}" >&2
+      exit 1
+    fi
   fi
 
   # Ejecutar verificaciones/correcciones
