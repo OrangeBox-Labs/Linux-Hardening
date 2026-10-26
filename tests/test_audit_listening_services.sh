@@ -5,14 +5,14 @@ ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
 # shellcheck source=../audit-listening-services.sh
 source "$ROOT_DIR/audit-listening-services.sh"
 
-fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
-pass() { printf '[PASS] %s\n' "$*"; }
+fail() { printf '[FAIL] %s\\n' "$*" >&2; exit 1; }
+pass() { printf '[PASS] %s\\n' "$*"; }
 
 assert_socket() {
   local fixture="$1" ep="$2" eport="$3" eaddr="$4" eproc="$5" eclass="$6" escope="$7"
   local parsed protocol state port address process category scope
   parsed="$(parse_ss_socket_line "$fixture")" || fail "no se pudo parsear: $fixture"
-  IFS=$'\t' read -r protocol state port address process category scope <<< "$parsed"
+  IFS=$'\\t' read -r protocol state port address process category scope <<< "$parsed"
   [ "$protocol" = "$ep" ] || fail "protocolo esperado=$ep actual=$protocol"
   [ "$port" = "$eport" ] || fail "puerto esperado=$eport actual=$port"
   [ "$address" = "$eaddr" ] || fail "dirección esperada=$eaddr actual=$address"
@@ -40,16 +40,7 @@ assert_netstat_socket() {
   local fixture="$1" ep="$2" eport="$3" eaddr="$4" eproc="$5" eclass="$6" escope="$7"
   local parsed protocol state port address process category scope
   parsed="$(parse_netstat_socket_line "$fixture")" || fail "no se pudo parsear netstat: $fixture"
-  IFS=
-unknown="$(parse_ss_socket_line 'tcp LISTEN 0 32 0.0.0.0:45678 0.0.0.0:* users:(("custom-agent",pid=107,fd=10))')"
-IFS=$'\t' read -r protocol state port address process category scope <<< "$unknown"
-[ "$process" = custom-agent ] || fail "no se conservó proceso desconocido"
-[ "$category" = NO_CLASIFICADO ] || fail "proceso desconocido clasificado incorrectamente"
-if grep -qiE 'yum remove|dnf remove|ELIMINAR' "$ROOT_DIR/audit-listening-services.sh"; then
-  fail "el auditor contiene sugerencias de eliminación de paquetes"
-fi
-pass "TCP/UDP, Pure-FTPd, PowerDNS, MongoDB, monitoreo, bind y procesos desconocidos"
-\t' read -r protocol state port address process category scope <<< "$parsed"
+  IFS=$'\\t' read -r protocol state port address process category scope <<< "$parsed"
   [ "$protocol" = "$ep" ] || fail "netstat protocolo esperado=$ep actual=$protocol"
   [ "$port" = "$eport" ] || fail "netstat puerto esperado=$eport actual=$port"
   [ "$address" = "$eaddr" ] || fail "netstat dirección esperada=$eaddr actual=$address"
@@ -63,10 +54,10 @@ assert_netstat_socket 'udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd' udp 161 0.0.0.0:
 assert_netstat_socket 'tcp6 0 0 :::443 :::* LISTEN 456/httpd' tcp 443 ':::443' httpd WEB TODAS_INTERFACES
 
 unknown="$(parse_ss_socket_line 'tcp LISTEN 0 32 0.0.0.0:45678 0.0.0.0:* users:(("custom-agent",pid=107,fd=10))')"
-IFS=$'\t' read -r protocol state port address process category scope <<< "$unknown"
+IFS=$'\\t' read -r protocol state port address process category scope <<< "$unknown"
 [ "$process" = custom-agent ] || fail "no se conservó proceso desconocido"
 [ "$category" = NO_CLASIFICADO ] || fail "proceso desconocido clasificado incorrectamente"
 if grep -qiE 'yum remove|dnf remove|ELIMINAR' "$ROOT_DIR/audit-listening-services.sh"; then
   fail "el auditor contiene sugerencias de eliminación de paquetes"
 fi
-pass "TCP/UDP, Pure-FTPd, PowerDNS, MongoDB, monitoreo, bind y procesos desconocidos"
+pass "TCP/UDP, netstat legacy, Pure-FTPd, PowerDNS, MongoDB, monitoreo, bind y procesos desconocidos"
