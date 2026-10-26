@@ -50,6 +50,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Añadido `CIS-COVERAGE-MAP.md`, inventario de los 143 checks locales por sección y secciones sin checks directos en el informe (3.2/3.3 y 4.2); el mapping recomendación oficial→control local sigue pendiente.
 - [x] Enlazados `PROJECT-STATUS.md` y `CIS-COVERAGE-MAP.md` desde README para retomar el trabajo sin depender del historial del chat.
 - [x] Añadidos al baseline y a `kernel-hardening.sh` los controles CIS de forwarding IPv4/IPv6. Cada valor se aplica solo con confirmación individual y explicación del riesgo para routing/NAT/VPN/gateways/containers; IPv6 no disponible en kernels legacy queda N/A.
+- [x] Añadidos los controles de redirects ICMPv6 al baseline y `kernel-hardening.sh`, con explicación de impacto sobre rutas y confirmación por parámetro; kernels sin IPv6 muestran N/A.
 - [x] Añadida auditoría de la coexistencia `systemd-journald`/`rsyslog` en EL9/10. Si ambos están activos advierte del posible conflicto de perfil CIS, pero no detiene ni deshabilita los servicios.
 - [ ] Continuar revisando permisos GRUB, AIDE activo, opciones efectivas de PAM/SSH y controles CIS dependientes de la versión.
 
@@ -62,7 +63,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [ ] Revisar `rsyslog-hardening.sh`: cambios de persistencia y reinicios de logging deben explicar uso de disco, flujo de logs y riesgo de perder recepción/forwarding.
 - [ ] Revisar `ssh-hardening.sh` y `ssh-hardening-complete.sh`: validar con `sshd -t`/`sshd -T`, backup y rollback; evitar perder acceso remoto y explicar impacto de root-login, algoritmos, forwarding, timeout y reinicio/recarga.
 - [ ] Revisar `sudo-hardening.sh` y `password-hardening.sh`: confirmar parámetros individualmente, preservar backups originales, no modificar PAM/authselect a ciegas y proteger cuentas administrativas.
-- [ ] Continuar la revisión de `network-hardening.sh` y `kernel-hardening.sh`: asegurar explicación/confirmación por parámetro, preservar rutas/VPN/IPv6 si se rechaza deshabilitar forwarding, y convertir todo control no expuesto por kernels legacy en N/A, no FAIL.
+- [ ] Continuar la revisión de `network-hardening.sh` y `kernel-hardening.sh`: asegurar explicación/confirmación por parámetro, preservar rutas/VPN/IPv6 si se rechaza deshabilitar forwarding/redirects, y convertir todo control no expuesto por kernels legacy en N/A, no FAIL.
 - [ ] Revisar el resto de módulos invocados por el baseline para que los cambios sean verdaderamente opt-in por confirmación, no por perfiles de aplicaciones, y que la auditoría no modifique el sistema.
 
 ### Validación final pendiente
