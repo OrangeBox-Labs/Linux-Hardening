@@ -41,7 +41,8 @@ case "$state_value" in
     fi
     ;;
   IDLE)
-    grep -Fq 'No hay tarea activa' "$STATE" ||
+    # Aceptar ambas formulaciones explícitas de inactividad usadas por el estado.
+    grep -Eq 'No hay tarea activa|Tarea activa:[*]*[[:space:]]*Ninguna([.]|$)' "$STATE" ||
       fail "IDLE debe declarar explícitamente que no hay tarea activa"
     if printf '%s\n' "$pending_block" | grep -Fq -- '- [ ] '; then
       fail "IDLE no puede conservar pasos pendientes"
