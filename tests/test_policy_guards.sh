@@ -75,4 +75,13 @@ grep -Fq 'journald no aplica a CentOS/RHEL 6' "$CORE" || fail "el baseline sigue
 grep -Fq 'if [ "${OS_VERSION:-}" = 6 ]; then' "$CORE" || fail "no se detecta la generación legacy para la auditoría de logs"
 pass "syslog/journald se distingue correctamente en CentOS/RHEL 6"
 
+# Older RHEL-family hosts must use their native auditd, ntpd and GRUB interfaces.
+grep -Fq 'auditd_is_active()' "$CORE" || fail "falta detección auditd compatible con SysV"
+grep -Fq 'service auditd status' "$CORE" || fail "CentOS 6 no comprueba auditd mediante service"
+grep -Fq 'ntpq -pn' "$CORE" || fail "falta comprobación del peer de ntpd legacy"
+grep -Fq '/boot/grub/grub.conf' "$CORE" || fail "CentOS 6 no comprueba grub.conf"
+grep -Fq 'update-crypto-policies no aplica a CentOS/RHEL 6/7' "$CORE" || fail "crypto policies ausentes en EL6/7 se siguen marcando como fallo"
+grep -Fq 'sysctl -n "$key"' "$CORE" || fail "los sysctl ausentes siguen contándose como controles fallidos"
+pass "auditorías de auditd, NTP, GRUB, crypto-policy y sysctl distinguen EL6"
+
 pass "fapolicyd no se instala ni activa y se informa la detección de Wazuh"

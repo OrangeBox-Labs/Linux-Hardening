@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.10 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.11 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.10
+SCRIPT_VERSION=1.4.11
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -100,6 +100,10 @@ orangebox_sysctl_persistence_target() {
 
 set_sysctl(){
   local key="$1" value="$2" file
+  if ! command -v sysctl >/dev/null 2>&1 || ! sysctl -n "$key" >/dev/null 2>&1; then
+    info "SYSCTL $key no disponible en este kernel; no aplica y no se modifica."
+    return 0
+  fi
   file="$(orangebox_sysctl_persistence_target)"
   if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
@@ -239,7 +243,19 @@ ssh_module_can_apply() {
 ssh_module(){
   echo -e "\n$BLUE### SSH ###$NC"; [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }; command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
   local perms policy ssh_status; perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true); [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
-  policy=$(command -v update-crypto-policies >/dev/null 2>&1 && update-crypto-policies --show 2>/dev/null||echo unknown); case "$policy" in LEGACY*) warn "Crypto policy=$policy: revisar migración";; unknown) warn "No se pudo determinar crypto policy";; *) ok "Crypto policy=$policy";; esac
+  if command -v update-crypto-policies >/dev/null 2>&1; then
+    policy="$(update-crypto-policies --show 2>/dev/null || echo unknown)"
+    case "$policy" in
+      LEGACY*) warn "Crypto policy=$policy: revisar migración" ;;
+      unknown) warn "No se pudo determinar crypto policy" ;;
+      *) ok "Crypto policy=$policy" ;;
+    esac
+  else
+    case "${OS_VERSION:-0}" in
+      6|7) info "update-crypto-policies no aplica a CentOS/RHEL 6/7; se auditan los algoritmos efectivos de SSH." ;;
+      *) warn "No se pudo determinar crypto policy" ;;
+    esac
+  fi
   [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"; [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"; [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
   # Safe SSH controls only. Existing crypto/auth/forwarding choices are preserved.
   if $AUTO_FIX; then
@@ -422,7 +438,31 @@ filesystem_module(){
     esac
   done
 }
-auditd_module(){ echo -e "\n$BLUE### AUDITD ###$NC"; command -v auditctl >/dev/null 2>&1&&systemctl is-active auditd >/dev/null 2>&1&&ok "auditd activo"||warn "auditd ausente/inactivo"; [ -d /etc/audit/rules.d ]&&ok "rules.d disponible"||warn "rules.d no existe"; }
+auditd_is_active() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active auditd >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v service >/dev/null 2>&1 && service auditd status >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v pgrep >/dev/null 2>&1 && pgrep -x auditd >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+auditd_module(){
+  echo -e "\n$BLUE### AUDITD ###$NC"
+  if auditd_is_active; then
+    if command -v auditctl >/dev/null 2>&1; then
+      ok "auditd activo"
+    else
+      warn "auditd parece activo, pero auditctl no está disponible"
+    fi
+  else
+    warn "auditd ausente/inactivo"
+  fi
+  [ -d /etc/audit/rules.d ] && ok "rules.d disponible" || info "rules.d no existe; esta versión puede usar /etc/audit/audit.rules"
+}
 rsyslog_legacy_is_active() {
   if command -v service >/dev/null 2>&1 && service rsyslog status >/dev/null 2>&1; then
     return 0
@@ -641,8 +681,51 @@ banners_module() {
   rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
   configure_ssh_banner
 }
-time_module(){ echo -e "\n$BLUE### TIME SYNC ###$NC"; command -v chronyc >/dev/null 2>&1&&chronyc tracking >/dev/null 2>&1&&ok "chrony operativo"||warn "NTP/chrony no verificado"; }
-grub_module(){ echo -e "\n$BLUE### GRUB ###$NC"; find /boot /etc -maxdepth 4 -type f -name grub.cfg 2>/dev/null|head -1|grep -q .&&ok "grub.cfg localizado"||warn "grub.cfg no localizado"; info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"; }
+time_module(){
+  echo -e "\n$BLUE### TIME SYNC ###$NC"
+  if command -v chronyc >/dev/null 2>&1; then
+    if chronyc tracking >/dev/null 2>&1; then
+      ok "chrony operativo"
+    else
+      warn "chronyc existe, pero no se pudo verificar la sincronización"
+    fi
+    return
+  fi
+
+  if command -v ntpq >/dev/null 2>&1; then
+    if ntpq -pn 2>/dev/null | awk 'NR > 2 && $1 ~ /^\*/ {found=1} END {exit(found ? 0 : 1)}'; then
+      ok "ntpd sincronizado; ntpq identifica un peer de sistema (*)"
+    elif { command -v service >/dev/null 2>&1 && service ntpd status >/dev/null 2>&1; } ||
+         { command -v pgrep >/dev/null 2>&1 && pgrep -x ntpd >/dev/null 2>&1; }; then
+      warn "ntpd activo, pero ntpq no confirma un peer sincronizado"
+    else
+      warn "ntpd/chrony ausente o sincronización no verificada"
+    fi
+    return
+  fi
+
+  if { command -v service >/dev/null 2>&1 && service ntpd status >/dev/null 2>&1; } ||
+     { command -v pgrep >/dev/null 2>&1 && pgrep -x ntpd >/dev/null 2>&1; }; then
+    info "ntpd está activo, pero ntpq no está disponible; sincronización no confirmada"
+  else
+    warn "NTP/chrony no verificado"
+  fi
+}
+grub_module(){
+  echo -e "\n$BLUE### GRUB ###$NC"
+  if [ "\${OS_VERSION:-0}" = 6 ]; then
+    if [ -e /boot/grub/grub.conf ] || [ -e /etc/grub.conf ]; then
+      ok "GRUB legacy grub.conf localizado"
+    else
+      warn "GRUB legacy: no se encontró /boot/grub/grub.conf ni /etc/grub.conf"
+    fi
+  elif find /boot /etc -maxdepth 5 \( -type f -o -type l \) -name grub.cfg 2>/dev/null | grep -q .; then
+    ok "grub.cfg localizado"
+  else
+    warn "grub.cfg no localizado"
+  fi
+  info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"
+}
 firewall_module() {
   echo -e "\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
   # Auditoría exclusivamente de lectura: nunca administrar el firewall desde

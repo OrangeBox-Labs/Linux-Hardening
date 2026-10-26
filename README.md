@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.10, detección y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
+| `linux-hardening.sh` | Baseline 1.4.11, detección y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y comprobaciones de auditd/NTP/GRUB/crypto-policy específicas para EL6. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -402,3 +402,8 @@ El `Banner` estándar de OpenSSH envía el contenido estático de `/etc/issue.ne
 El auditor de listeners consulta `ss -lntup` sin depender de la opción `-H` no disponible en algunas versiones antiguas y usa `netstat -lntup` como alternativa cuando `ss` no entrega datos. Las cabeceras se ignoran y las direcciones IPv4 no se clasifican como IPv6.
 
 En CentOS/RHEL 6, la persistencia de los parámetros sysctl apunta a `/etc/sysctl.conf`; no se crea `/etc/sysctl.d`. Cada modificación sigue requiriendo confirmación por parámetro. La comprobación de logs verifica `rsyslog` en lugar de exigir `systemd-journald` en ese sistema legacy.
+
+
+### Auditoría legacy CentOS/RHEL 6
+
+Las comprobaciones reconocen el stack SysV de `auditd` y `ntpd`, el archivo de GRUB legacy `/boot/grub/grub.conf` y la ausencia esperada de `update-crypto-policies` en EL6/EL7. Los parámetros sysctl que no existen en el kernel quedan como información de incompatibilidad y no como controles corregibles. Estas comprobaciones son de solo lectura; no activan servicios ni alteran el arranque.
