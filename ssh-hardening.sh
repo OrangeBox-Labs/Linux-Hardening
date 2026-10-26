@@ -22,6 +22,10 @@ AUTO_FIX=false
 SSHD_CONFIG="/etc/ssh/sshd_config"
 SSHD_CONFIG_DIR="/etc/ssh/sshd_config.d"
 BACKUP_DIR="/root/ssh-backup-$(date +%Y%m%d-%H%M%S)"
+SSH_MANAGED_BEGIN="# ORANGEBOX SSH HARDENING BEGIN"
+SSH_MANAGED_END="# ORANGEBOX SSH HARDENING END"
+SSH_BACKUP_READY=false
+SSH_CONFIG_CHANGED=false
 
 # ==============================================
 # FUNCION PARA OBTENER VERSION DE OPENSSH
@@ -34,117 +38,223 @@ get_ssh_version() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    if [ -f "$SSHD_CONFIG" ]; then
-      cp -p "$SSHD_CONFIG" "$BACKUP_DIR/"
-    fi
-    if [ -d "$SSHD_CONFIG_DIR" ]; then
-      cp -r "$SSHD_CONFIG_DIR" "$BACKUP_DIR/"
-    fi
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  [ -f "$SSHD_CONFIG" ] && [ ! -L "$SSHD_CONFIG" ] || {
+    echo -e "${RED}[ERROR] $SSHD_CONFIG no es un archivo regular seguro; no se modifica SSH.${NC}" >&2
+    return 1
+  }
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modifica SSH.${NC}" >&2
+    return 1
   fi
+  if ! cp -p "$SSHD_CONFIG" "$BACKUP_DIR/sshd_config"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar $SSHD_CONFIG; no se modifica SSH.${NC}" >&2
+    return 1
+  fi
+  if [ -d "$SSHD_CONFIG_DIR" ] && ! cp -a "$SSHD_CONFIG_DIR" "$BACKUP_DIR/"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar $SSHD_CONFIG_DIR; no se modifica SSH.${NC}" >&2
+    return 1
+  fi
+  SSH_BACKUP_READY=true
+  echo -e "${GREEN}[✓] Backup de SSH verificado en: $BACKUP_DIR${NC}"
+}
+
+confirm_ssh_change() {
+  local title="$1" current="$2" proposed="$3" effect="$4" answer=""
+  echo -e "\n${YELLOW}[WARN] Cambio de SSH pendiente: $title${NC}"
+  echo "Estado efectivo actual: ${current:-no verificable}"
+  echo "Propuesta: $proposed"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "${YELLOW}[WARN] No hay terminal interactiva; no se modifica SSH.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  printf '¿Aplicar este cambio? [s/N]: ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) echo -e "${YELLOW}[INFO] Cambio rechazado; se conserva la configuración actual.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1 ;;
+  esac
+}
+
+ssh_parameter_impact() {
+  case "$1" in
+    permitrootlogin) echo "Deshabilita el login SSH directo de root; puede dejar fuera a administradores que solo acceden como root. Confirma antes que existe un usuario alternativo probado." ;;
+    allowtcpforwarding) echo "Bloquea túneles SSH usados por port-forwarding, VPNs y herramientas de administración; puede romper flujos que dependan de ellos." ;;
+    clientaliveinterval|clientalivecountmax) echo "Cierra conexiones que no responden al keepalive según los límites configurados; puede desconectar sesiones inactivas y tareas interactivas largas." ;;
+    ciphers|macs|kexalgorithms|pubkeyacceptedalgorithms|pubkeyacceptedkeytypes) echo "Restringe algoritmos de negociación SSH; clientes antiguos, dispositivos integrados o herramientas heredadas podrían dejar de conectar." ;;
+    x11forwarding) echo "Deshabilita forwarding de X11; las aplicaciones gráficas remotas que dependan de él dejarán de funcionar." ;;
+    usepam) echo "Cambia el uso de PAM para SSH; puede afectar autenticación, MFA, límites de sesión y políticas de acceso." ;;
+    banner) echo "Muestra un aviso antes de autenticar. No cambia credenciales, pero requiere archivo legible y configuración SSH válida." ;;
+    maxauthtries) echo "Limita intentos de autenticación por conexión; usuarios legítimos con varias llaves o métodos pueden necesitar ajustar el proceso de login." ;;
+    logingracetime) echo "Reduce el tiempo permitido para autenticarse; clientes con autenticación lenta pueden fallar." ;;
+    maxstartups) echo "Controla conexiones sin autenticar concurrentes; límites muy bajos pueden rechazar conexiones legítimas durante picos." ;;
+    maxsessions) echo "Limita sesiones multiplexadas por conexión; puede afectar usos de ControlMaster o automatización SSH." ;;
+    *) echo "Cambia la política de SSH; puede afectar compatibilidad de clientes y acceso remoto. Valida desde una segunda sesión antes de cerrar la actual." ;;
+  esac
+}
+
+ssh_effective_value() {
+  local key="$1" config="${2:-$SSHD_CONFIG}"
+  sshd -T -f "$config" 2>/dev/null |
+    awk -v wanted="$key" 'tolower($1)==tolower(wanted) {$1=""; sub(/^[[:space:]]+/, ""); print; found=1; exit} END{if(!found) exit 1}'
+}
+
+ssh_install_parameter() {
+  local param="$1" expected="$2" fix_line="$3"
+  local tmp="" base="" previous_block="" current_copy="" candidate=""
+  local actual="" impact="" mode="600"
+  [ "$SSH_BACKUP_READY" = true ] || { echo -e "${RED}[ERROR] No hay backup verificado; no se modifica SSH.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  [ ! -L "$SSHD_CONFIG" ] && [ -f "$SSHD_CONFIG" ] || { echo -e "${RED}[ERROR] $SSHD_CONFIG no es un archivo regular seguro.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  base="$(mktemp /etc/ssh/.sshd_config.orangebox.base.XXXXXX)" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  previous_block="$(mktemp /etc/ssh/.sshd_config.orangebox.block.XXXXXX)" || { rm -f "$base"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  tmp="$(mktemp /etc/ssh/.sshd_config.orangebox.candidate.XXXXXX)" || { rm -f "$base" "$previous_block"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  current_copy="$(mktemp /etc/ssh/.sshd_config.orangebox.current.XXXXXX)" || { rm -f "$base" "$previous_block" "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  if ! cp -p "$SSHD_CONFIG" "$current_copy"; then
+    rm -f "$base" "$previous_block" "$tmp" "$current_copy"
+    echo -e "${RED}[WARN] No se pudo conservar el sshd_config actual para rollback.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  awk -v begin="$SSH_MANAGED_BEGIN" -v end="$SSH_MANAGED_END" '
+    $0==begin {inside=1; next}
+    $0==end {inside=0; next}
+    !inside {print}
+  ' "$SSHD_CONFIG" > "$base" || { rm -f "$base" "$previous_block" "$tmp" "$current_copy"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  awk -v begin="$SSH_MANAGED_BEGIN" -v end="$SSH_MANAGED_END" -v wanted="$param" '
+    $0==begin {inside=1; next}
+    $0==end {inside=0; next}
+    inside && tolower($1)!=tolower(wanted) {print}
+  ' "$SSHD_CONFIG" > "$previous_block" || { rm -f "$base" "$previous_block" "$tmp" "$current_copy"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  {
+    printf '%s\n' "$SSH_MANAGED_BEGIN"
+    printf '%s\n' "$fix_line"
+    cat "$previous_block"
+    printf '%s\n' "$SSH_MANAGED_END"
+    cat "$base"
+  } > "$tmp" || { rm -f "$base" "$previous_block" "$tmp" "$current_copy"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  mode="$(stat -c '%a' "$SSHD_CONFIG" 2>/dev/null || echo 600)"
+  chmod "$mode" "$tmp" && chown root:root "$tmp" || { rm -f "$base" "$previous_block" "$tmp" "$current_copy"; WARNINGS=$((WARNINGS + 1)); return 1; }
+
+  if ! sshd -t -f "$tmp" >/dev/null 2>&1; then
+    echo -e "${RED}[WARN] El candidato con '$fix_line' no pasó sshd -t; no se instala.${NC}"
+    sshd -t -f "$tmp" 2>&1
+    rm -f "$base" "$previous_block" "$tmp" "$current_copy"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  candidate="$(ssh_effective_value "$param" "$tmp" || true)"
+  if [ "$candidate" != "$expected" ]; then
+    echo -e "${YELLOW}[WARN] El candidato no produce el valor efectivo esperado para $param. Efectivo candidato='${candidate:-no verificable}', esperado='$expected'; no se instala.${NC}"
+    rm -f "$base" "$previous_block" "$tmp" "$current_copy"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  if ! mv "$tmp" "$SSHD_CONFIG"; then
+    rm -f "$base" "$previous_block" "$tmp" "$current_copy"
+    echo -e "${RED}[WARN] No se pudo instalar el candidato de SSH.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  command -v restorecon >/dev/null 2>&1 && restorecon "$SSHD_CONFIG" >/dev/null 2>&1 || true
+
+  actual="$(ssh_effective_value "$param" "$SSHD_CONFIG" || true)"
+  if sshd -t >/dev/null 2>&1 && [ "$actual" = "$expected" ]; then
+    echo -e "${GREEN}[✓] $param aplicado y verificado: $actual${NC}"
+    SSH_CONFIG_CHANGED=true
+    FIXED=$((FIXED + 1))
+    rm -f "$base" "$previous_block" "$current_copy"
+    return 0
+  fi
+
+  echo -e "${RED}[WARN] La configuración instalada no cumplió la validación posterior; restaurando el archivo previo a este cambio.${NC}"
+  if cp -p "$current_copy" "$SSHD_CONFIG"; then
+    command -v restorecon >/dev/null 2>&1 && restorecon "$SSHD_CONFIG" >/dev/null 2>&1 || true
+    if sshd -t >/dev/null 2>&1; then
+      echo -e "${YELLOW}[INFO] Rollback de sshd_config verificado.${NC}"
+    else
+      echo -e "${RED}[ERROR] El rollback no valida; mantenga abierta la sesión y recupere desde $BACKUP_DIR/sshd_config.${NC}"
+    fi
+  else
+    echo -e "${RED}[ERROR] No se pudo restaurar sshd_config; recupere desde $BACKUP_DIR/sshd_config.${NC}"
+  fi
+  rm -f "$base" "$previous_block" "$tmp" "$current_copy"
+  WARNINGS=$((WARNINGS + 1))
+  return 1
 }
 
 # ==============================================
 # FUNCION PARA VERIFICAR Y CONFIGURAR PARAMETRO
 # ==============================================
 check_sshd_param() {
-  local param="$1"
-  local expected="$2"
-  local description="$3"
-  local fix_line="$4"
-
-  # Extraer el nombre del parametro del fix_line (lo que va antes del espacio)
-  local param_name=$(echo "$fix_line" | awk '{print $1}')
-
-  local current=$(sshd -T 2>/dev/null | grep -i "^$param" | awk '{print $2}' | head -1)
-
+  local param="$1" expected="$2" description="$3" fix_line="$4"
+  local current="" effect=""
+  current="$(ssh_effective_value "$param" "$SSHD_CONFIG" || true)"
   if [ -z "$current" ]; then
-    echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-    if [ "$AUTO_FIX" = true ] && [ -n "$fix_line" ]; then
-      # Verificar si ya existe la linea comentada
-      if grep -qi "^#\s*$param_name" "$SSHD_CONFIG"; then
-        # Descomentar y modificar
-        sed -i "s/^#\s*$param_name.*/$fix_line/i" "$SSHD_CONFIG"
-      else
-        # Agregar al final
-        echo "$fix_line" >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] Configuracion agregada: $fix_line${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  elif [ "$current" = "$expected" ]; then
-    echo -e "${GREEN}[✓] $description: $current${NC}"
-  else
-    echo -e "${RED}[!] $description: $current (debe ser $expected)${NC}"
-    if [ "$AUTO_FIX" = true ] && [ -n "$fix_line" ]; then
-      # Buscar la linea existente (case insensitive) y reemplazarla
-      if grep -qi "^$param_name\s" "$SSHD_CONFIG"; then
-        sed -i "s/^$param_name\s.*/$fix_line/i" "$SSHD_CONFIG"
-      elif grep -qi "^#\s*$param_name\s" "$SSHD_CONFIG"; then
-        sed -i "s/^#\s*$param_name\s.*/$fix_line/i" "$SSHD_CONFIG"
-      else
-        echo "$fix_line" >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] Configuracion corregida: $fix_line${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    echo -e "${YELLOW}[WARN] $description: sshd -T no devuelve un valor verificable para $param; no se cambia.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
+  if [ "$current" = "$expected" ]; then
+    echo -e "${GREEN}[✓] $description=$current (valor efectivo)${NC}"
+    return 0
+  fi
+  effect="$(ssh_parameter_impact "$param")"
+  echo -e "${YELLOW}[WARN] $description: valor actual='$current'; recomendado='$expected'.${NC}"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+  if ! confirm_ssh_change "$description" "$current" "$fix_line" "$effect"; then return 1; fi
+  ssh_install_parameter "$param" "$expected" "$fix_line"
 }
 
 # ==============================================
 # FUNCION PARA VERIFICAR PERMISOS
 # ==============================================
 check_permissions() {
-  local file="$1"
-  local perms="$2"
-  local owner="$3"
-  local group="$4"
-  local description="$5"
-
-  if [ ! -f "$file" ]; then
-    echo -e "${YELLOW}[!] $file no existe${NC}"
+  local file="$1" perms="$2" owner="$3" group="$4" description="$5"
+  local current_perms="" current_owner="" current_group="" effect="" answer=""
+  if [ ! -f "$file" ] || [ -L "$file" ]; then
+    echo -e "${YELLOW}[WARN] $file no existe o no es un archivo regular seguro.${NC}"
+    WARNINGS=$((WARNINGS + 1))
     return 1
   fi
-
-  local current_perms=$(stat -c "%a" "$file" 2>/dev/null)
-  local current_owner=$(stat -c "%U" "$file" 2>/dev/null)
-  local current_group=$(stat -c "%G" "$file" 2>/dev/null)
-
-  local needs_fix=0
-
-  if [ "$current_perms" != "$perms" ]; then
-    echo -e "${RED}[!] $description permisos: $current_perms (debe ser $perms)${NC}"
-    needs_fix=1
-  else
-    echo -e "${GREEN}[✓] $description permisos correctos: $current_perms${NC}"
+  current_perms="$(stat -c '%a' "$file" 2>/dev/null || true)"
+  current_owner="$(stat -c '%U' "$file" 2>/dev/null || true)"
+  current_group="$(stat -c '%G' "$file" 2>/dev/null || true)"
+  if [ "$current_perms" = "$perms" ] && [ "$current_owner" = "$owner" ] && [ "$current_group" = "$group" ]; then
+    echo -e "${GREEN}[✓] $description: $current_perms $current_owner:$current_group${NC}"
+    return 0
   fi
-
-  if [ "$current_owner" != "$owner" ]; then
-    echo -e "${RED}[!] $description propietario: $current_owner (debe ser $owner)${NC}"
-    needs_fix=1
-  else
-    echo -e "${GREEN}[✓] $description propietario correcto: $current_owner${NC}"
+  effect="Restringe la escritura del archivo de configuración SSH a root. Si la propiedad o permisos se fijan de forma incorrecta, sshd puede rechazar la configuración; se requiere backup y validación antes de la recarga."
+  echo -e "${YELLOW}[WARN] $description: actual=$current_perms $current_owner:$current_group; recomendado=$perms $owner:$group${NC}"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ] || ! confirm_ssh_change "$description" "$current_perms $current_owner:$current_group" "chmod $perms; chown $owner:$group $file" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
-
-  if [ "$current_group" != "$group" ]; then
-    echo -e "${RED}[!] $description grupo: $current_group (debe ser $group)${NC}"
-    needs_fix=1
-  else
-    echo -e "${GREEN}[✓] $description grupo correcto: $current_group${NC}"
+  if [ "$SSH_BACKUP_READY" != true ]; then
+    echo -e "${RED}[WARN] No hay backup SSH verificado; no se cambian permisos.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
-
-  if [ $needs_fix -eq 1 ] && [ "$AUTO_FIX" = true ]; then
-    chmod "$perms" "$file" 2>/dev/null
-    chown "$owner:$group" "$file" 2>/dev/null
-    echo -e "${GREEN}[✓] $description corregido${NC}"
+  if chmod "$perms" "$file" && chown "$owner:$group" "$file" &&
+     [ "$(stat -c '%a' "$file" 2>/dev/null)" = "$perms" ] &&
+     [ "$(stat -c '%U:%G' "$file" 2>/dev/null)" = "$owner:$group" ] &&
+     sshd -t >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] $description ajustado y validado${NC}"
     FIXED=$((FIXED + 1))
-  elif [ $needs_fix -eq 1 ]; then
+    SSH_CONFIG_CHANGED=true
+  else
+    echo -e "${RED}[WARN] No se pudo validar la corrección de permisos de $file. Restaure manualmente desde $BACKUP_DIR/sshd_config si es necesario.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -244,26 +354,7 @@ check_user_env() {
 # ==============================================
 check_ciphers() {
   echo -e "\n${BLUE}[*] CIS 5.3.11 - Verificando algoritmos de cifrado...${NC}"
-
-  local ciphers=$(sshd -T 2>/dev/null | grep -i "ciphers" | awk '{print $2}')
-
-  if [ -n "$ciphers" ]; then
-    echo -e "${GREEN}[✓] Algoritmos de cifrado configurados${NC}"
-  else
-    echo -e "${RED}[!] No hay algoritmos de cifrado explicitos${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      # Verificar si existe linea comentada
-      if grep -qi "^#\s*Ciphers" "$SSHD_CONFIG"; then
-        sed -i "s/^#\s*Ciphers.*/Ciphers aes256-ctr,aes192-ctr,aes128-ctr/i" "$SSHD_CONFIG"
-      else
-        echo 'Ciphers aes256-ctr,aes192-ctr,aes128-ctr' >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] Cifrado fuerte configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  check_sshd_param "ciphers" "aes256-ctr,aes192-ctr,aes128-ctr" "Ciphers" "Ciphers aes256-ctr,aes192-ctr,aes128-ctr"
 }
 
 # ==============================================
@@ -271,25 +362,7 @@ check_ciphers() {
 # ==============================================
 check_macs() {
   echo -e "\n${BLUE}[*] CIS 5.3.12 - Verificando algoritmos MAC...${NC}"
-
-  local macs=$(sshd -T 2>/dev/null | grep -i "macs" | awk '{print $2}')
-
-  if [ -n "$macs" ]; then
-    echo -e "${GREEN}[✓] Algoritmos MAC configurados${NC}"
-  else
-    echo -e "${RED}[!] No hay algoritmos MAC explicitos${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if grep -qi "^#\s*MACs" "$SSHD_CONFIG"; then
-        sed -i "s/^#\s*MACs.*/MACs hmac-sha2-512,hmac-sha2-256/i" "$SSHD_CONFIG"
-      else
-        echo 'MACs hmac-sha2-512,hmac-sha2-256' >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] MAC fuerte configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  check_sshd_param "macs" "hmac-sha2-512,hmac-sha2-256" "MACs" "MACs hmac-sha2-512,hmac-sha2-256"
 }
 
 # ==============================================
@@ -297,57 +370,16 @@ check_macs() {
 # ==============================================
 check_kex() {
   echo -e "\n${BLUE}[*] CIS 5.3.13 - Verificando algoritmos de intercambio de claves...${NC}"
-
-  local kex=$(sshd -T 2>/dev/null | grep -i "kexalgorithms" | awk '{print $2}')
-
-  if [ -n "$kex" ]; then
-    echo -e "${GREEN}[✓] Algoritmos KEX configurados${NC}"
-  else
-    echo -e "${RED}[!] No hay algoritmos KEX explicitos${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      local kex_line='KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256'
-      if grep -qi "^#\s*KexAlgorithms" "$SSHD_CONFIG"; then
-        sed -i "s|^#\s*KexAlgorithms.*|$kex_line|i" "$SSHD_CONFIG"
-      else
-        echo "$kex_line" >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] KEX fuerte configurado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  check_sshd_param "kexalgorithms" "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256" "KexAlgorithms" "KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256"
 }
 
 # ==============================================
 # 5.3.14 - IDLE TIMEOUT
 # ==============================================
 check_idle_timeout() {
-  echo -e "\n${BLUE}[*] CIS 5.3.14 - Configurando ClientAliveInterval...${NC}"
-
-  local interval=$(sshd -T 2>/dev/null | grep -i "clientaliveinterval" | awk '{print $2}')
-  local count=$(sshd -T 2>/dev/null | grep -i "clientalivecountmax" | awk '{print $2}')
-
-  if [ -n "$interval" ] && [ "$interval" -gt 0 ] 2>/dev/null &&
-     [ "$interval" -le 300 ] 2>/dev/null &&
-     [ -n "$count" ] && [ "$count" -ge 1 ] 2>/dev/null &&
-     [ "$count" -le 3 ] 2>/dev/null; then
-    echo -e "${GREEN}[✓] Idle timeout configurado: $interval segundos, $count intentos${NC}"
-  else
-    echo -e "${RED}[!] Idle timeout no configurado correctamente${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      # Eliminar lineas existentes (comentadas o no)
-      sed -i '/^#\?\s*ClientAliveInterval/d' "$SSHD_CONFIG"
-      sed -i '/^#\?\s*ClientAliveCountMax/d' "$SSHD_CONFIG"
-      echo "ClientAliveInterval 300" >>"$SSHD_CONFIG"
-      echo "ClientAliveCountMax 3" >>"$SSHD_CONFIG"
-      echo -e "${GREEN}[✓] ClientAliveInterval=300 y ClientAliveCountMax=3 configurados${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: ClientAliveInterval 300 y ClientAliveCountMax 3${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  echo -e "\n${BLUE}[*] CIS 5.3.14 - Configurando timeout de inactividad SSH...${NC}"
+  check_sshd_param "clientaliveinterval" "300" "ClientAliveInterval" "ClientAliveInterval 300"
+  check_sshd_param "clientalivecountmax" "3" "ClientAliveCountMax" "ClientAliveCountMax 3"
 }
 
 # ==============================================
@@ -363,30 +395,35 @@ check_grace_time() {
 # ==============================================
 check_banner() {
   echo -e "\n${BLUE}[*] CIS 5.3.16 - Configurando banner de advertencia...${NC}"
-
-  local banner=$(sshd -T 2>/dev/null | grep -i "banner" | awk '{print $2}')
-
-  if [ -n "$banner" ] && [ -f "$banner" ]; then
-    echo -e "${GREEN}[✓] Banner configurado: $banner${NC}"
-  else
-    echo -e "${RED}[!] Banner de advertencia no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      # Crear banner si no existe
-      if [ ! -f "/etc/issue.net" ]; then
-        echo "Sistema de uso autorizado solamente. Acceso no autorizado es un delito." >/etc/issue.net
-      fi
-      if grep -qi "^#\?\s*Banner" "$SSHD_CONFIG"; then
-        sed -i "s/^#\?\s*Banner.*/Banner \/etc\/issue.net/i" "$SSHD_CONFIG"
-      else
-        echo "Banner /etc/issue.net" >>"$SSHD_CONFIG"
-      fi
-      echo -e "${GREEN}[✓] Banner configurado: /etc/issue.net${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: Banner /etc/issue.net${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+  local current="" effect="" tmp=""
+  current="$(ssh_effective_value banner "$SSHD_CONFIG" || true)"
+  if [ "$current" = "/etc/issue.net" ] && [ -s /etc/issue.net ]; then
+    echo -e "${GREEN}[✓] Banner SSH efectivo: $current${NC}"
+    return 0
   fi
+
+  if [ ! -s /etc/issue.net ]; then
+    effect="Crea un aviso previo a autenticación, sin enumerar servicios ni credenciales. Puede cambiar el texto legal que los usuarios ven al conectarse."
+    echo -e "${YELLOW}[WARN] /etc/issue.net no contiene un banner no vacío.${NC}"
+    if [ "$AUTO_FIX" != true ] || ! confirm_ssh_change "crear banner /etc/issue.net" "${current:-no banner}" "texto de uso autorizado" "$effect"; then
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+    if [ "$SSH_BACKUP_READY" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+    if [ -e /etc/issue.net ]; then
+      if [ -L /etc/issue.net ] || ! cp -p /etc/issue.net "$BACKUP_DIR/issue.net"; then
+        echo -e "${RED}[WARN] No se pudo respaldar /etc/issue.net o es un symlink; no se modifica.${NC}"
+        WARNINGS=$((WARNINGS + 1))
+        return 1
+      fi
+    fi
+    tmp="$(mktemp /etc/.issue.net.orangebox.XXXXXX)" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+    printf '%s\n' 'SISTEMA DE USO AUTORIZADO. El acceso no autorizado está prohibido.' > "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+    chmod 644 "$tmp" && chown root:root "$tmp" && mv "$tmp" /etc/issue.net || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+    echo -e "${GREEN}[✓] Banner /etc/issue.net creado.${NC}"
+    FIXED=$((FIXED + 1))
+  fi
+  check_sshd_param "banner" "/etc/issue.net" "Banner SSH" "Banner /etc/issue.net"
 }
 
 # ==============================================
@@ -451,32 +488,37 @@ check_extra_security() {
 # REINICIAR SSH
 # ==============================================
 restart_ssh() {
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "\n${BLUE}[*] Validando y reiniciando SSH...${NC}"
-  else
-    echo -e "\n${BLUE}[*] Auditoría SSH: no se reiniciará ni modificará el servicio${NC}"
+  [ "$AUTO_FIX" = true ] || {
+    echo -e "\n${BLUE}[*] Auditoría SSH: no se reiniciará ni modificará el servicio.${NC}"
+    return 0
+  }
+  [ "$SSH_CONFIG_CHANGED" = true ] || {
+    echo -e "\n${GREEN}[✓] No se cambió la configuración SSH; no se recarga el servicio.${NC}"
+    return 0
+  }
+
+  local effect="Recarga la configuración validada de sshd. Las sesiones establecidas normalmente permanecen activas, pero nuevas conexiones usarán la política nueva; una política inadecuada puede impedir nuevos logins. Mantén abierta esta sesión y prueba una segunda conexión antes de cerrarla."
+  if ! sshd -t; then
+    echo -e "${RED}[ERROR] sshd -t falló; no se recarga el servicio. Backup: $BACKUP_DIR/sshd_config${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  if ! confirm_ssh_change "recargar sshd" "configuración SSH modificada y sshd -t válido" "systemctl reload sshd / service sshd reload" "$effect"; then
+    echo -e "${YELLOW}[WARN] La configuración está guardada pero no activa; el servicio no fue recargado.${NC}"
+    return 1
   fi
 
-  if [ "$AUTO_FIX" = true ]; then
-    if sshd -t; then
-      systemctl restart sshd 2>/dev/null || service sshd restart 2>/dev/null
-      if [ $? -eq 0 ]; then
-        echo -e "${GREEN}[✓] SSH reiniciado correctamente${NC}"
-      else
-        echo -e "${YELLOW}[!] SSH configuracion valida pero servicio no reiniciado${NC}"
-      fi
-    else
-      echo -e "${RED}[!] Error en configuracion de SSH${NC}"
-      sshd -t
-      echo -e "${RED}[!] Restaurando backup...${NC}"
-      if [ -f "$BACKUP_DIR/sshd_config" ]; then
-        cp "$BACKUP_DIR/sshd_config" "$SSHD_CONFIG"
-        systemctl restart sshd 2>/dev/null || service sshd restart 2>/dev/null
-        echo -e "${YELLOW}[!] Backup restaurado${NC}"
-      fi
-      exit 1
-    fi
+  if command -v systemctl >/dev/null 2>&1 && systemctl reload sshd 2>/dev/null; then
+    echo -e "${GREEN}[✓] sshd recargado sin reiniciar sesiones existentes${NC}"
+    return 0
   fi
+  if command -v service >/dev/null 2>&1 && service sshd reload 2>/dev/null; then
+    echo -e "${GREEN}[✓] sshd recargado sin reiniciar sesiones existentes${NC}"
+    return 0
+  fi
+  echo -e "${YELLOW}[WARN] No se pudo recargar sshd. No se fuerza un restart; la configuración queda pendiente de aplicar. Backup: $BACKUP_DIR/sshd_config${NC}"
+  WARNINGS=$((WARNINGS + 1))
+  return 1
 }
 
 # ==============================================
@@ -511,24 +553,11 @@ show_summary() {
 # ==============================================
 show_intro() {
   echo -e "${YELLOW}"
-  echo "Este script configura hardening de SSH segun CIS Benchmark"
-  echo ""
-  echo "LOS CAMBIOS INCLUYEN:"
-  echo "  - Permisos 600 para /etc/ssh/sshd_config"
-  echo "  - Deshabilitar login root"
-  echo "  - Limitar intentos de autenticacion a 4"
-  echo "  - Deshabilitar X11Forwarding y TCPForwarding"
-  echo "  - Configurar timeout de sesion inactiva"
-  echo "  - Algoritmos de cifrado, MAC y KEX fuertes"
-  echo "  - Banner de advertencia"
-  echo ""
-  echo -e "${RED}NOTA: Deshabilitar login root puede afectar administradores acostumbrados a usar root directamente${NC}"
-  echo -e "${RED}      Se recomienda tener un usuario con sudo configurado antes de aplicar${NC}"
-  echo ""
-  echo -e "${YELLOW}Backup de configuraciones en: $BACKUP_DIR${NC}"
-  echo ""
-  echo -e "${GREEN}Iniciando correciones en 3 segundos, presiona Ctrl+C para cancelar...${NC}"
-  sleep 3
+  echo "Este script audita y configura controles SSH basados en el CIS Benchmark."
+  echo "Cada cambio de parámetro requiere confirmación, backup y validación con sshd -t."
+  echo "Se mantiene abierta la sesión actual y se recarga sshd (no se fuerza restart)."
+  echo "Backup en: $BACKUP_DIR"
+  echo -e "${NC}"
 }
 
 # ==============================================
@@ -541,7 +570,10 @@ main() {
 
   if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
     AUTO_FIX=true
-    make_backup
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup SSH falló; no se aplicarán cambios.${NC}" >&2
+      exit 1
+    fi
     show_intro
     echo -e "${YELLOW}[!] Modo automatico: aplicando configuraciones...${NC}"
     echo ""
