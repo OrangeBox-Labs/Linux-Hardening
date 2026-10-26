@@ -41,7 +41,11 @@ bash -c '
   backup_once "$2/source.conf"
   backup="$BACKUP_DIR$2/source.conf"
   [ -f "$backup" ]
-  cmp -s "$2/source.conf" "$backup"
+  source_hash="$(sha256sum "$2/source.conf")"
+  source_hash="${source_hash%% *}"
+  backup_hash="$(sha256sum "$backup")"
+  backup_hash="${backup_hash%% *}"
+  [ "$source_hash" = "$backup_hash" ]
   printf "%s\n" "modified-content" > "$2/source.conf"
   backup_once "$2/source.conf"
   grep -Fq "original-content" "$backup"
