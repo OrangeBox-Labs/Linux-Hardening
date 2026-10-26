@@ -12,8 +12,8 @@ sysctl_safe_log() {
   shift
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
     case "$level" in
-      OK) OK_COUNT=$(($\{OK_COUNT:-0}+1)) ;;
-      N/A) NOT_APPLICABLE_COUNT=$(($\{NOT_APPLICABLE_COUNT:-0}+1)) ;;
+      OK) OK_COUNT=$((${OK_COUNT:-0}+1)) ;;
+      N/A) NOT_APPLICABLE_COUNT=$((${NOT_APPLICABLE_COUNT:-0}+1)) ;;
     esac
     case "$level" in INFO|CAMBIO\ PROPUESTO) return 0 ;; esac
   fi
