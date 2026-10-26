@@ -93,7 +93,7 @@ get_auditd_enabled_state() {
   [ -n "$auditctl" ] || return 1
 
   status="$("$auditctl" -s 2>/dev/null)" || return 1
-  printf '%s\\n' "$status" | awk '
+  printf '%s\n' "$status" | awk '
     $1 == "enabled" { print $2; found = 1; exit }
     END { if (!found) exit 1 }
   '
