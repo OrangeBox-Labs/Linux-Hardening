@@ -46,8 +46,44 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC
 ok(){ echo -e "$GREEN[OK]$NC $*"; }; info(){ echo -e "$BLUE[INFO]$NC $*"; }; warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
 detect_os(){
-  [ -r /etc/os-release ] || die "Falta /etc/os-release"; . /etc/os-release
-  OS_ID=${ID:-}; OS_VERSION=$(echo "${VERSION_ID:-}"|cut -d. -f1); ID_LIKE=${ID_LIKE:-}
+  local os_release_file="${ORANGEBOX_OS_RELEASE_FILE:-/etc/os-release}"
+  local redhat_release_file="${ORANGEBOX_REDHAT_RELEASE_FILE:-/etc/redhat-release}"
+  local release_line release_version
+
+  OS_ID=""
+  OS_VERSION=""
+  ID_LIKE=""
+
+  if [ -r "$os_release_file" ]; then
+    . "$os_release_file"
+    OS_ID=${ID:-}
+    OS_VERSION=$(echo "${VERSION_ID:-}" | cut -d. -f1)
+    ID_LIKE=${ID_LIKE:-}
+  fi
+
+  # CentOS/RHEL 6 can lack /etc/os-release; use the legacy release marker.
+  if [ -z "$OS_ID" ] || [ -z "$OS_VERSION" ]; then
+    [ -r "$redhat_release_file" ] || die "No se encontró una identificación válida: $os_release_file ni $redhat_release_file"
+    release_line=$(cat "$redhat_release_file" 2>/dev/null)
+    release_version=$(printf '%s\n' "$release_line" | awk '
+      { for (i=1; i<=NF; i++) if ($i == "release") {
+          split($(i+1), version_parts, ".");
+          print version_parts[1];
+          exit
+        }
+      }')
+    case "$release_line" in
+      *CentOS*|*centos*) OS_ID=centos ;;
+      *"Red Hat Enterprise Linux"*|*"Red Hat Linux"*) OS_ID=rhel ;;
+      *"Oracle Linux"*|*"Oracle Linux Server"*) OS_ID=ol ;;
+      *Rocky*|*rocky*) OS_ID=rocky ;;
+      *AlmaLinux*|*almalinux*) OS_ID=almalinux ;;
+      *) die "No se pudo identificar una distribución compatible desde $redhat_release_file: $release_line" ;;
+    esac
+    [ -n "$release_version" ] || die "No se pudo extraer la versión desde $redhat_release_file: $release_line"
+    OS_VERSION="$release_version"
+  fi
+
   case "$OS_ID" in rhel|centos|rocky|almalinux|ol|oracle) ;; *) [[ "$ID_LIKE" == *rhel* ]] || die "Distribución no soportada: $OS_ID";; esac
   case "$OS_VERSION" in 6|7|8|9|10) ;; *) die "Versión no soportada: $OS_VERSION";; esac
   ok "Detectado: $OS_ID $OS_VERSION"
