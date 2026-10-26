@@ -8,7 +8,7 @@ pass() { printf '[PASS] %s\n' "$*"; }
 grep -Fq 'confirm_ssh_complete_change()' "$SSH" || fail "SSH avanzado no exige consentimiento"
 grep -Fq 'sshd -t' "$SSH" || fail "no valida la configuración SSH"
 grep -Fq 'sshd -T' "$SSH" || fail "no valida los valores efectivos de sshd"
-grep -Fq 'No se regeneran ni eliminan claves de host' "$SSH" || fail "el informe no informa que conserva host keys"
+grep -Fq 'NO se regeneran ni eliminan claves de host' "$SSH" || fail "el informe no informa que conserva host keys"
 grep -Fq 'NO se modifica ninguna regla de firewall' "$SSH" || fail "el informe no informa que no toca el firewall"
 grep -Fq 'no se instala ni actualiza desde este script' "$SSH" || fail "ssh-audit puede instalar paquetes automáticamente"
 grep -Fq 'systemctl reload sshd' "$SSH" || fail "SSH avanzado debe usar reload"
