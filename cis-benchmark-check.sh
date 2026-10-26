@@ -2626,6 +2626,7 @@ main() {
   echo -e "${YELLOW}[INFO] Perfil de referencia: $CIS_PROFILE${NC}"
   echo -e "${YELLOW}[INFO] Estado: $CIS_PROFILE_STATUS${NC}"
   echo -e "${YELLOW}[INFO] Se evalúa solo el subconjunto local; no se afirma cobertura total ni certificación CIS.${NC}\n"
+  echo -e "${YELLOW}[INFO] Las etiquetas numéricas de los tests son referencias locales históricas; no se ha validado una equivalencia uno a uno con los IDs oficiales del perfil vigente. Consulte CIS-COVERAGE-MAP.md.${NC}\n"
 
   # Limpiar reporte anterior
   echo "CIS Benchmark Verification Report" >"$REPORT_FILE"
@@ -2637,6 +2638,7 @@ main() {
   echo "Perfil de referencia: $CIS_PROFILE" | tee -a "$REPORT_FILE"
   echo "Estado del mapa: $CIS_PROFILE_STATUS" | tee -a "$REPORT_FILE"
   echo "Cobertura: subconjunto local de controles OrangeBox; no es certificación ni porcentaje completo del benchmark CIS oficial." | tee -a "$REPORT_FILE"
+  echo "IDs de tests: numeración local histórica; la equivalencia oficial por versión/perfil no está validada uno a uno. Ver CIS-COVERAGE-MAP.md." | tee -a "$REPORT_FILE"
   echo "" | tee -a "$REPORT_FILE"
 
   # Seccion 1.1 - Configuracion de Filesystem
