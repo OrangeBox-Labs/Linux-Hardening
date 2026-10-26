@@ -28,6 +28,8 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 REMOTE_CONFIG=false
+RSYSLOG_CONFIG_CHANGED=false
+JOURNALD_CONFIG_CHANGED=false
 
 RSYSLOG_CONF="/etc/rsyslog.conf"
 RSYSLOG_D_DIR="/etc/rsyslog.d"
@@ -67,6 +69,93 @@ show_usage() {
 # ==============================================
 # FUNCION PARA HACER BACKUP
 # ==============================================
+confirm_rsyslog_change() {
+  local control="$1" effect="$2" answer=""
+  echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
+  echo "Qué hace/riesgo: $effect"
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "$YELLOW[WARN] No hay terminal interactiva; se omite el cambio por seguridad.$NC"
+    return 1
+  fi
+  printf '¿Confirmas este cambio? [s/N]: ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) echo -e "$BLUE[INFO] Cambio rechazado; se conserva el estado actual.$NC"; return 1 ;;
+  esac
+}
+
+journald_param_inventory() {
+  local param="$1" file
+  for file in "$JOURNALD_CONF" /usr/lib/systemd/journald.conf.d/*.conf /usr/local/lib/systemd/journald.conf.d/*.conf /run/systemd/journald.conf.d/*.conf /etc/systemd/journald.conf.d/*.conf; do
+    [ -f "$file" ] || continue
+    awk -v path="$file" -v param="$param" '
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      /^[ \t]*[#;]/ { next }
+      /^[ \t]*\[/ {
+        section=tolower(trim($0))
+        gsub(/[\[\] \t]/, "", section)
+        next
+      }
+      section == "journal" {
+        line=$0
+        eq=index(line, "=")
+        if (!eq) next
+        key=trim(substr(line,1,eq-1))
+        if (key != param) next
+        value=trim(substr(line,eq+1))
+        sub(/[ \t]*[#;].*$/, "", value)
+        current=trim(value)
+      }
+      END { if (current != "") printf "%s|%s\n", path, current }
+    ' "$file" 2>/dev/null
+  done
+}
+
+journald_set_main_param() {
+  local param="$1" expected="$2" tmp mode
+  [ ! -L "$JOURNALD_CONF" ] || { echo -e "$RED[!] $JOURNALD_CONF es symlink; no se modifica automáticamente.$NC"; return 1; }
+  tmp="$(mktemp "$JOURNALD_CONF.orangebox.XXXXXX")" || return 1
+  if [ -f "$JOURNALD_CONF" ]; then
+    awk -v param="$param" -v expected="$expected" '
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      function ensure_value() { if (section == "journal" && !written) { print param "=" expected; written=1 } }
+      /^[ \t]*\[/ {
+        ensure_value()
+        section=tolower(trim($0))
+        gsub(/[\[\] \t]/, "", section)
+        if (section == "journal") journal_seen=1
+        print
+        next
+      }
+      section == "journal" && $0 !~ /^[ \t]*[#;]/ {
+        line=$0
+        eq=index(line, "=")
+        if (eq) {
+          key=trim(substr(line,1,eq-1))
+          if (key == param) {
+            if (!written) { print param "=" expected; written=1 }
+            next
+          }
+        }
+      }
+      { print }
+      END {
+        ensure_value()
+        if (!journal_seen) { print ""; print "[Journal]"; print param "=" expected }
+      }
+    ' "$JOURNALD_CONF" > "$tmp" || { rm -f "$tmp"; return 1; }
+    mode="$(stat -c "%a" "$JOURNALD_CONF" 2>/dev/null || echo 644)"
+    chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
+    chown --reference="$JOURNALD_CONF" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  else
+    printf '[Journal]\n%s=%s\n' "$param" "$expected" > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  fi
+  mv "$tmp" "$JOURNALD_CONF" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
 make_backup() {
   if [ "$AUTO_FIX" = true ]; then
     mkdir -p "$BACKUP_DIR"
@@ -81,54 +170,52 @@ make_backup() {
 # FUNCION GENERICA PARA CONFIGURAR PARAMETROS DE JOURNALD
 # ==============================================
 configure_journald_param() {
-  local param="$1"
-  local expected="$2"
-  local description="$3"
+  local param="$1" expected="$2" description="$3"
+  local inventory="" mismatch="" dropins="" file actual="" effect=""
 
-  # systemd-journald defaults Compress=yes. A commented sample line or no active
-  # setting means the effective default is compliant unless a drop-in overrides it.
-  if [ "$param" = "Compress" ] && [ "$expected" = "yes" ] &&
-     ! grep -Eq '^[[:space:]]*Compress[[:space:]]*=' "$JOURNALD_CONF" 2>/dev/null; then
-    echo -e "${GREEN}[✓] Compress=yes (valor predeterminado; no requiere descomentar)${NC}"
-    return 0
-  fi
-
-  if grep -q "^[#]*\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
-    if grep -q "^#\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
-      echo -e "${YELLOW}[!] $description esta comentado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i "s/^#\s*${param}=${expected}/${param}=${expected}/" "$JOURNALD_CONF"
-        echo -e "${GREEN}[✓] $description descomentado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    else
-      echo -e "${GREEN}[✓] $description${NC}"
+  inventory="$(journald_param_inventory "$param")"
+  if [ -n "$inventory" ]; then
+    mismatch="$(printf '%s\n' "$inventory" | awk -F'|' -v expected="$expected" '$2 != expected {print}')"
+    if [ -z "$mismatch" ]; then
+      echo -e "$GREEN[✓] $description coincide con las directivas explícitas detectadas$NC"
+      return 0
     fi
+  elif [ "$param" = "Compress" ] && [ "$expected" = "yes" ]; then
+    echo -e "$GREEN[✓] Compress=yes es el valor predeterminado; no se requiere editarlo$NC"
     return 0
   fi
 
-  if grep -q "^[#]*\s*${param}=" "$JOURNALD_CONF" 2>/dev/null; then
-    echo -e "${RED}[!] $description tiene valor incorrecto${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      sed -i "s/^[#]*\s*${param}=.*/${param}=${expected}/" "$JOURNALD_CONF"
-      echo -e "${GREEN}[✓] $description corregido a ${expected}${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 0
+  echo -e "$RED[!] $description no cumple el objetivo $expected o falta una configuración explícita$NC"
+  if [ -n "$inventory" ]; then
+    printf '%s\n' "$inventory" | while IFS='|' read -r file actual; do
+      [ -n "$file" ] && echo "  - Configurado: $file = $actual"
+    done
   fi
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
 
-  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-  if [ "$AUTO_FIX" = true ]; then
-    echo "${param}=${expected}" >>"$JOURNALD_CONF"
-    echo -e "${GREEN}[✓] $description configurado como ${expected}${NC}"
-    FIXED=$((FIXED + 1))
-  else
+  dropins="$(printf '%s\n' "$inventory" | awk -F'|' -v main="$JOURNALD_CONF" '$1 != main && $1 != "" {print}')"
+  if [ -n "$dropins" ]; then
+    echo -e "$YELLOW[WARN] Hay un override en un drop-in; no se edita el archivo principal porque podría no tener efecto.$NC"
+    echo "$dropins"
     WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
+
+  case "$param" in
+    ForwardToSyslog) effect="Reenvía eventos del journal a rsyslog. Puede duplicar logs, aumentar I/O y cambia el flujo de recolección; compruebe que rsyslog se utiliza." ;;
+    Compress) effect="Comprime archivos de journal grandes para ahorrar disco a costa de CPU. Solo se cambia cuando una configuración explícita contradice el valor esperado." ;;
+    Storage) effect="Mantiene logs tras reinicios y consume espacio en /var. Compruebe capacidad y retención antes de activar persistencia." ;;
+    *) effect="Cambia la política de journald; puede afectar retención, consumo de disco y flujo de logs." ;;
+  esac
+  if ! confirm_rsyslog_change "$description -> $expected" "$effect"; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+  if ! journald_set_main_param "$param" "$expected"; then
+    echo -e "$RED[!] No se pudo modificar $JOURNALD_CONF de forma segura$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  JOURNALD_CONFIG_CHANGED=true
+  FIXED=$((FIXED + 1))
+  echo -e "$GREEN[✓] $description configurado en $JOURNALD_CONF$NC"
 }
 
 # ==============================================
