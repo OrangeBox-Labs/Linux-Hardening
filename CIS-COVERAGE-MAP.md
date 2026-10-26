@@ -21,6 +21,7 @@ Las páginas oficiales catalogan estas versiones para las distribuciones manteni
 Fuentes:
 - RHEL: https://www.cisecurity.org/benchmark/red_hat_linux
 - Perfil CIS RHEL 9 renderizado por ComplianceAsCode (incluye el mapeo de la recomendación 3.3.1 de forwarding): https://complianceascode.github.io/content-pages/rendered-policies/rhel9/cis_rhel9.html
+- Nota de Red Hat sobre la separación entre perfiles journald/rsyslog en RHEL 9/10: https://access.redhat.com/articles/7146814
 - AlmaLinux: https://www.cisecurity.org/benchmark/almalinuxos_linux
 - Rocky Linux: https://www.cisecurity.org/benchmark/rocky_linux
 - Oracle Linux: https://www.cisecurity.org/benchmark/oracle_linux
@@ -51,7 +52,7 @@ Fuentes:
 | 6.1 | 8 | Permisos de archivos sensibles | linux-hardening.sh; password-hardening.sh | Inventariado; cotejo exacto con la versión oficial pendiente |
 | 6.2 | 3 | Shadow, contraseñas vacías y UID 0 | linux-hardening.sh; password-hardening.sh | Inventariado; cotejo exacto con la versión oficial pendiente |
 | 3.2 / 3.3 | 0 checks directos del verificador | Módulos de red y parámetros sysctl | `linux-hardening.sh`, `kernel-hardening.sh`, `network-hardening.sh` | El hardening ya cubre redirects, source routing, `rp_filter`, SYN cookies, martians e IPv4/IPv6 forwarding. Forwarding se propone deshabilitar con confirmación individual porque puede interrumpir routing/NAT/VPN/gateways/containers. Falta crear la batería de solo lectura del checker y validar el mapping por cada versión; para RHEL 9 CIS v3.0.0 el perfil público SSG asocia 3.3.1 a forwarding IPv4/IPv6. |
-| 4.2 | 0 | Rsyslog/logging | rsyslog-hardening.sh | Falta visibilidad directa en el informe CIS, aunque existe módulo operacional relacionado |
+| CIS RHEL 9 v3.0.0: 6.2.1.4 / 6.2.2 / 6.2.3 (no es ID local) | 0 checks directos del verificador | Elección de journald/rsyslog y logging | `linux-hardening.sh`, `rsyslog-hardening.sh` | El baseline advierte si ambos servicios están activos en EL9/10, pero el checker CIS aún no cubre la configuración de logging por perfil; el stack debe elegirse/tailorearse sin deshabilitar colectores a ciegas. |
 
 ## Brechas relevantes y decisión de riesgo
 
@@ -59,6 +60,7 @@ Fuentes:
 |---|---|---|---|
 | Checks de montaje que heredaban opciones del filesystem padre | Corregido en esta rama mediante match exacto de TARGET | Podía dar falsos PASS y esconder controles de filesystem pendientes | Cambio de auditoría solo lectura; no modifica montajes |
 | Forwarding IPv4/IPv6 | Añadido al baseline y al módulo `kernel-hardening.sh` como control opt-in | Deshabilitarlo puede romper routing, NAT, VPN, gateways y redes de contenedores; puede afectar también rutas IPv6 de uplink | `sysctl-safe` muestra el efecto y pide confirmación individual `[s/N]`; si no hay TTY, omite el cambio. IPv6 ausente en kernels legacy queda como N/A. |
+| Journald y rsyslog activos a la vez | Añadida advertencia en el baseline para EL9/10; sin remediación automática | Desactivar uno puede perder forwarding remoto, ingestión de Wazuh o recepción/persistencia de logs; CIS ofrece rutas alternativas y requiere seleccionar el perfil | Solo lectura; se pide decisión operativa/tailoring, no se para ni deshabilita ningún servicio. |
 | SELinux en bootloader | Corregido en esta rama: inspecciona `/proc/cmdline`, `grubby --info=ALL` y archivos BLS/GRUB/EFI; si no puede comprobar runtime y persistencia devuelve WARN | Habilitar SELinux Enforcing sobre un host configurado como Disabled puede romper servicios por labels/policies | El checker solo detecta; cualquier migración de modo debe seguir siendo opt-in y requerir análisis/ventana de mantenimiento |
 | Core dumps | Corregido en esta rama para consultar `systemd-analyze cat-config systemd/coredump.conf` y considerar drop-ins | Desactivar almacenamiento/backtraces reduce datos útiles para post-mortem | Solo lectura; remediación sigue siendo una decisión operativa confirmada |
 | Servicios no requeridos, paquetes clientes y módulos de filesystem | Módulos opt-in existentes; checker detecta presencia | Eliminar/deshabilitar DNS, correo, web, NFS, Samba, SNMP, clientes o módulos usados puede cortar una función legítima | Confirmación por acción y explicación de impacto; nunca eliminar solo por discrepancia con baseline genérico |
