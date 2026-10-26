@@ -131,9 +131,14 @@ backup_once() {
   local src="$1" dst backup
   [ -e "$src" ] || [ -L "$src" ] || return 0
   [ "${AUTO_FIX:-false}" = true ] || return 0
+  [ ! -L "$src" ] || die "No se respalda automáticamente $src porque es un enlace simbólico; se aborta antes de modificarlo."
 
   backup="$BACKUP_DIR$src"
   if [ -e "$backup" ] || [ -L "$backup" ]; then
+    [ ! -L "$backup" ] || die "El destino de backup $backup es un enlace simbólico; se aborta --fix."
+    if { [ -f "$src" ] && [ ! -f "$backup" ]; } || { [ -d "$src" ] && [ ! -d "$backup" ]; }; then
+      die "El tipo del backup existente $backup no coincide con $src; se aborta --fix."
+    fi
     return 0
   fi
   dst="$BACKUP_DIR$(dirname "$src")"
@@ -148,9 +153,6 @@ backup_once() {
   fi
   if [ -f "$src" ] && ! cmp -s "$src" "$backup"; then
     die "La copia de seguridad de $src no coincide con el original; se aborta --fix."
-  fi
-  if [ -L "$src" ] && [ "$(readlink "$src" 2>/dev/null || true)" != "$(readlink "$backup" 2>/dev/null || true)" ]; then
-    die "La copia de seguridad del enlace $src no coincide; se aborta --fix."
   fi
   if [ -d "$src" ] && [ ! -L "$src" ] && ! diff -qr "$src" "$backup" >/dev/null 2>&1; then
     die "La copia de seguridad del directorio $src no coincide; se aborta --fix."
