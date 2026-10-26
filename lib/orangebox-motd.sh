@@ -167,7 +167,7 @@ if [ -n "${SSH_CONNECTION:-}" ]; then
 elif [ -n "${SSH_CLIENT:-}" ]; then
   OB_CLIENT_IP=$(printf '%s\n' "$SSH_CLIENT" | awk 'NF {print $1; exit}')
 else
-  OB_CLIENT_IP=$(who am i 2>/dev/null | awk 'NF {value=$NF; gsub(/[()]/,"",value); print value; exit}')
+  OB_CLIENT_IP=$(who am i 2>/dev/null | awk 'match($0, /\\([^)]*\\)/) {print substr($0,RSTART+1,RLENGTH-2); exit}')
 fi
 [ -n "$OB_CLIENT_IP" ] || OB_CLIENT_IP="Local"
 
