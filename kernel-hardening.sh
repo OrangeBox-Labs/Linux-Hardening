@@ -85,8 +85,19 @@ kernel_backup_file() {
   fi
   # A repeated call for the same file must preserve the original pre-change copy.
   [ -e "$backup" ] && return 0
-  if ! cp -p "$source" "$backup" || [ ! -f "$backup" ] || ! cmp -s "$source" "$backup"; then
-    echo "[ERROR] No se pudo crear/verificar el backup de $source." >&2
+  if ! cp -p "$source" "$backup" || [ ! -f "$backup" ]; then
+    echo "[ERROR] No se pudo crear el backup de $source." >&2
+    return 1
+  fi
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    echo "[ERROR] sha256sum no está disponible para verificar el backup de $source." >&2
+    return 1
+  fi
+  local source_hash backup_hash
+  source_hash="$(sha256sum "$source" 2>/dev/null | awk '{print $1}')"
+  backup_hash="$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')"
+  if [ -z "$source_hash" ] || [ -z "$backup_hash" ] || [ "$source_hash" != "$backup_hash" ]; then
+    echo "[ERROR] No se pudo verificar el backup de $source." >&2
     return 1
   fi
   echo "[INFO] Backup $source: $backup"
