@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.12, compatibilidad legacy CentOS 6 para SYSCTL, listeners, auditd/NTP/GRUB, crypto-policy y comprobaciones PAM. |
+| `linux-hardening.sh` | Baseline 1.4.13, compatibilidad legacy CentOS 6 para SYSCTL, listeners, auditd/NTP/GRUB, crypto-policy y PAM, con prueba de regresión de la rama GRUB legacy. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |

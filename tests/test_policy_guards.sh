@@ -80,8 +80,28 @@ grep -Fq 'auditd_is_active()' "$CORE" || fail "falta detección auditd compatibl
 grep -Fq 'service auditd status' "$CORE" || fail "CentOS 6 no comprueba auditd mediante service"
 grep -Fq 'ntpq -pn' "$CORE" || fail "falta comprobación del peer de ntpd legacy"
 grep -Fq '/boot/grub/grub.conf' "$CORE" || fail "CentOS 6 no comprueba grub.conf"
+grep -Fq 'if [ "${OS_VERSION:-0}" = 6 ]; then' "$CORE" || fail "el control GRUB legacy no depende de la versión detectada"
+if grep -Fq '\\${OS_VERSION:-0}' "$CORE"; then
+  fail "grub_module contiene una expansión OS_VERSION escapada que impide detectar CentOS 6"
+fi
 grep -Fq 'update-crypto-policies no aplica a CentOS/RHEL 6/7' "$CORE" || fail "crypto policies ausentes en EL6/7 se siguen marcando como fallo"
 grep -Fq 'sysctl -n "$key"' "$CORE" || fail "los sysctl ausentes siguen contándose como controles fallidos"
+
+grub_fn_tmp="$(mktemp)"
+trap 'rm -f "$grub_fn_tmp"' EXIT
+awk '/^grub_module\(\)\{/ {in_fn=1} in_fn {print} in_fn && /^}$/ {exit}' "$CORE" > "$grub_fn_tmp"
+[ -s "$grub_fn_tmp" ] || fail "no se pudo extraer grub_module"
+grub_output="$(
+  BLUE="" NC=""
+  OS_VERSION=6
+  ok() { printf '[OK] %s\\n' "$*"; }
+  warn() { printf '[WARN] %s\\n' "$*"; }
+  info() { printf '[INFO] %s\\n' "$*"; }
+  . "$grub_fn_tmp"
+  grub_module
+)"
+case "$grub_output" in *"GRUB legacy"*) ;; *) fail "OS_VERSION=6 no entra a la rama GRUB legacy: $grub_output" ;; esac
+case "$grub_output" in *"grub.cfg no localizado"*) fail "CentOS 6 cae incorrectamente en la rama moderna de grub.cfg" ;; esac
 pass "auditorías de auditd, NTP, GRUB, crypto-policy y sysctl distinguen EL6"
 
 # PAM tooling differs on older CentOS/RHEL; it remains read-only.

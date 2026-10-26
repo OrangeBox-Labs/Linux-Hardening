@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.12 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.13 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.12
+SCRIPT_VERSION=1.4.13
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -727,7 +727,7 @@ time_module(){
 }
 grub_module(){
   echo -e "\n$BLUE### GRUB ###$NC"
-  if [ "\${OS_VERSION:-0}" = 6 ]; then
+  if [ "${OS_VERSION:-0}" = 6 ]; then
     if [ -e /boot/grub/grub.conf ] || [ -e /etc/grub.conf ]; then
       ok "GRUB legacy grub.conf localizado"
     else
