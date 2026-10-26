@@ -36,7 +36,7 @@ El estado detallado del proyecto está en [PROJECT-STATUS.md](PROJECT-STATUS.md)
 | `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
 | `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
-| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict` y `kernel.kptr_restrict`. |
+| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict`, `kernel.kptr_restrict` y forwarding IPv4/IPv6 con confirmación individual. |
 | `kernel-lpe-2026-mitigation.sh` | Mitigaciones específicas para escenarios LPE recientes, separadas del hardening general. |
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
@@ -325,12 +325,12 @@ La opción `--module selinux-setup` está bloqueada por política porque SELinux
 | Módulo/script | Riesgo operacional |
 |---|---|
 | `generate-iptables-rules.sh` | Puede vaciar reglas iptables y establecer `INPUT DROP`, cortando SSH. No debe combinarse con Shorewall. |
-| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, rutas asimétricas y aplicaciones. `--auto` los deja en auditoría. |
+| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, NAT, gateways, redes de contenedores, rutas asimétricas y aplicaciones. Forwarding IPv4/IPv6 solicita confirmación por parámetro y se omite sin TTY; `--auto` deja los controles de riesgo en auditoría. |
 | `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Pueden afectar clientes antiguos, automatizaciones y métodos de autenticación. |
 | `FS-hardening.sh` | Opciones restrictivas, `hidepid`, módulos y autofs pueden afectar monitoreo y aplicaciones. |
 | `cron-hardening.sh` | Restricciones de cron/at pueden romper tareas de usuarios o cPanel. |
 | `grub-hardening.sh` | Cambios de arranque pueden requerir reinicio y dejar un sistema inaccesible si se aplican incorrectamente. |
-| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Validar contenedores, VPN y aplicaciones. |
+| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Forwarding IPv4/IPv6 queda detrás de confirmación individual porque puede interrumpir routing/NAT/VPN/gateways/containers. Validar rutas y consola de recuperación. |
 | `auditd-hardening.sh` / `rsyslog-hardening.sh` | Pueden aumentar volumen de logs o afectar reglas y destinos existentes. |
 | `configure-time-sync.sh` | Cambios bruscos de hora pueden afectar certificados, autenticación y correlación de logs. |
 | `bash-hardening.sh` | Logging de comandos puede elevar volumen de logs y capturar argumentos sensibles. |
