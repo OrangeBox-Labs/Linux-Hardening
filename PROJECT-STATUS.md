@@ -24,7 +24,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 | Auditoría de listeners/firewall | Implementado; solo lectura | Inventario TCP/UDP, proceso/servicio y contraste con reglas INPUT de gestores/backends conocidos. No modifica reglas ni decide qué puertos cerrar. |
 | Verificador `cis-benchmark-check.sh` | **Parcial** | 143 controles locales implementados. Cubre partes de filesystem, paquetes, AIDE, GRUB, core dumps, SELinux, servicios, tiempo, auditd, cron, SSH, sudo, PAM/passwords, permisos y cuentas. No equivale a las recomendaciones completas del benchmark vigente. |
 | Catálogo CIS | Catalogado; trazabilidad control a control pendiente | Hay referencias para RHEL, AlmaLinux, Rocky Linux y Oracle Linux 8–10. CentOS/Stream no se equipara automáticamente a un perfil RHEL. Falta asociar cada control local a la recomendación y versión exactas, distinguir aplicabilidad y registrar controles no cubiertos/no aplicables. |
-| Pruebas y CI | Implementados; resultado de esta rama aún no confirmado | El workflow ejecuta sintaxis Bash, regresiones operacionales y smoke tests en CentOS 6/7 y AlmaLinux 8/9/10. El cambio de este análisis añade una prueba de mountpoints, pero debe confirmarse CI en verde antes de integrarlo en `main`. |
+| Pruebas y CI | Implementados; resultado de esta rama aún no confirmado | El workflow ejecuta sintaxis Bash, regresiones operacionales y smoke tests en CentOS 6/7 y AlmaLinux 8/9/10. Esta rama añade pruebas para mountpoints exactos, precedencia de systemd y argumentos de arranque; los guards también cubren consentimiento de forwarding y auditoría no destructiva de logging. CI debe quedar en verde antes de integrar en `main`. |
 
 ## Matriz de cobertura CIS local
 
@@ -55,6 +55,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 - [x] Añadida `tests/test_cis_effective_config.sh` para probar overrides efectivos y detección de argumentos de arranque, y conectada al workflow.
 - [x] Añadido hardening opt-in de forwarding IPv4/IPv6 al baseline y al módulo `kernel-hardening.sh`: solo cambia con confirmación individual del helper sysctl y explicación de impacto; se omite sin TTY.
 - [x] Añadida auditoría de elección del stack journald/rsyslog en EL9/10. Si ambos están activos, advierte que debe elegirse/tailorearse el perfil y no detiene, deshabilita ni reinicia los servicios desde esa comprobación.
+- [x] El checker CIS ahora advierte en pantalla y reporte que las etiquetas numéricas locales son históricas; no garantiza equivalencia uno a uno con IDs oficiales de cada versión. El coverage map explica esa brecha.
 - [ ] Ejecutar/confirmar todos los tests y compatibilidad; el resultado de CI para la rama de trabajo aún no está verificado.
 - [ ] Integrar los cambios de esta rama en `main` tras validar CI y revisar diff.
 
