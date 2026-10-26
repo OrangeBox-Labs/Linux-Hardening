@@ -81,7 +81,7 @@ grep -Fq 'service auditd status' "$CORE" || fail "CentOS 6 no comprueba auditd m
 grep -Fq 'ntpq -pn' "$CORE" || fail "falta comprobación del peer de ntpd legacy"
 grep -Fq '/boot/grub/grub.conf' "$CORE" || fail "CentOS 6 no comprueba grub.conf"
 grep -Fq 'if [ "${OS_VERSION:-0}" = 6 ]; then' "$CORE" || fail "el control GRUB legacy no depende de la versión detectada"
-if grep -Fq '\\${OS_VERSION:-0}' "$CORE"; then
+if grep -Fq '\${OS_VERSION:-0}' "$CORE"; then
   fail "grub_module contiene una expansión OS_VERSION escapada que impide detectar CentOS 6"
 fi
 grep -Fq 'update-crypto-policies no aplica a CentOS/RHEL 6/7' "$CORE" || fail "crypto policies ausentes en EL6/7 se siguen marcando como fallo"
