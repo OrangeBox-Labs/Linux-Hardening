@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression tests for OS identification on CentOS/RHEL generations without os-release.
 set -eu
-ROOT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
