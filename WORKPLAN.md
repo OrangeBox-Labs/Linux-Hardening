@@ -44,12 +44,13 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Alinear el comentario de versión del baseline con `SCRIPT_VERSION=1.4.26` y enlazar el tablero `PROJECT-STATUS.md` desde README.
 - [ ] Validar la sintaxis de los archivos modificados y ejecutar las pruebas CIS en esta rama.
 - [ ] Confirmar CI completo y compatibilidad CentOS 6/7 + AlmaLinux 8/9/10; no integrar en `main` antes de comprobarlo.
-- [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9.
+- [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9. Añadir tests de lectura CIS para sysctl de red y logging; elegir/tailorear el perfil journald o rsyslog sin deshabilitar colectores automáticamente.
 - [x] Corregir en la rama el control SELinux de arranque para revisar kernel activo y fuentes BLS/GRUB/EFI, y los checks de core dumps para resolver `systemd-analyze cat-config`/drop-ins; evidencia incompleta queda en WARN.
 - [x] Añadida `tests/test_cis_effective_config.sh` para verificar overrides de systemd y argumentos de arranque, y conectada al workflow.
 - [x] Añadido `CIS-COVERAGE-MAP.md`, inventario de los 143 checks locales por sección y secciones sin checks directos en el informe (3.2/3.3 y 4.2); el mapping recomendación oficial→control local sigue pendiente.
 - [x] Enlazados `PROJECT-STATUS.md` y `CIS-COVERAGE-MAP.md` desde README para retomar el trabajo sin depender del historial del chat.
 - [x] Añadidos al baseline y a `kernel-hardening.sh` los controles CIS de forwarding IPv4/IPv6. Cada valor se aplica solo con confirmación individual y explicación del riesgo para routing/NAT/VPN/gateways/containers; IPv6 no disponible en kernels legacy queda N/A.
+- [x] Añadida auditoría de la coexistencia `systemd-journald`/`rsyslog` en EL9/10. Si ambos están activos advierte del posible conflicto de perfil CIS, pero no detiene ni deshabilita los servicios.
 - [ ] Continuar revisando permisos GRUB, AIDE activo, opciones efectivas de PAM/SSH y controles CIS dependientes de la versión.
 
 ### En curso
