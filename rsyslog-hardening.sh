@@ -243,7 +243,7 @@ configure_journald_param() {
       return 0
     fi
   elif [ "$param" = "Compress" ] && [ "$expected" = "yes" ]; then
-    echo -e "$GREEN[✓] Compress=yes es el valor predeterminado; no se requiere editarlo$NC"
+    echo -e "$GREEN[✓] Compress=yes (valor predeterminado; no requiere descomentar)$NC"
     return 0
   fi
 
