@@ -169,6 +169,68 @@ make_backup() {
 # ==============================================
 # FUNCION GENERICA PARA CONFIGURAR PARAMETROS DE JOURNALD
 # ==============================================
+rsyslog_current_directive() {
+  local directive="$1"
+  [ -r "$RSYSLOG_CONF" ] || return 0
+  awk -v directive="$directive" '
+    /^[ \t]*[#;]/ || /^[ \t]*$/ { next }
+    {
+      line=$0
+      n=split(line, fields, /[ \t]+/)
+      if (fields[1] == directive && n >= 2) current=fields[2]
+    }
+    END { if (current != "") print current }
+  ' "$RSYSLOG_CONF" 2>/dev/null
+}
+
+rsyslog_set_directive() {
+  local directive="$1" expected="$2" description="$3" effect="$4"
+  local current="" tmp="" mode=""
+  current="$(rsyslog_current_directive "$directive")"
+  if [ "$current" = "$expected" ]; then
+    echo -e "$GREEN[✓] $description=$expected$NC"
+    return 0
+  fi
+  if [ "$AUTO_FIX" != true ]; then
+    echo -e "$RED[!] $description actual=$current; recomendado=$expected$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  echo -e "$YELLOW[!] $description actual=$current; objetivo=$expected$NC"
+  if ! confirm_rsyslog_change "$description -> $expected" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  [ ! -L "$RSYSLOG_CONF" ] || { echo -e "$RED[!] $RSYSLOG_CONF es symlink; no se modifica.$NC"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  tmp="$(mktemp "$RSYSLOG_CONF.orangebox.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  awk -v directive="$directive" -v expected="$expected" '
+    /^[ \t]*[#;]/ { print; next }
+    {
+      line=$0
+      n=split(line, fields, /[ \t]+/)
+      if (fields[1] == directive) {
+        if (!written) { print directive " " expected; written=1 }
+        next
+      }
+      print
+    }
+    END { if (!written) print directive " " expected }
+  ' "$RSYSLOG_CONF" > "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  mode="$(stat -c "%a" "$RSYSLOG_CONF" 2>/dev/null || echo 644)"
+  chmod "$mode" "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  chown --reference="$RSYSLOG_CONF" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  mv "$tmp" "$RSYSLOG_CONF" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  if [ "$(rsyslog_current_directive "$directive")" = "$expected" ]; then
+    RSYSLOG_CONFIG_CHANGED=true
+    FIXED=$((FIXED + 1))
+    echo -e "$GREEN[✓] $description configurado y validado$NC"
+  else
+    echo -e "$RED[!] No se validó $description después del cambio$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+}
+
 configure_journald_param() {
   local param="$1" expected="$2" description="$3"
   local inventory="" mismatch="" dropins="" file actual="" effect=""
@@ -277,24 +339,23 @@ configure_remote_logging() {
 # 4.2.1.1 - ENSURE RSYSLOG IS INSTALLED
 # ==============================================
 check_rsyslog_installed() {
-  echo -e "\n${BLUE}[*] CIS 4.2.1.1 - Verificando rsyslog instalado...${NC}"
-
-  if rpm -q rsyslog &>/dev/null; then
-    echo -e "${GREEN}[✓] rsyslog instalado${NC}"
+  echo -e "\n$BLUE[*] CIS 4.2.1.1 - Verificando rsyslog instalado...$NC"
+  if rpm -q rsyslog >/dev/null 2>&1; then
+    echo -e "$GREEN[✓] rsyslog instalado$NC"
+    return 0
+  fi
+  echo -e "$RED[!] rsyslog no instalado$NC"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+  local effect="Instala rsyslog y añade un servicio de logging. Comprueba si journald u otro colector ya gestiona los logs; instalarlo no habilita forwarding remoto."
+  if ! confirm_rsyslog_change "instalar rsyslog" "$effect"; then WARNINGS=$((WARNINGS + 1)); return 1; fi
+  if command -v dnf >/dev/null 2>&1; then dnf install rsyslog -y
+  else yum install rsyslog -y; fi
+  if rpm -q rsyslog >/dev/null 2>&1; then
+    echo -e "$GREEN[✓] rsyslog instalado y verificado$NC"
+    FIXED=$((FIXED + 1))
   else
-    echo -e "${RED}[!] rsyslog no instalado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      if command -v dnf &>/dev/null; then
-        dnf install rsyslog -y 2>/dev/null
-      else
-        yum install rsyslog -y 2>/dev/null
-      fi
-      echo -e "${GREEN}[✓] rsyslog instalado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: Instalar rsyslog${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    echo -e "$RED[!] No se confirmó la instalación de rsyslog$NC"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -302,105 +363,48 @@ check_rsyslog_installed() {
 # 4.2.1.2 - ENSURE RSYSLOG SERVICE IS ENABLED AND RUNNING
 # ==============================================
 check_rsyslog_enabled() {
-  echo -e "\n${BLUE}[*] CIS 4.2.1.2 - Verificando rsyslog habilitado...${NC}"
+  local rc effect=""
+  echo -e "\n$BLUE[*] CIS 4.2.1.2 - Verificando rsyslog habilitado y activo...$NC"
 
-  if ob_service_is_enabled rsyslog; then
-    echo -e "${GREEN}[✓] rsyslog habilitado${NC}"
-  else
-    echo -e "${RED}[!] rsyslog no habilitado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      ob_service_enable rsyslog
-      echo -e "${GREEN}[✓] rsyslog habilitado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  ob_service_is_enabled rsyslog
+  rc=$?
+  case "$rc" in
+    0) echo -e "$GREEN[✓] rsyslog habilitado$NC" ;;
+    1)
+      effect="Habilita rsyslog para arrancar con el sistema y modifica el flujo de logs. Verifique que el servicio forme parte del stack de logging esperado y no duplique otro colector."
+      if [ "$AUTO_FIX" = true ] && confirm_rsyslog_change "habilitar rsyslog al arranque" "$effect"; then
+        if ob_service_enable rsyslog; then echo -e "$GREEN[✓] rsyslog habilitado$NC"; FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
+      ;;
+    *) echo -e "$YELLOW[WARN] No se pudo determinar si rsyslog está habilitado; no se modifica.$NC"; WARNINGS=$((WARNINGS + 1)) ;;
+  esac
 
-  if ob_service_is_active rsyslog; then
-    echo -e "${GREEN}[✓] rsyslog corriendo${NC}"
-  else
-    echo -e "${RED}[!] rsyslog no corriendo${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      ob_service_start rsyslog
-      echo -e "${GREEN}[✓] rsyslog iniciado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  ob_service_is_active rsyslog
+  rc=$?
+  case "$rc" in
+    0) echo -e "$GREEN[✓] rsyslog activo$NC" ;;
+    1)
+      effect="Inicia rsyslog ahora y cambia qué proceso recibe/procesa logs. Puede generar I/O y modificar la ruta de logs; compruebe que no haya otro colector exclusivo."
+      if [ "$AUTO_FIX" = true ] && confirm_rsyslog_change "iniciar rsyslog ahora" "$effect"; then
+        if ob_service_start rsyslog; then echo -e "$GREEN[✓] rsyslog iniciado$NC"; FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
+      ;;
+    *) echo -e "$YELLOW[WARN] No se pudo determinar si rsyslog está activo; no se modifica.$NC"; WARNINGS=$((WARNINGS + 1)) ;;
+  esac
 }
 
 # ==============================================
 # 4.2.1.3 - ENSURE RSYSLOG DEFAULT FILE PERMISSIONS
 # ==============================================
 check_file_permissions() {
-  echo -e "\n${BLUE}[*] CIS 4.2.1.3 - Verificando permisos de archivos de log...${NC}"
-
-  if grep -q "^\$FileCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
-    if grep -q "^\$FileCreateMode 0640" "$RSYSLOG_CONF" 2>/dev/null; then
-      echo -e "${GREEN}[✓] FileCreateMode 0640${NC}"
-    else
-      echo -e "${RED}[!] FileCreateMode valor incorrecto${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i 's/^\$FileCreateMode.*/$FileCreateMode 0640/' "$RSYSLOG_CONF"
-        echo -e "${GREEN}[✓] FileCreateMode corregido a 0640${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
-  else
-    echo -e "${RED}[!] FileCreateMode no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo '$FileCreateMode 0640' >>"$RSYSLOG_CONF"
-      echo -e "${GREEN}[✓] FileCreateMode 0640 agregado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  if grep -q "^\$DirCreateMode" "$RSYSLOG_CONF" 2>/dev/null; then
-    if grep -q "^\$DirCreateMode 0750" "$RSYSLOG_CONF" 2>/dev/null; then
-      echo -e "${GREEN}[✓] DirCreateMode 0750${NC}"
-    else
-      echo -e "${RED}[!] DirCreateMode valor incorrecto${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i 's/^\$DirCreateMode.*/$DirCreateMode 0750/' "$RSYSLOG_CONF"
-        echo -e "${GREEN}[✓] DirCreateMode corregido a 0750${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
-  else
-    echo -e "${RED}[!] DirCreateMode no configurado${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      echo '$DirCreateMode 0750' >>"$RSYSLOG_CONF"
-      echo -e "${GREEN}[✓] DirCreateMode 0750 agregado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
-
-  if grep -q "^\$Umask" "$RSYSLOG_CONF" 2>/dev/null; then
-    if grep -q "^\$Umask 0027" "$RSYSLOG_CONF" 2>/dev/null; then
-      echo -e "${GREEN}[✓] Umask 0027${NC}"
-    else
-      echo -e "${RED}[!] Umask valor incorrecto${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        sed -i 's/^\$Umask.*/$Umask 0027/' "$RSYSLOG_CONF"
-        echo -e "${GREEN}[✓] Umask corregido a 0027${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
-  else
-    echo -e "${YELLOW}[!] Umask no configurado (opcional)${NC}"
-  fi
+  echo -e "\n$BLUE[*] CIS 4.2.1.3 - Verificando permisos predeterminados de logs...$NC"
+  local effect=""
+  effect="FileCreateMode=0640 limita lectura de archivos nuevos a propietario/grupo; agentes o colectores que no usen el grupo correcto podrían perder acceso."
+  rsyslog_set_directive '$FileCreateMode' '0640' 'FileCreateMode' "$effect"
+  effect="DirCreateMode=0750 limita acceso a directorios nuevos de logs; puede afectar procesos de monitorización que dependan de permisos de directorio."
+  rsyslog_set_directive '$DirCreateMode' '0750' 'DirCreateMode' "$effect"
+  effect="Umask=0027 restringe permisos por defecto de nuevos archivos/directorios de rsyslog; puede afectar lectores que dependan de acceso para grupo/otros."
+  rsyslog_set_directive '$Umask' '0027' 'Umask' "$effect"
 }
 
 # ==============================================
@@ -439,73 +443,91 @@ check_remote_accept() {
 # CONFIGURAR JOURNALD
 # ==============================================
 configure_journald() {
-  echo -e "\n${BLUE}[*] Configurando journald...${NC}"
+  echo -e "\n$BLUE[*] Configurando journald...$NC"
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo -e "${YELLOW}[N/A] systemd-journald no está disponible en esta plataforma; se omiten controles específicos de journald.${NC}"
+    echo -e "$YELLOW[N/A] systemd-journald no está disponible; se omiten sus controles.$NC"
     return 0
   fi
-  echo -e "\n${YELLOW}[*] 4.2.2.1 - Verificando envio de journald a rsyslog...${NC}"
   configure_journald_param "ForwardToSyslog" "yes" "ForwardToSyslog"
-  echo -e "\n${YELLOW}[*] 4.2.2.2 - Verificando compresion de archivos grandes...${NC}"
   configure_journald_param "Compress" "yes" "Compress"
-  echo -e "\n${YELLOW}[*] 4.2.2.3 - Verificando almacenamiento persistente...${NC}"
   configure_journald_param "Storage" "persistent" "Storage"
 
   if [ "$AUTO_FIX" = true ] && [ ! -d /var/log/journal ]; then
-    mkdir -p /var/log/journal
-    systemctl restart systemd-journald
-    echo -e "${GREEN}[✓] Directorio /var/log/journal creado${NC}"
-    FIXED=$((FIXED + 1))
+    local effect="Crea /var/log/journal para conservar logs tras reinicios. Puede aumentar el uso de disco; valide capacidad y retención."
+    if confirm_rsyslog_change "crear /var/log/journal" "$effect"; then
+      if mkdir -p /var/log/journal; then
+        JOURNALD_CONFIG_CHANGED=true
+        FIXED=$((FIXED + 1))
+        echo -e "$GREEN[✓] Directorio /var/log/journal creado$NC"
+      else echo -e "$RED[!] No se pudo crear /var/log/journal$NC"; WARNINGS=$((WARNINGS + 1)); fi
+    else WARNINGS=$((WARNINGS + 1)); fi
   fi
 }
+
 # ==============================================
 # VERIFICAR PERMISOS DE LOGS (4.2.3)
 # ==============================================
 check_log_permissions() {
-  echo -e "\n${BLUE}[*] CIS 4.2.3 - Verificando permisos de archivos de log...${NC}"
-
-  local log_files=$(find /var/log -type f -name "*.log" 2>/dev/null | head -10)
-  local issues=0
-
-  for log in $log_files; do
-    local perms=$(stat -c "%a" "$log" 2>/dev/null)
-    if [ "$perms" != "640" ] && [ "$perms" != "600" ] && [ "$perms" != "644" ]; then
-      echo -e "${RED}[!] Permisos incorrectos: $log ($perms)${NC}"
-      issues=$((issues + 1))
+  echo -e "\n$BLUE[*] CIS 4.2.3 - Verificando permisos de archivos *.log en /var/log...$NC"
+  local log perms effect found=0
+  while IFS= read -r -d '' log; do
+    found=$((found + 1))
+    perms="$(stat -c "%a" "$log" 2>/dev/null || true)"
+    if [ "$perms" != "640" ] && [ "$perms" != "600" ]; then
+      echo -e "$YELLOW[!] Permisos de $log: $perms (objetivo 0640; 0600 también se acepta)$NC"
+      if [ "$AUTO_FIX" = true ]; then
+        effect="Cambia solo $log a 0640; puede restringir agentes de monitorización o recolectores que dependan de los permisos actuales."
+        if confirm_rsyslog_change "ajustar permisos de $log a 0640" "$effect"; then
+          if chmod 640 "$log" && [ "$(stat -c "%a" "$log" 2>/dev/null)" = "640" ]; then
+            echo -e "$GREEN[✓] Permisos corregidos: $log$NC"
+            FIXED=$((FIXED + 1))
+          else echo -e "$RED[!] No se pudo validar el permiso de $log$NC"; WARNINGS=$((WARNINGS + 1)); fi
+        else WARNINGS=$((WARNINGS + 1)); fi
+      else WARNINGS=$((WARNINGS + 1)); fi
     fi
-  done
-
-  if [ $issues -eq 0 ]; then
-    echo -e "${GREEN}[✓] Permisos de logs correctos${NC}"
-  else
-    echo -e "${YELLOW}[!] Se encontraron $issues archivos con permisos incorrectos${NC}"
-    if [ "$AUTO_FIX" = true ]; then
-      find /var/log -type f -name "*.log" -exec chmod 640 {} \; 2>/dev/null
-      echo -e "${GREEN}[✓] Permisos corregidos a 640${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  done < <(find /var/log -type f -name "*.log" -print0 2>/dev/null)
+  if [ "$found" -eq 0 ]; then echo -e "$BLUE[INFO] No hay archivos *.log en /var/log para evaluar.$NC"; fi
 }
 
 # ==============================================
 # REINICIAR SERVICIOS
 # ==============================================
 restart_services() {
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "\n${BLUE}[*] Reiniciando servicios...${NC}"
-    if ob_service_restart rsyslog; then
-      echo -e "${GREEN}[✓] Rsyslog reiniciado${NC}"
-    else
-      echo -e "${RED}[!] No se pudo reiniciar rsyslog${NC}"
+  local effect=""
+  [ "$AUTO_FIX" = true ] || return 0
+
+  if [ "$RSYSLOG_CONFIG_CHANGED" = true ]; then
+    if command -v rsyslogd >/dev/null 2>&1 && ! rsyslogd -N1 >/dev/null 2>&1; then
+      echo -e "$RED[!] rsyslogd -N1 no validó la configuración; no se reinicia el servicio.$NC"
       WARNINGS=$((WARNINGS + 1))
+    else
+      effect="Reinicia rsyslog para cargar la configuración. Puede interrumpir brevemente recepción/forwarding; si falla, podría detener la recolección o entrega de logs."
+      if confirm_rsyslog_change "reiniciar rsyslog para aplicar los cambios" "$effect"; then
+        if ob_service_restart rsyslog && ob_service_is_active rsyslog; then
+          echo -e "$GREEN[✓] rsyslog reiniciado y activo$NC"
+          RSYSLOG_CONFIG_CHANGED=false
+        else echo -e "$RED[!] No se pudo verificar rsyslog tras el reinicio$NC"; WARNINGS=$((WARNINGS + 1)); fi
+      else
+        echo -e "$YELLOW[WARN] Configuración guardada pero no cargada; falta recarga/reinicio autorizado.$NC"
+        WARNINGS=$((WARNINGS + 1))
+      fi
     fi
-    if command -v systemctl >/dev/null 2>&1 && systemctl restart systemd-journald; then
-      echo -e "${GREEN}[✓] systemd-journald reiniciado${NC}"
+  fi
+
+  if [ "$JOURNALD_CONFIG_CHANGED" = true ]; then
+    effect="Reinicia systemd-journald para aplicar cambios de persistencia/flujo de logs. Puede interrumpir brevemente la recepción de eventos; valide servicio y espacio en disco."
+    if confirm_rsyslog_change "reiniciar systemd-journald para aplicar los cambios" "$effect"; then
+      if systemctl restart systemd-journald && systemctl is-active --quiet systemd-journald; then
+        echo -e "$GREEN[✓] systemd-journald reiniciado y activo$NC"
+        JOURNALD_CONFIG_CHANGED=false
+      else echo -e "$RED[!] No se pudo validar systemd-journald tras el reinicio$NC"; WARNINGS=$((WARNINGS + 1)); fi
+    else
+      echo -e "$YELLOW[WARN] Configuración journald guardada pero no cargada; falta reinicio autorizado.$NC"
+      WARNINGS=$((WARNINGS + 1))
     fi
   fi
 }
+
 # ==============================================
 # MOSTRAR RESUMEN
 # ==============================================
