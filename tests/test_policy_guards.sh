@@ -125,6 +125,16 @@ grep -Fq 'rsyslog_legacy_is_active()' "$CORE" || fail "falta comprobar rsyslog e
 grep -Fq 'journald no aplica a CentOS/RHEL 6' "$CORE" || fail "el baseline sigue tratando journald como obligatorio en CentOS 6"
 grep -Fq 'if [ "${OS_VERSION:-}" = 6 ]; then' "$CORE" || fail "no se detecta la generación legacy para la auditoría de logs"
 pass "syslog/journald se distingue correctamente en CentOS/RHEL 6"
+# CIS RHEL 9/10 has mutually exclusive journald/rsyslog paths in default profiles.
+# The audit may warn, but must never stop or disable a logging service automatically.
+grep -Fq 'audit_logging_stack_selection()' "$CORE" || fail "falta auditar la elección del stack journald/rsyslog"
+grep -Fq 'No se detiene ni deshabilita ningún servicio desde esta auditoría.' "$CORE" || fail "la auditoría de logging no declara su política no destructiva"
+logging_audit_block="$(sed -n '/^audit_logging_stack_selection() {/,/^}/p' "$CORE")"
+if printf '%s\n' "$logging_audit_block" | grep -Eiq 'systemctl[[:space:]]+(stop|disable|mask|restart)[[:space:]]+(rsyslog|systemd-journald)'; then
+  fail "la auditoría del stack de logging intenta parar, deshabilitar o reiniciar servicios"
+fi
+pass "journald/rsyslog solo genera advertencia; el check no cambia servicios"
+
 
 # Older RHEL-family hosts must use their native auditd, ntpd and GRUB interfaces.
 grep -Fq 'auditd_is_active()' "$CORE" || fail "falta detección auditd compatible con SysV"
