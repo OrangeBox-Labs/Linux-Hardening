@@ -122,7 +122,7 @@ make_backup() {
 # CONFIGURAR PROFILE.D DE BASH Y PROMPT
 # ==============================================
 configure_profile() {
-  echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
+  echo -e "\n${BLUE}[*] Configurando perfil de Bash y prompt...${NC}"
 
   if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D" && grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
@@ -810,6 +810,7 @@ show_summary() {
 
   echo -e "\n${YELLOW}PARA APLICAR CAMBIOS EN SESION ACTUAL:${NC}"
   echo -e "  source /etc/profile.d/orangebox.sh"
+  echo -e "  source /etc/profile.d/99-orangebox-motd.sh"
   echo -e "  source /etc/profile.d/aliases.sh"
   echo -e "  source ~/.bashrc"
 
