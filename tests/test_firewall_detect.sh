@@ -48,6 +48,48 @@ MOCK_COMMAND
   chmod 755 "$MOCK_BIN/$cmd"
 done
 
+cat > "$MOCK_BIN/csf" <<'MOCK_CSF'
+#!/bin/sh
+[ "$1" = "-l" ] || exit 2
+[ -r "$FAKE_RULES_DIR/csf.list" ] || exit 1
+cat "$FAKE_RULES_DIR/csf.list"
+MOCK_CSF
+cat > "$MOCK_BIN/shorewall" <<'MOCK_SHOREWALL'
+#!/bin/sh
+[ "$1" = "status" ] || exit 2
+[ -r "$FAKE_RULES_DIR/shorewall.status" ] || exit 1
+cat "$FAKE_RULES_DIR/shorewall.status"
+MOCK_SHOREWALL
+cat > "$MOCK_BIN/firewall-cmd" <<'MOCK_FIREWALL_CMD'
+#!/bin/sh
+[ "$1" = "--state" ] || exit 2
+[ -r "$FAKE_RULES_DIR/firewalld.state" ] || exit 1
+cat "$FAKE_RULES_DIR/firewalld.state"
+MOCK_FIREWALL_CMD
+cat > "$MOCK_BIN/systemctl" <<'MOCK_SYSTEMCTL'
+#!/bin/sh
+[ "$1" = "is-active" ] || exit 1
+unit="$2"
+if [ -r "$FAKE_RULES_DIR/systemctl.$unit" ]; then
+  state="$(cat "$FAKE_RULES_DIR/systemctl.$unit")"
+else
+  state=inactive
+fi
+echo "$state"
+[ "$state" = "active" ]
+MOCK_SYSTEMCTL
+cat > "$MOCK_BIN/service" <<'MOCK_SERVICE'
+#!/bin/sh
+exit 1
+MOCK_SERVICE
+cat > "$MOCK_BIN/nft" <<'MOCK_NFT'
+#!/bin/sh
+[ "$1" = "list" ] && [ "$2" = "ruleset" ] || exit 2
+[ -r "$FAKE_RULES_DIR/nft.rules" ] || exit 1
+cat "$FAKE_RULES_DIR/nft.rules"
+MOCK_NFT
+chmod 755 "$MOCK_BIN/csf" "$MOCK_BIN/shorewall" "$MOCK_BIN/firewall-cmd" "$MOCK_BIN/systemctl" "$MOCK_BIN/service" "$MOCK_BIN/nft"
+
 # Run assertions in a clean non-interactive Bash. env -i drops exported Bash
 # functions, BASH_ENV, provider-specific wrappers and inherited environment
 # variables that may shadow command lookup on hardened/hosting servers.
@@ -101,4 +143,20 @@ diagnostics="$(firewall_print_backend_diagnostics)"
 printf '%s\n' "$diagnostics" | grep -q 'iptables-legacy-save: accesible' || fail "no informa legacy"
 printf '%s\n' "$diagnostics" | grep -q 'iptables: backend=legacy' || fail "no muestra backend seleccionado"
 pass "backend nf_tables/legacy e Imunify360 en reglas IPv4/IPv6, actuales y legacy"
+
+# CSF is considered active only when its read-only listing exposes CSF chains.
+printf '%s\n' 'Chain INPUT' 'Chain LOCALINPUT' > "$FAKE_RULES_DIR/csf.list"
+printf '%s\n' 'Shorewall is stopped' > "$FAKE_RULES_DIR/shorewall.status"
+firewall_report_detected > "$FAKE_RULES_DIR/report-csf.txt"
+grep -q 'Gestor activo detectado: CSF' "$FAKE_RULES_DIR/report-csf.txt" || fail "no identificó CSF activo"
+grep -q 'iptables-services:' "$FAKE_RULES_DIR/report-csf.txt" || fail "no informó iptables-services"
+grep -q 'Solo lectura:' "$FAKE_RULES_DIR/report-csf.txt" || fail "no declaró el comportamiento de solo lectura"
+
+# Multiple positive manager signals must be called out rather than silently
+# choosing one of the managers.
+printf '%s\n' 'Shorewall is running' > "$FAKE_RULES_DIR/shorewall.status"
+firewall_report_detected > "$FAKE_RULES_DIR/report-conflict.txt"
+grep -q 'Gestores activos ambiguos: CSF + Shorewall' "$FAKE_RULES_DIR/report-conflict.txt" || fail "no alertó por gestores concurrentes"
+[ "$FIREWALL_WARNINGS" -ge 1 ] || fail "el conflicto de gestores no incrementó las advertencias"
+pass "identificación de gestor activo y alerta de coexistencia sin modificar reglas"
 TEST_CASE
