@@ -24,6 +24,16 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 El estado detallado del proyecto está en [PROJECT-STATUS.md](PROJECT-STATUS.md), y el inventario de controles presentes/ausentes por dominio está en [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
 
+### Continuidad de tareas y recuperación de sesión
+
+El trabajo del repositorio tiene un checkpoint independiente del chat:
+
+- [`.task-status.md`](.task-status.md): tarea activa, pendientes reales, contexto técnico, decisiones, riesgos, pruebas y siguiente acción exacta.
+- [`.task-journal.md`](.task-journal.md): historial acumulativo; los hitos se agregan al final y no se borran.
+- [`.github/TASK-RESUMPTION-PROTOCOL.md`](.github/TASK-RESUMPTION-PROTOCOL.md): procedimiento obligatorio para comenzar, actualizar, pausar, reanudar y cerrar tareas.
+
+Al iniciar o retomar una tarea de este repositorio, lee primero el estado, después las últimas entradas del journal y luego verifica en GitHub branch/commit/PR/CI. Al completar un paso, registra evidencia en el journal y retíralo de la lista de pendientes; no mantengas tareas terminadas en esa lista. El workflow [Task state consistency](.github/workflows/task-state-check.yml) verifica la estructura de estos archivos en CI.
+
 ### Cambios recientes del baseline y los módulos
 
 | Script / componente | Cambios y mejoras documentadas |
