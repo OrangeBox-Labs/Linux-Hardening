@@ -233,7 +233,7 @@ check_auditd_installed() {
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar audit-libs" "no instalado" "dnf/yum install audit-libs" "$reason"; then
       if command -v dnf >/dev/null 2>&1; then dnf install audit-libs -y
       else yum install audit-libs -y; fi
-      if rpm -q audit-libs >/dev/null 2>&1; then FIXED=$((FIXED + 1); else WARNINGS=$((WARNINGS + 1)); fi
+      if rpm -q audit-libs >/dev/null 2>&1; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
     else
       WARNINGS=$((WARNINGS + 1))
     fi
@@ -254,7 +254,7 @@ check_auditd_installed() {
   if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar $package" "auditctl no disponible" "dnf/yum install $package" "$reason"; then
     if command -v dnf >/dev/null 2>&1; then dnf install "$package" -y
     else yum install "$package" -y; fi
-    if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then FIXED=$((FIXED + 1); else WARNINGS=$((WARNINGS + 1)); fi
+    if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
   else
     WARNINGS=$((WARNINGS + 1))
   fi
