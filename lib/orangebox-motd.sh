@@ -36,7 +36,7 @@ orangebox_motd_ensure_figlet() {
   fi
 
   if orangebox_motd_figlet_ready; then
-    printf '%s\n' "[OK] FIGlet quedó disponible; el MOTD usará el logotipo FIGlet."
+    printf '%s\n' "[OK] FIGlet quedó disponible; el banner previo al login usará el logotipo FIGlet."
     return 0
   fi
 
@@ -44,13 +44,49 @@ orangebox_motd_ensure_figlet() {
   return 1
 }
 
+orangebox_motd_write_login_banner() {
+  local output="$1"
+  local force_ascii=false
+  [ "$#" -ge 2 ] && force_ascii="$2"
+  [ -n "$output" ] || return 2
+
+  {
+    printf '%s\n' '*******************************************************************************'
+    if [ "$force_ascii" != true ] && command -v figlet >/dev/null 2>&1 && figlet -f small OrangeBox >/dev/null 2>&1; then
+      figlet -f small OrangeBox
+    else
+      cat <<'ORANGEBOX_ASCII'
+   ___                        ____
+  / _ \ _ __ __ _ _ __   __ _ | __ )
+ | | | | '__/ _| | '_ \ / _| ||  _ \
+ | |_| | | | (_| | | | | (_| || |_) |
+  \___/|_|  \__,_|_| |_|\__,_||____/
+ORANGEBOX_ASCII
+    fi
+    printf '\n'
+    printf '%s\n' '                         SISTEMA DE ACCESO RESTRINGIDO'
+    printf '%s\n' '                           www.orangebox.cl'
+    printf '%s\n' '*******************************************************************************'
+    printf '\n'
+    printf '%s\n' 'Todas las conexiones y los comandos ejecutados quedan'
+    printf '%s\n' 'asociados a la IP de origen y se registran en sistemas'
+    printf '%s\n' 'remotos de auditoría.'
+    printf '\n'
+    printf '%s\n' 'Todo acceso, uso o actividad no autorizada será'
+    printf '%s\n' 'documentado y reportado a las autoridades competentes.'
+    printf '\n'
+    printf '%s\n' 'Si no cuenta con autorización, desconéctese'
+    printf '%s\n' 'inmediatamente.'
+    printf '\n'
+    printf '%s\n' '*******************************************************************************'
+  } > "$output"
+}
+
 orangebox_motd_write_profile() {
   local output="$1"
   [ -n "$output" ] || return 2
 
   cat > "$output" <<'ORANGEBOX_SESSION_MOTD'
-# OrangeBox dynamic login banner. This file is sourced by /etc/profile.
-# A static /etc/motd cannot know the client IP for each individual SSH session.
 case $- in
   *i*) ;;
   *) return 0 2>/dev/null || exit 0 ;;
@@ -58,44 +94,29 @@ esac
 [ -t 1 ] || return 0 2>/dev/null || exit 0
 
 OB_RESET=
-OB_BOLD=
-OB_ORANGE=
 OB_CYAN=
 OB_YELLOW=
-OB_RED=
 OB_MAGENTA=
-OB_WHITE=
 OB_COLORS=0
 if command -v tput >/dev/null 2>&1 && [ -n "$TERM" ] && [ "$TERM" != dumb ]; then
   OB_RESET=$(tput sgr0 2>/dev/null || true)
-  OB_BOLD=$(tput bold 2>/dev/null || true)
   OB_COLORS=$(tput colors 2>/dev/null || printf '0')
   case "$OB_COLORS" in ''|*[!0-9]*) OB_COLORS=0 ;; esac
   if [ "$OB_COLORS" -ge 256 ] 2>/dev/null; then
-    OB_ORANGE=$(tput setaf 214 2>/dev/null || tput setaf 3 2>/dev/null || true)
     OB_CYAN=$(tput setaf 39 2>/dev/null || tput setaf 6 2>/dev/null || true)
     OB_YELLOW=$(tput setaf 226 2>/dev/null || tput setaf 3 2>/dev/null || true)
-    OB_RED=$(tput setaf 196 2>/dev/null || tput setaf 1 2>/dev/null || true)
     OB_MAGENTA=$(tput setaf 205 2>/dev/null || tput setaf 5 2>/dev/null || true)
-    OB_WHITE=$(tput setaf 15 2>/dev/null || tput setaf 7 2>/dev/null || true)
   elif [ "$OB_COLORS" -ge 8 ] 2>/dev/null; then
-    OB_ORANGE=$(tput setaf 3 2>/dev/null || true)
     OB_CYAN=$(tput setaf 6 2>/dev/null || true)
     OB_YELLOW=$(tput setaf 3 2>/dev/null || true)
-    OB_RED=$(tput setaf 1 2>/dev/null || true)
     OB_MAGENTA=$(tput setaf 5 2>/dev/null || true)
-    OB_WHITE=$(tput setaf 7 2>/dev/null || true)
   fi
 fi
 
-# SSH_CONNECTION = client IP, client port, server IP, server port.
-# Only show the server's local address here. The remote IP belongs in server-side
-# SSH authentication logs; the standard OpenSSH Banner file cannot expand per-session values.
 OB_SERVER_IP=
 if [ -n "$SSH_CONNECTION" ]; then
   OB_SERVER_IP=$(printf '%s\n' "$SSH_CONNECTION" | awk 'NF {print $3; exit}')
 fi
-
 if [ -z "$OB_SERVER_IP" ] && command -v ip >/dev/null 2>&1; then
   OB_SERVER_IP=$(ip -o -4 addr show scope global 2>/dev/null |
     awk '$3 == "inet" && $4 !~ /^127\./ {split($4,a,"/"); print a[1]; exit}')
@@ -112,40 +133,13 @@ OB_UPTIME=$(awk 'NR == 1 {s=int($1); printf "up %d days, %d hours, %d minutes", 
 [ -n "$OB_UPTIME" ] || OB_UPTIME="No disponible"
 OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)
 [ -n "$OB_LOAD" ] || OB_LOAD="No disponible"
+OB_DATETIME=$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null)
+[ -n "$OB_DATETIME" ] || OB_DATETIME="No disponible"
 
-ob_center() {
-  ob_text="$1"
-  ob_color="$2"
-  ob_pad=$(awk -v text="$ob_text" -v width="$OB_COLUMNS" 'BEGIN {p=int((width-length(text))/2); if (p<0) p=0; print p}')
-  printf '%*s%s%s%s\n' "$ob_pad" '' "$ob_color" "$ob_text" "$OB_RESET"
-}
-OB_COLUMNS=$(tput cols 2>/dev/null || printf '80')
-case "$OB_COLUMNS" in ''|*[!0-9]*) OB_COLUMNS=80 ;; esac
-[ "$OB_COLUMNS" -gt 0 ] 2>/dev/null || OB_COLUMNS=80
-
-if command -v figlet >/dev/null 2>&1 && figlet -f small OrangeBox >/dev/null 2>&1; then
-  printf '%s' "$OB_ORANGE"
-  figlet -f small OrangeBox 2>/dev/null
-  printf '%s\n' "$OB_RESET"
-else
-  printf '%s' "$OB_ORANGE"
-  cat <<'ORANGEBOX_ASCII'
-   ___                        ____            
-  / _ \ _ __ __ _ _ __   __ _| __ )  _____  __
- | | | | '__/ _| | '_ \ / _| |  _ \ / _ \ \/ /
- | |_| | | | (_| | | | | (_| | |_) | (_) >  < 
-  \___/|_|  \__,_|_| |_|\__, |____/ \___/_/\_\
-                         |___/                  
-ORANGEBOX_ASCII
-  printf '%s\n' "$OB_RESET"
-fi
-
-printf '\n'
-ob_center "www.orangebox.cl" "$OB_CYAN"
-printf '\n'
 printf '  %sIP interna:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_SERVER_IP"
 printf '  %sUptime:%s        %s\n' "$OB_YELLOW" "$OB_RESET" "$OB_UPTIME"
 printf '  %sLoad (1/5/15m):%s %s\n' "$OB_MAGENTA" "$OB_RESET" "$OB_LOAD"
+printf '  %sFecha/hora:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_DATETIME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
 }
