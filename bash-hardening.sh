@@ -115,7 +115,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=-1$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=-1$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D" && grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -130,21 +130,9 @@ configure_profile() {
 # https://www.orangebox.cl
 # ==============================================
 
-# Banner de OrangeBox (ASCII art simple, no requiere figlet)
-echo "  ___                         ___          "
-echo " / _ \ _ _ __ _ _ _  __ _ ___| _ ) _____ __"
-echo "| (_) | '_/ _\` | ' \/ _\` / -_) _ \/ _ \ \ /"
-echo " \___/|_| \__,_|_||_\__, \___|___/\___/_\_\\"
-echo "                    |___/                  "
-echo
-echo ""
-
-# Mostrar información de la conexión
-echo "=== INFORMACION DE CONEXION ==="
-echo "IP del cliente: $(who am i | awk '{print $5}' | tr -d '()' || echo 'local')"
-echo "Usuario: $USER"
-echo "Fecha/Hora: $(date '+%Y-%m-%d %H:%M:%S')"
-echo ""
+# ORANGEBOX_SESSION_DISPLAY=external-motd
+# Logo, estado y datos de conexión se muestran una sola vez en
+#+ /etc/profile.d/99-orangebox-motd.sh. Este perfil configura Bash.
 
 # Resolver hostname FQDN una vez por shell para mostrarlo en el prompt.
 ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
