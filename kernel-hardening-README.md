@@ -54,8 +54,12 @@ sysctl kernel.randomize_va_space
 
 ### Hardening de red
 
+Los parámetros de forwarding se auditan y se proponen solo en `--fix`; el helper sysctl muestra el impacto y pregunta por cada cambio. Si no existe TTY, se omite. Una máquina con rol de router/gateway debe conservar forwarding cuando el servicio lo necesite y aceptar conscientemente el desvío del baseline.
+
 - net.ipv4.conf.all.accept_redirects = 0: Previene ataques de redireccion ICMP que podrian desviar trafico
 - net.ipv4.conf.all.send_redirects = 0: Evita que el sistema sea usado como nodo de redireccion en ataques MITM
+- net.ipv4.ip_forward = 0: evita que el host enrute IPv4; **requiere confirmación individual** porque puede cortar routing, NAT, VPN o redes de contenedores.
+- net.ipv6.conf.all.forwarding = 0: evita que el host enrute IPv6; **requiere confirmación individual** y puede afectar gateways, VPN o redes de contenedores.
 - net.ipv4.tcp_syncookies = 1: Previene ataques SYN flood que agotan la cola de conexiones
 
 ## Valores por defecto antes de aplicar el script
@@ -72,6 +76,8 @@ sysctl vm.mmap_min_addr
 sysctl fs.protected_fifos
 sysctl fs.protected_hardlinks
 sysctl fs.protected_symlinks
+sysctl net.ipv4.ip_forward
+sysctl net.ipv6.conf.all.forwarding
 sysctl net.ipv4.conf.all.accept_redirects
 sysctl net.ipv4.conf.all.send_redirects
 sysctl net.ipv4.tcp_syncookies

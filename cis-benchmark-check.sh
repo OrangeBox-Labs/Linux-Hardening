@@ -145,6 +145,102 @@ is_system_account() {
   return 1
 }
 
+# Filesystem paths must be exact mountpoints for partition and mount-option checks.
+# findmnt --target /tmp can return the parent filesystem and produce false PASSes;
+# inspect the complete active mount table and match TARGET exactly instead.
+cis_mount_is_exact() {
+  local mountpoint="$1"
+  command -v findmnt >/dev/null 2>&1 || return 2
+  findmnt -rn -o TARGET 2>/dev/null |
+    awk -v expected="$mountpoint" '$0 == expected { found=1 } END { exit(found ? 0 : 1) }'
+}
+
+cis_mount_option_enabled() {
+  local mountpoint="$1" option="$2" options=""
+  cis_mount_is_exact "$mountpoint" || return 1
+  options="$(findmnt -rn -o TARGET,OPTIONS 2>/dev/null |
+    awk -v expected="$mountpoint" '$1 == expected { print $2; exit }')"
+  [ -n "$options" ] || return 1
+  case ",$options," in
+    *,"$option",*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+
+# Search active kernel arguments in /proc/cmdline, GRUB, BLS and grubby output.
+# A whole-line comment is ignored so documentation/comments never count as evidence.
+cis_stream_has_kernel_argument() {
+  local argument="$1"
+  awk -v wanted="$argument" '
+    /^[[:space:]]*#/ { next }
+    {
+      line=$0
+      sub(/[[:space:]]+#.*/, "", line)
+      n=split(line, tokens, /[[:space:]\",]+/)
+      for (i=1; i<=n; i++) if (tokens[i] == wanted) found=1
+    }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
+cis_file_has_kernel_argument() {
+  local file="$1" argument="$2"
+  [ -r "$file" ] || return 2
+  cis_stream_has_kernel_argument "$argument" < "$file"
+}
+
+# Read the effective systemd config including drop-ins when systemd-analyze supports it.
+# If drop-ins exist but effective ordering cannot be resolved, return "unverifiable".
+cis_systemd_config_dump() {
+  local unit="$1" base_file="$2" candidate
+  if command -v systemd-analyze >/dev/null 2>&1 &&
+     systemd-analyze cat-config "$unit" >/dev/null 2>&1; then
+    systemd-analyze cat-config "$unit" 2>/dev/null
+    return $?
+  fi
+
+  for candidate in \
+    /etc/systemd/coredump.conf.d/*.conf \
+    /run/systemd/coredump.conf.d/*.conf \
+    /usr/local/lib/systemd/coredump.conf.d/*.conf \
+    /usr/lib/systemd/coredump.conf.d/*.conf \
+    /lib/systemd/coredump.conf.d/*.conf; do
+    [ -e "$candidate" ] || continue
+    return 2
+  done
+  [ -r "$base_file" ] || return 2
+  cat "$base_file"
+}
+
+cis_systemd_config_value() {
+  local unit="$1" base_file="$2" section="$3" key="$4" config=""
+  config="$(cis_systemd_config_dump "$unit" "$base_file")" || return 2
+  printf '%s\n' "$config" | awk -v wanted_section="$section" -v wanted_key="$key" '
+    function trim(s) {
+      sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s
+    }
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    /^[[:space:]]*\[[^]]+\][[:space:]]*$/ {
+      section=$0
+      sub(/^[[:space:]]*\[/, "", section)
+      sub(/\][[:space:]]*$/, "", section)
+      next
+    }
+    section == wanted_section {
+      line=$0
+      sub(/[[:space:]]+#.*/, "", line)
+      equal=index(line, "=")
+      if (equal > 0) {
+        key=trim(substr(line, 1, equal-1))
+        value=trim(substr(line, equal+1))
+        if (key == wanted_key) { current=value; found=1 }
+      }
+    }
+    END { if (found) { print current; exit 0 } exit 1 }
+  '
+}
+
 # ==============================================
 # 1.1.1.1 - DESHABILITAR SQUASHFS (CORREGIDO)
 # ==============================================
@@ -216,7 +312,7 @@ check_udf() {
 # 1.1.2.1 - ASEGURAR PARTICION SEPARADA PARA /tmp
 # ==============================================
 check_tmp_partition() {
-  if findmnt --kernel /tmp &>/dev/null; then
+  if cis_mount_is_exact "/tmp"; then
     log_result "PASS" "1.1.2.1 - Asegurar que /tmp es una particion separada" "" "" "$GREEN"
     return 0
   fi
@@ -228,7 +324,7 @@ check_tmp_partition() {
 # 1.1.2.2 - OPCION NODEV EN /tmp
 # ==============================================
 check_tmp_nodev() {
-  if findmnt --kernel /tmp | grep -q "nodev"; then
+  if cis_mount_option_enabled "/tmp" "nodev"; then
     log_result "PASS" "1.1.2.2 - Asegurar opcion nodev en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -240,7 +336,7 @@ check_tmp_nodev() {
 # 1.1.2.3 - OPCION NOEXEC EN /tmp
 # ==============================================
 check_tmp_noexec() {
-  if findmnt --kernel /tmp | grep -q "noexec"; then
+  if cis_mount_option_enabled "/tmp" "noexec"; then
     log_result "PASS" "1.1.2.3 - Asegurar opcion noexec en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -252,7 +348,7 @@ check_tmp_noexec() {
 # 1.1.2.4 - OPCION NOSUID EN /tmp
 # ==============================================
 check_tmp_nosuid() {
-  if findmnt --kernel /tmp | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/tmp" "nosuid"; then
     log_result "PASS" "1.1.2.4 - Asegurar opcion nosuid en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -264,7 +360,7 @@ check_tmp_nosuid() {
 # 1.1.3.1 - ASEGURAR PARTICION SEPARADA PARA /var
 # ==============================================
 check_var_partition() {
-  if findmnt --kernel /var &>/dev/null; then
+  if cis_mount_is_exact "/var"; then
     log_result "PASS" "1.1.3.1 - Asegurar particion separada para /var" "" "" "$GREEN"
     return 0
   fi
@@ -276,7 +372,7 @@ check_var_partition() {
 # 1.1.3.2 - OPCION NODEV EN /var
 # ==============================================
 check_var_nodev() {
-  if findmnt --kernel /var | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var" "nodev"; then
     log_result "PASS" "1.1.3.2 - Asegurar opcion nodev en particion /var" "" "" "$GREEN"
     return 0
   fi
@@ -288,7 +384,7 @@ check_var_nodev() {
 # 1.1.3.3 - OPCION NOSUID EN /var
 # ==============================================
 check_var_nosuid() {
-  if findmnt --kernel /var | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var" "nosuid"; then
     log_result "PASS" "1.1.3.3 - Asegurar opcion nosuid en particion /var" "" "" "$GREEN"
     return 0
   fi
@@ -300,7 +396,7 @@ check_var_nosuid() {
 # 1.1.4.1 - ASEGURAR PARTICION SEPARADA PARA /var/tmp
 # ==============================================
 check_var_tmp_partition() {
-  if findmnt --kernel /var/tmp &>/dev/null; then
+  if cis_mount_is_exact "/var/tmp"; then
     log_result "PASS" "1.1.4.1 - Asegurar particion separada para /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -312,7 +408,7 @@ check_var_tmp_partition() {
 # 1.1.4.2 - OPCION NOEXEC EN /var/tmp
 # ==============================================
 check_var_tmp_noexec() {
-  if findmnt --kernel /var/tmp | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/tmp" "noexec"; then
     log_result "PASS" "1.1.4.2 - Asegurar opcion noexec en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -324,7 +420,7 @@ check_var_tmp_noexec() {
 # 1.1.4.3 - OPCION NOSUID EN /var/tmp
 # ==============================================
 check_var_tmp_nosuid() {
-  if findmnt --kernel /var/tmp | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/tmp" "nosuid"; then
     log_result "PASS" "1.1.4.3 - Asegurar opcion nosuid en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -336,7 +432,7 @@ check_var_tmp_nosuid() {
 # 1.1.4.4 - OPCION NODEV EN /var/tmp
 # ==============================================
 check_var_tmp_nodev() {
-  if findmnt --kernel /var/tmp | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/tmp" "nodev"; then
     log_result "PASS" "1.1.4.4 - Asegurar opcion nodev en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -348,7 +444,7 @@ check_var_tmp_nodev() {
 # 1.1.5.1 - ASEGURAR PARTICION SEPARADA PARA /var/log
 # ==============================================
 check_var_log_partition() {
-  if findmnt --kernel /var/log &>/dev/null; then
+  if cis_mount_is_exact "/var/log"; then
     log_result "PASS" "1.1.5.1 - Asegurar particion separada para /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -360,7 +456,7 @@ check_var_log_partition() {
 # 1.1.5.2 - OPCION NODEV EN /var/log
 # ==============================================
 check_var_log_nodev() {
-  if findmnt --kernel /var/log | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/log" "nodev"; then
     log_result "PASS" "1.1.5.2 - Asegurar opcion nodev en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -372,7 +468,7 @@ check_var_log_nodev() {
 # 1.1.5.3 - OPCION NOEXEC EN /var/log
 # ==============================================
 check_var_log_noexec() {
-  if findmnt --kernel /var/log | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/log" "noexec"; then
     log_result "PASS" "1.1.5.3 - Asegurar opcion noexec en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -384,7 +480,7 @@ check_var_log_noexec() {
 # 1.1.5.4 - OPCION NOSUID EN /var/log
 # ==============================================
 check_var_log_nosuid() {
-  if findmnt --kernel /var/log | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/log" "nosuid"; then
     log_result "PASS" "1.1.5.4 - Asegurar opcion nosuid en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -396,7 +492,7 @@ check_var_log_nosuid() {
 # 1.1.6.1 - ASEGURAR PARTICION SEPARADA PARA /var/log/audit
 # ==============================================
 check_var_log_audit_partition() {
-  if findmnt --kernel /var/log/audit &>/dev/null; then
+  if cis_mount_is_exact "/var/log/audit"; then
     log_result "PASS" "1.1.6.1 - Asegurar particion separada para /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -408,7 +504,7 @@ check_var_log_audit_partition() {
 # 1.1.6.2 - OPCION NOEXEC EN /var/log/audit
 # ==============================================
 check_var_log_audit_noexec() {
-  if findmnt --kernel /var/log/audit | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/log/audit" "noexec"; then
     log_result "PASS" "1.1.6.2 - Asegurar opcion noexec en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -420,7 +516,7 @@ check_var_log_audit_noexec() {
 # 1.1.6.3 - OPCION NODEV EN /var/log/audit
 # ==============================================
 check_var_log_audit_nodev() {
-  if findmnt --kernel /var/log/audit | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/log/audit" "nodev"; then
     log_result "PASS" "1.1.6.3 - Asegurar opcion nodev en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -432,7 +528,7 @@ check_var_log_audit_nodev() {
 # 1.1.6.4 - OPCION NOSUID EN /var/log/audit
 # ==============================================
 check_var_log_audit_nosuid() {
-  if findmnt --kernel /var/log/audit | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/log/audit" "nosuid"; then
     log_result "PASS" "1.1.6.4 - Asegurar opcion nosuid en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -444,7 +540,7 @@ check_var_log_audit_nosuid() {
 # 1.1.7.1 - ASEGURAR PARTICION SEPARADA PARA /home
 # ==============================================
 check_home_partition() {
-  if findmnt --kernel /home &>/dev/null; then
+  if cis_mount_is_exact "/home"; then
     log_result "PASS" "1.1.7.1 - Asegurar particion separada para /home" "" "" "$GREEN"
     return 0
   fi
@@ -456,7 +552,7 @@ check_home_partition() {
 # 1.1.7.2 - OPCION NODEV EN /home
 # ==============================================
 check_home_nodev() {
-  if findmnt --kernel /home | grep -q "nodev"; then
+  if cis_mount_option_enabled "/home" "nodev"; then
     log_result "PASS" "1.1.7.2 - Asegurar opcion nodev en particion /home" "" "" "$GREEN"
     return 0
   fi
@@ -468,7 +564,7 @@ check_home_nodev() {
 # 1.1.7.3 - OPCION NOSUID EN /home
 # ==============================================
 check_home_nosuid() {
-  if findmnt --kernel /home | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/home" "nosuid"; then
     log_result "PASS" "1.1.7.3 - Asegurar opcion nosuid en particion /home" "" "" "$GREEN"
     return 0
   fi
@@ -480,7 +576,7 @@ check_home_nosuid() {
 # 1.1.8.1 - ASEGURAR PARTICION SEPARADA PARA /dev/shm
 # ==============================================
 check_dev_shm_partition() {
-  if findmnt --kernel /dev/shm &>/dev/null; then
+  if cis_mount_is_exact "/dev/shm"; then
     log_result "PASS" "1.1.8.1 - Asegurar /dev/shm como particion separada" "" "" "$GREEN"
     return 0
   fi
@@ -492,7 +588,7 @@ check_dev_shm_partition() {
 # 1.1.8.2 - OPCION NODEV EN /dev/shm
 # ==============================================
 check_dev_shm_nodev() {
-  if findmnt --kernel /dev/shm | grep -q "nodev"; then
+  if cis_mount_option_enabled "/dev/shm" "nodev"; then
     log_result "PASS" "1.1.8.2 - Asegurar opcion nodev en /dev/shm" "" "" "$GREEN"
     return 0
   fi
@@ -504,7 +600,7 @@ check_dev_shm_nodev() {
 # 1.1.8.3 - OPCION NOEXEC EN /dev/shm
 # ==============================================
 check_dev_shm_noexec() {
-  if findmnt --kernel /dev/shm | grep -q "noexec"; then
+  if cis_mount_option_enabled "/dev/shm" "noexec"; then
     log_result "PASS" "1.1.8.3 - Asegurar opcion noexec en /dev/shm" "" "" "$GREEN"
     return 0
   fi
@@ -516,7 +612,7 @@ check_dev_shm_noexec() {
 # 1.1.8.4 - OPCION NOSUID EN /dev/shm
 # ==============================================
 check_dev_shm_nosuid() {
-  if findmnt --kernel /dev/shm | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/dev/shm" "nosuid"; then
     log_result "PASS" "1.1.8.4 - Asegurar opcion nosuid en /dev/shm" "" "" "$GREEN"
     return 0
   fi
@@ -674,11 +770,18 @@ check_grub_permissions() {
 # 1.5.1 - DESHABILITAR ALMACENAMIENTO DE CORE DUMPS
 # ==============================================
 check_coredump_storage() {
-  if grep -q "^Storage=none" /etc/systemd/coredump.conf 2>/dev/null; then
-    log_result "PASS" "1.5.1 - Deshabilitar almacenamiento de core dumps" "" "" "$GREEN"
+  local value="" rc=0
+  value="$(cis_systemd_config_value systemd/coredump.conf /etc/systemd/coredump.conf Coredump Storage)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ "$value" = "none" ]; then
+    log_result "PASS" "1.5.1 - Deshabilitar almacenamiento de core dumps" "Storage=none en la configuración efectiva de systemd, incluidos los drop-ins." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "1.5.1 - Deshabilitar almacenamiento de core dumps" "Storage=none no configurado en coredump.conf" "Editar /etc/systemd/coredump.conf y agregar: Storage=none. Reiniciar: systemctl restart systemd-coredump" "$YELLOW"
+  if [ "$rc" -eq 2 ]; then
+    log_result "WARN" "1.5.1 - Deshabilitar almacenamiento de core dumps" "No se pudo resolver con seguridad la configuración efectiva de systemd/coredump.conf y sus drop-ins." "Revisar 'systemd-analyze cat-config systemd/coredump.conf'. Si hay overrides y cat-config no está disponible, no se considera cumplimiento verificado." "$YELLOW"
+    return 2
+  fi
+  log_result "WARN" "1.5.1 - Deshabilitar almacenamiento de core dumps" "Storage efectivo: ${value:-no definido}; se requiere Storage=none." "Configurar Storage=none en la configuración efectiva. Antes de deshabilitar los core dumps, confirmar que los equipos de soporte no dependen de ellos para diagnosticar fallos; este verificador no aplica cambios." "$YELLOW"
   return 2
 }
 
@@ -686,11 +789,18 @@ check_coredump_storage() {
 # 1.5.2 - DESHABILITAR BACKTRACES DE CORE DUMPS
 # ==============================================
 check_coredump_backtraces() {
-  if grep -q "^ProcessSizeMax=0" /etc/systemd/coredump.conf 2>/dev/null; then
-    log_result "PASS" "1.5.2 - Deshabilitar backtraces de core dumps" "" "" "$GREEN"
+  local value="" rc=0
+  value="$(cis_systemd_config_value systemd/coredump.conf /etc/systemd/coredump.conf Coredump ProcessSizeMax)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ "$value" = "0" ]; then
+    log_result "PASS" "1.5.2 - Deshabilitar backtraces de core dumps" "ProcessSizeMax=0 en la configuración efectiva de systemd, incluidos los drop-ins." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "1.5.2 - Deshabilitar backtraces de core dumps" "ProcessSizeMax=0 no configurado" "Editar /etc/systemd/coredump.conf y agregar: ProcessSizeMax=0. Reiniciar: systemctl restart systemd-coredump" "$YELLOW"
+  if [ "$rc" -eq 2 ]; then
+    log_result "WARN" "1.5.2 - Deshabilitar backtraces de core dumps" "No se pudo resolver con seguridad la configuración efectiva de systemd/coredump.conf y sus drop-ins." "Revisar 'systemd-analyze cat-config systemd/coredump.conf'. Si hay overrides y cat-config no está disponible, no se considera cumplimiento verificado." "$YELLOW"
+    return 2
+  fi
+  log_result "WARN" "1.5.2 - Deshabilitar backtraces de core dumps" "ProcessSizeMax efectivo: ${value:-no definido}; se requiere ProcessSizeMax=0." "Configurar ProcessSizeMax=0 en la configuración efectiva. Esto desactiva el procesamiento de core dumps y puede reducir información para el análisis post-mortem; este verificador no aplica cambios." "$YELLOW"
   return 2
 }
 
@@ -710,11 +820,48 @@ check_selinux_installed() {
 # 1.6.1.2 - ASEGURAR SELINUX NO DESHABILITADO EN BOOTLOADER
 # ==============================================
 check_selinux_bootloader() {
-  if grep -q "selinux=0" /boot/grub2/grub.cfg 2>/dev/null; then
-    log_result "FAIL" "1.6.1.2 - Asegurar SELinux no deshabilitado en bootloader" "selinux=0 encontrado en grub.cfg" "Editar /boot/grub2/grub.cfg y eliminar los parametros selinux=0 o enforcing=0" "$RED"
+  local runtime_available=false persistent_source=false runtime_bad=false
+  local bad_sources="" file grubby_info=""
+
+  if [ -r /proc/cmdline ]; then
+    runtime_available=true
+    if cis_file_has_kernel_argument /proc/cmdline "selinux=0"; then
+      runtime_bad=true
+      bad_sources=" /proc/cmdline (kernel activo)"
+    fi
+  fi
+
+  # grubby normally enumerates effective boot entries, including BLS-based entries.
+  if command -v grubby >/dev/null 2>&1; then
+    grubby_info="$(grubby --info=ALL 2>/dev/null || true)"
+    if [ -n "$grubby_info" ]; then
+      persistent_source=true
+      if printf '%s\n' "$grubby_info" | cis_stream_has_kernel_argument "selinux=0"; then
+        bad_sources="$bad_sources grubby --info=ALL"
+      fi
+    fi
+  fi
+
+  # Check common persisted source/generated configs as well; include BLS and EFI.
+  for file in /etc/default/grub /boot/loader/entries/*.conf /boot/grub2/grub.cfg /boot/grub/grub.cfg /boot/efi/EFI/*/grub.cfg; do
+    [ -r "$file" ] || continue
+    [ "$file" = "/etc/default/grub" ] || persistent_source=true
+    if cis_file_has_kernel_argument "$file" "selinux=0"; then
+      bad_sources="$bad_sources $file"
+    fi
+  done
+
+  if [ "$runtime_bad" = true ] || [ -n "$bad_sources" ]; then
+    log_result "FAIL" "1.6.1.2 - Asegurar SELinux no deshabilitado en bootloader" "Se encontró el argumento activo selinux=0 en:${bad_sources:- configuración no identificada}." "Eliminar selinux=0 de la configuración/entrada de arranque correspondiente y validar los parámetros efectivos. No se modifica GRUB ni se reinicia el sistema desde este verificador." "$RED"
     return 1
   fi
-  log_result "PASS" "1.6.1.2 - Asegurar SELinux no deshabilitado en bootloader" "" "" "$GREEN"
+
+  if [ "$runtime_available" != true ] || [ "$persistent_source" != true ]; then
+    log_result "WARN" "1.6.1.2 - Asegurar SELinux no deshabilitado en bootloader" "Evidencia incompleta: kernel activo verificable=$runtime_available; configuración persistente de arranque verificable=$persistent_source." "Comprobar /proc/cmdline y las entradas efectivas con grubby --info=ALL o los archivos BLS/GRUB/EFI. No se concede PASS si no se puede revisar el kernel activo y al menos una fuente persistente." "$YELLOW"
+    return 2
+  fi
+
+  log_result "PASS" "1.6.1.2 - Asegurar SELinux no deshabilitado en bootloader" "No se encontró selinux=0 en /proc/cmdline ni en las fuentes persistentes de arranque detectadas." "" "$GREEN"
   return 0
 }
 
@@ -2479,6 +2626,7 @@ main() {
   echo -e "${YELLOW}[INFO] Perfil de referencia: $CIS_PROFILE${NC}"
   echo -e "${YELLOW}[INFO] Estado: $CIS_PROFILE_STATUS${NC}"
   echo -e "${YELLOW}[INFO] Se evalúa solo el subconjunto local; no se afirma cobertura total ni certificación CIS.${NC}\n"
+  echo -e "${YELLOW}[INFO] Las etiquetas numéricas de los tests son referencias locales históricas; no se ha validado una equivalencia uno a uno con los IDs oficiales del perfil vigente. Consulte CIS-COVERAGE-MAP.md.${NC}\n"
 
   # Limpiar reporte anterior
   echo "CIS Benchmark Verification Report" >"$REPORT_FILE"
@@ -2490,6 +2638,7 @@ main() {
   echo "Perfil de referencia: $CIS_PROFILE" | tee -a "$REPORT_FILE"
   echo "Estado del mapa: $CIS_PROFILE_STATUS" | tee -a "$REPORT_FILE"
   echo "Cobertura: subconjunto local de controles OrangeBox; no es certificación ni porcentaje completo del benchmark CIS oficial." | tee -a "$REPORT_FILE"
+  echo "IDs de tests: numeración local histórica; la equivalencia oficial por versión/perfil no está validada uno a uno. Ver CIS-COVERAGE-MAP.md." | tee -a "$REPORT_FILE"
   echo "" | tee -a "$REPORT_FILE"
 
   # Seccion 1.1 - Configuracion de Filesystem

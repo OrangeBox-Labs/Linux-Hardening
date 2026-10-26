@@ -2,7 +2,8 @@
 
 Última actualización: 2026-10-26
 Rama de referencia: `main`
-Commit de partida: `7d619b9f65687d214d7ce9d3c7bd9ad43f71575b`
+Commit de partida en `main`: `707daa5f6c587acfb97d98d4d709362c9949d160`
+Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status`
 
 Este archivo es el punto de reanudación del trabajo. Actualizar estados y commit de referencia al terminar cada bloque coherente.
 
@@ -32,7 +33,27 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Cambiar `FS-hardening.sh` a auditoría por defecto y `--fix` explícito; pedir aprobación individual para restricciones de montaje, `hidepid=2`, bloqueo de módulos y deshabilitación de autofs; no descargar módulos cargados en caliente.
 - [x] Añadir al baseline principal los controles `kernel.yama.ptrace_scope`, `vm.mmap_min_addr`, `kernel.unprivileged_bpf_disabled` y `user.max_user_namespaces`, usando la ruta de validación/confirmación de sysctl.
 - [x] Añadir pruebas iniciales para los comportamientos de filesystem y calidad del verificador CIS.
-- [ ] Confirmar el resultado CI de commit `7d619b9f65687d214d7ce9d3c7bd9ad43f71575b` y corregir fallos si aparecen.
+- [x] CI run `40402578862` pasó todos los jobs (sintaxis, regresiones y compatibility smoke en CentOS 6/7 + AlmaLinux 8/9/10) para el commit funcional/documental `e64b2825357f9479e9e9537802a973a0adb613be`; antes de integrar, comprobar que el último run del HEAD más reciente también esté verde.
+
+### Auditoría CIS / estado del repositorio — 2026-10-26
+
+- [x] Contrastar el mapa de benchmarks CIS catalogados para RHEL, AlmaLinux, Rocky Linux y Oracle Linux 8–10 con las páginas públicas de CIS; CentOS/Stream permanece sin equivalencia automática.
+- [x] Confirmar que `cis-benchmark-check.sh` implementa 143 comprobaciones locales: el resultado debe describirse como subconjunto y no como cumplimiento completo del benchmark.
+- [x] Detectar un falso PASS en las comprobaciones de montaje: `findmnt --kernel /ruta` podía devolver el filesystem padre y hacer creer que la ruta tenía montaje dedicado/opciones propias.
+- [x] Añadir en la rama `cis-mount-audit-and-status` helpers de mountpoint exacto, prueba unitaria con `findmnt` simulado y ejecución desde el workflow CI.
+- [x] Alinear el comentario de versión del baseline con `SCRIPT_VERSION=1.4.26` y enlazar el tablero `PROJECT-STATUS.md` desde README.
+- [x] Validar sintaxis y ejecutar las pruebas CIS/nuevas regresiones en la rama (CI run `40402578862`, commit `e64b2825357f9479e9e9537802a973a0adb613be`).
+- [x] Confirmar la matriz CI CentOS 6/7 + AlmaLinux 8/9/10 para ese commit.
+- [ ] Antes de integrar, comprobar que el run más reciente asociado al HEAD actual está en verde y revisar el diff final.
+- [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9. Añadir tests de lectura CIS para sysctl de red y logging; elegir/tailorear el perfil journald o rsyslog sin deshabilitar colectores automáticamente.
+- [x] Corregir en la rama el control SELinux de arranque para revisar kernel activo y fuentes BLS/GRUB/EFI, y los checks de core dumps para resolver `systemd-analyze cat-config`/drop-ins; evidencia incompleta queda en WARN.
+- [x] Añadida `tests/test_cis_effective_config.sh` para verificar overrides de systemd y argumentos de arranque, y conectada al workflow.
+- [x] Añadido `CIS-COVERAGE-MAP.md`, inventario de los 143 checks locales por sección y secciones sin checks directos en el informe (3.2/3.3 y 4.2); el mapping recomendación oficial→control local sigue pendiente.
+- [x] Enlazados `PROJECT-STATUS.md` y `CIS-COVERAGE-MAP.md` desde README para retomar el trabajo sin depender del historial del chat.
+- [x] Añadidos al baseline y a `kernel-hardening.sh` los controles CIS de forwarding IPv4/IPv6. Cada valor se aplica solo con confirmación individual y explicación del riesgo para routing/NAT/VPN/gateways/containers; IPv6 no disponible en kernels legacy queda N/A.
+- [x] Añadidos los controles de redirects ICMPv6 al baseline y `kernel-hardening.sh`, con explicación de impacto sobre rutas y confirmación por parámetro; kernels sin IPv6 muestran N/A.
+- [x] Añadida auditoría de la coexistencia `systemd-journald`/`rsyslog` en EL9/10. Si ambos están activos advierte del posible conflicto de perfil CIS, pero no detiene ni deshabilita los servicios.
+- [ ] Continuar revisando permisos GRUB, AIDE activo, opciones efectivas de PAM/SSH y controles CIS dependientes de la versión.
 
 ### En curso
 
@@ -43,15 +64,16 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [ ] Revisar `rsyslog-hardening.sh`: cambios de persistencia y reinicios de logging deben explicar uso de disco, flujo de logs y riesgo de perder recepción/forwarding.
 - [ ] Revisar `ssh-hardening.sh` y `ssh-hardening-complete.sh`: validar con `sshd -t`/`sshd -T`, backup y rollback; evitar perder acceso remoto y explicar impacto de root-login, algoritmos, forwarding, timeout y reinicio/recarga.
 - [ ] Revisar `sudo-hardening.sh` y `password-hardening.sh`: confirmar parámetros individualmente, preservar backups originales, no modificar PAM/authselect a ciegas y proteger cuentas administrativas.
-- [ ] Revisar `network-hardening.sh` y `kernel-hardening.sh`: cada sysctl/módulo debe exponer efecto e impacto; preservar forwarding/rutas/VPN/IPv6; un control que no existe en ese kernel debe salir como N/A, no como FAIL.
+- [ ] Continuar la revisión de `network-hardening.sh` y `kernel-hardening.sh`: asegurar explicación/confirmación por parámetro, preservar rutas/VPN/IPv6 si se rechaza deshabilitar forwarding/redirects, y convertir todo control no expuesto por kernels legacy en N/A, no FAIL.
 - [ ] Revisar el resto de módulos invocados por el baseline para que los cambios sean verdaderamente opt-in por confirmación, no por perfiles de aplicaciones, y que la auditoría no modifique el sistema.
 
 ### Validación final pendiente
 
-- [ ] Ejecutar `bash -n` sobre todos los scripts modificados.
-- [ ] Ejecutar las regresiones nuevas y las existentes.
-- [ ] Confirmar CI para CentOS 6/7 y AlmaLinux 8/9/10.
-- [ ] Verificar el árbol Git y que todos los entrypoints conserven `100755`.
+- [x] Ejecutar `bash -n` sobre todos los scripts modificados (CI run `40402578862`).
+- [x] Ejecutar las regresiones nuevas y las existentes (incluye mountpoint, coredump/SELinux, policy guards, SSH avanzado y consentimiento de forwarding).
+- [x] Confirmar CI para CentOS 6/7 y AlmaLinux 8/9/10 (CI run `40402578862`).
+- [x] Verificar que los entrypoints conserven `100755` mediante el paso automatizado de CI.
+- [x] Actualizar este plan con el último CI verde conocido y mantener como precondición de integración que el run más reciente esté verde.
 - [ ] Actualizar este archivo con el commit final y las limitaciones que sigan abiertas.
 
 ## Punto de reanudación

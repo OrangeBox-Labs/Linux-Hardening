@@ -40,6 +40,10 @@ jobs:
         run: bash tests/test_time_sync_legacy_refresh.sh
       - name: Test CIS profile mapping and checker quality
         run: bash tests/test_cis_checker_quality.sh
+      - name: Test exact CIS mountpoint validation
+        run: bash tests/test_cis_mountpoint_exact.sh
+      - name: Test effective CIS settings and boot arguments
+        run: bash tests/test_cis_effective_config.sh
       - name: Test audit output accuracy
         run: bash tests/test_audit_output_accuracy.sh
       - name: Test Bash history deletion guard
@@ -129,6 +133,8 @@ jobs:
               /bin/bash tests/test_os_detection_legacy.sh
               /bin/bash tests/test_time_sync_legacy_refresh.sh
               /bin/bash tests/test_cis_checker_quality.sh
+              /bin/bash tests/test_cis_mountpoint_exact.sh
+              /bin/bash tests/test_cis_effective_config.sh
               /bin/bash tests/test_bash_history_guard.sh
               if command -v script >/dev/null 2>&1; then
                 /bin/bash tests/test_bash_prompt_fqdn.sh

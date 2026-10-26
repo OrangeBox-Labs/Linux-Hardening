@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.25 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.26 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -874,6 +874,11 @@ kernel_module(){
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then
     echo -e "$BLUE[INFO]$NC El destino persistente sysctl está enlazado/no gestionado por OrangeBox; se auditan igualmente todos los valores y no se sobrescribe ese archivo."
   fi
+  # CIS RHEL 9 v3.0.0 recommendation 3.3.1 covers IPv4 and IPv6 forwarding;
+  # exact cross-version/profile mapping is tracked in CIS-COVERAGE-MAP.md.
+  # Routing/NAT/VPN/container gateways are legitimate exceptions, so sysctl-safe
+  # explains the effect and requires individual [s/N] consent before any change.
+  set_sysctl net.ipv4.ip_forward 0
   forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
   rp_filter=1
   if [ "$forwarding" = 1 ]; then
@@ -908,6 +913,12 @@ kernel_module(){
   set_sysctl net.ipv4.conf.default.rp_filter "$rp_filter"
 
   if [ -d /proc/sys/net/ipv6 ]; then
+    # CIS RHEL 9 v3.0.0 3.3.5 also covers IPv6 ICMP redirects.
+    # These network changes require the normal per-parameter consent.
+    set_sysctl net.ipv6.conf.all.accept_redirects 0
+    set_sysctl net.ipv6.conf.default.accept_redirects 0
+    # IPv6 forwarding is also a routing role setting; never switch it without consent.
+    set_sysctl net.ipv6.conf.all.forwarding 0
     set_sysctl net.ipv6.conf.all.accept_source_route 0
     set_sysctl net.ipv6.conf.default.accept_source_route 0
     ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
@@ -925,6 +936,8 @@ kernel_module(){
   elif [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
     sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_redirects: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_redirects: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_ra: este kernel no expone /proc/sys/net/ipv6."
     sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_ra: este kernel no expone /proc/sys/net/ipv6."
   fi
@@ -990,9 +1003,35 @@ rsyslog_legacy_is_active() {
   return 1
 }
 
+audit_logging_stack_selection() {
+  local journal_active=false rsyslog_active=false
+  if [ "${OS_VERSION:-0}" = 6 ] || ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ "${OS_VERSION:-0}" -lt 9 ] 2>/dev/null; then
+    info "No se evalúa exclusividad journald/rsyslog para esta generación en el baseline genérico."
+    return 0
+  fi
+
+  systemctl is-active --quiet systemd-journald 2>/dev/null && journal_active=true
+  systemctl is-active --quiet rsyslog 2>/dev/null && rsyslog_active=true
+
+  if [ "$journal_active" = true ] && [ "$rsyslog_active" = true ]; then
+    warn "systemd-journald y rsyslog están activos simultáneamente. Los perfiles CIS RHEL 9/10 separan las rutas journald/rsyslog; el uso dual debe ser una decisión consciente/tailoring."
+    echo "Qué hace/riesgo: deshabilitar cualquiera puede cortar persistencia, forwarding remoto, ingestión de Wazuh o procesos que leen logs. No se detiene ni deshabilita ningún servicio desde esta auditoría."
+  elif [ "$journal_active" = true ]; then
+    ok "Stack de logging activo: systemd-journald; rsyslog no está activo."
+  elif [ "$rsyslog_active" = true ]; then
+    info "Stack de logging activo: rsyslog sin systemd-journald; validar que coincide con el perfil operativo/CIS seleccionado."
+  else
+    warn "No se verificó un stack journald/rsyslog activo; no se habilita ni instala ningún servicio automáticamente."
+  fi
+}
+
 rsyslog_module(){
   local conf=/etc/systemd/journald.conf
   section "JOURNAL / SYSLOG"
+  audit_logging_stack_selection
   if [ "${OS_VERSION:-}" = 6 ]; then
     na "journald no aplica a CentOS/RHEL 6; Storage=persistent está excluido porque se usa el stack legacy."
     na "/var/log/journal como persistencia de journald no aplica a CentOS/RHEL 6."
@@ -1813,7 +1852,7 @@ risk_description() {
     selinux-setup) echo "solo cambia SELinux a Enforcing y/o persiste ese modo tras una confirmación específica; aplicaciones sin políticas/contextos adecuados pueden quedar bloqueadas. No habilita SELinux si está Disabled." ;;
     time-sync) echo "puede modificar ntpd/chronyd o ajustar el reloj; puede afectar Kerberos/Samba AD, certificados y correlación de logs. El baseline general lo audita, pero no cambia NTP automáticamente." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
-    kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
+    kernel) echo "audita y propone deshabilitar forwarding IPv4/IPv6 solo con confirmación individual. Puede interrumpir routing, NAT, VPN y redes de contenedores; si se conserva IPv4 forwarding, usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
     synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
     network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;

@@ -20,6 +20,21 @@ grep -Fq 'check_sysctl_param "kernel.dmesg_restrict" "1"' "$KERNEL" || fail "ker
 for key in 'kernel.yama.ptrace_scope' 'vm.mmap_min_addr' 'kernel.unprivileged_bpf_disabled' 'user.max_user_namespaces'; do
   grep -Fq "set_sysctl $key " "$CORE" || fail "el baseline principal no evalúa $key"
 done
+for key in 'net.ipv4.ip_forward' 'net.ipv6.conf.all.forwarding'; do
+  grep -Fq "set_sysctl $key 0" "$CORE" || fail "el baseline no audita ni protege $key"
+  grep -Fq "check_sysctl_param \"$key\" \"0\"" "$KERNEL" || fail "kernel-hardening no contempla $key"
+done
+SYSCTL_SAFE="$ROOT_DIR/lib/sysctl-safe.sh"
+grep -Fq 'Deshabilita el reenvío IPv4 del host' "$SYSCTL_SAFE" || fail "falta explicar el impacto de apagar IPv4 forwarding"
+grep -Fq 'Deshabilita el reenvío IPv6 del host' "$SYSCTL_SAFE" || fail "falta explicar el impacto de apagar IPv6 forwarding"
+for key in 'net.ipv6.conf.all.accept_redirects' 'net.ipv6.conf.default.accept_redirects'; do
+  grep -Fq "set_sysctl $key 0" "$CORE" || fail "el baseline no audita $key"
+  grep -Fq "check_sysctl_param \"$key\" \"0\"" "$KERNEL" || fail "kernel-hardening no audita $key"
+done
+grep -Fq 'Ignora redirecciones ICMPv6 recibidas' "$SYSCTL_SAFE" || fail "falta explicar el efecto de bloquear redirects ICMPv6"
+grep -Fq 'IPv6 ICMP redirects no están expuestos por este kernel; no aplica.' "$KERNEL" || fail "kernel legacy debe reportar N/A para redirects IPv6"
+grep -Fq 'No hay terminal interactiva; se omite $key por seguridad.' "$SYSCTL_SAFE" || fail "un cambio sysctl sensible debe omitirse sin TTY"
+grep -Fq 'IPv6 forwarding no está expuesto por este kernel; no aplica.' "$KERNEL" || fail "kernel legacy debe informar N/A para IPv6 forwarding"
 grep -Fq 'set_kptr_restrict_policy' "$CORE" || fail "baseline no utiliza la política condicional de kptr_restrict"
 grep -Fq 'check_kptr_restrict_policy' "$KERNEL" || fail "kernel-hardening no utiliza la política condicional de kptr_restrict"
 if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr_restrict" "2"' "$CORE" "$KERNEL"; then
@@ -115,6 +130,16 @@ grep -Fq 'rsyslog_legacy_is_active()' "$CORE" || fail "falta comprobar rsyslog e
 grep -Fq 'journald no aplica a CentOS/RHEL 6' "$CORE" || fail "el baseline sigue tratando journald como obligatorio en CentOS 6"
 grep -Fq 'if [ "${OS_VERSION:-}" = 6 ]; then' "$CORE" || fail "no se detecta la generación legacy para la auditoría de logs"
 pass "syslog/journald se distingue correctamente en CentOS/RHEL 6"
+# CIS RHEL 9/10 has mutually exclusive journald/rsyslog paths in default profiles.
+# The audit may warn, but must never stop or disable a logging service automatically.
+grep -Fq 'audit_logging_stack_selection()' "$CORE" || fail "falta auditar la elección del stack journald/rsyslog"
+grep -Fq 'No se detiene ni deshabilita ningún servicio desde esta auditoría.' "$CORE" || fail "la auditoría de logging no declara su política no destructiva"
+logging_audit_block="$(sed -n '/^audit_logging_stack_selection() {/,/^}/p' "$CORE")"
+if printf '%s\n' "$logging_audit_block" | grep -Eiq 'systemctl[[:space:]]+(stop|disable|mask|restart)[[:space:]]+(rsyslog|systemd-journald)'; then
+  fail "la auditoría del stack de logging intenta parar, deshabilitar o reiniciar servicios"
+fi
+pass "journald/rsyslog solo genera advertencia; el check no cambia servicios"
+
 
 # Older RHEL-family hosts must use their native auditd, ntpd and GRUB interfaces.
 grep -Fq 'auditd_is_active()' "$CORE" || fail "falta detección auditd compatible con SysV"

@@ -22,11 +22,13 @@ Linux-Hardening está evolucionando hacia algo más útil que una colección de 
 
 La filosofía actual de OrangeBox es bastante simple: **primero comprobar, después preguntar y finalmente cambiar**. El baseline incorpora controles de idempotencia, preflight de configuración efectiva, auditorías de solo lectura y políticas especiales para ambientes donde romper SSH a las 3 de la mañana no es precisamente una feature.
 
+El estado detallado del proyecto está en [PROJECT-STATUS.md](PROJECT-STATUS.md), y el inventario de controles presentes/ausentes por dominio está en [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
+
 ### Cambios recientes del baseline y los módulos
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.25: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
+| `linux-hardening.sh` | Baseline 1.4.26: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -34,7 +36,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 | `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
 | `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
-| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict` y `kernel.kptr_restrict`. |
+| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict`, `kernel.kptr_restrict` y forwarding IPv4/IPv6 con confirmación individual. |
 | `kernel-lpe-2026-mitigation.sh` | Mitigaciones específicas para escenarios LPE recientes, separadas del hardening general. |
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
@@ -85,6 +87,9 @@ Los controles sysctl distinguen entre valor activo, persistente, configuración 
 
 Los cambios pendientes pueden requerir confirmación individual.
 
+Los parámetros de forwarding IPv4/IPv6 ahora también se auditan en el baseline y el módulo de kernel independiente. El objetivo CIS es deshabilitarlos, pero **no se fuerzan automáticamente**: cambiar `net.ipv4.ip_forward` o `net.ipv6.conf.all.forwarding` puede interrumpir routing, NAT, VPN, gateways y redes de contenedores. En `--fix`, cada parámetro explica el impacto y solicita confirmación individual `[s/N]`; sin terminal interactiva se omite. Si IPv4 forwarding se conserva, el baseline usa `rp_filter=2` (modo flexible) para reducir descartes de tráfico asimétrico.
+
+
 Política OrangeBox para los controles principales:
 
 ```text
@@ -103,6 +108,8 @@ net.core.somaxconn
 ```
 
 El baseline no modifica automáticamente `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`, porque esos parámetros dependen de latencia, pérdida, aplicaciones y política operacional.
+
+El hardening también audita `net.ipv6.conf.{all,default}.accept_redirects`. Ignorar redirects ICMPv6 reduce cambios de ruta inducidos por terceros, pero puede afectar redes que dependan de ellos, por lo que cada cambio solicita confirmación; si el kernel no expone IPv6, se informa N/A.
 
 Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
@@ -208,7 +215,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.25; reporte de todos los controles corregibles, con estado y resumen. |
+| `linux-hardening.sh` | Baseline 1.4.26; reporte de todos los controles corregibles, con estado y resumen. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
@@ -320,12 +327,12 @@ La opción `--module selinux-setup` está bloqueada por política porque SELinux
 | Módulo/script | Riesgo operacional |
 |---|---|
 | `generate-iptables-rules.sh` | Puede vaciar reglas iptables y establecer `INPUT DROP`, cortando SSH. No debe combinarse con Shorewall. |
-| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, rutas asimétricas y aplicaciones. `--auto` los deja en auditoría. |
+| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, NAT, gateways, redes de contenedores, rutas asimétricas y aplicaciones. Forwarding IPv4/IPv6 solicita confirmación por parámetro y se omite sin TTY; `--auto` deja los controles de riesgo en auditoría. |
 | `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Pueden afectar clientes antiguos, automatizaciones y métodos de autenticación. |
 | `FS-hardening.sh` | Opciones restrictivas, `hidepid`, módulos y autofs pueden afectar monitoreo y aplicaciones. |
 | `cron-hardening.sh` | Restricciones de cron/at pueden romper tareas de usuarios o cPanel. |
 | `grub-hardening.sh` | Cambios de arranque pueden requerir reinicio y dejar un sistema inaccesible si se aplican incorrectamente. |
-| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Validar contenedores, VPN y aplicaciones. |
+| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Forwarding IPv4/IPv6 queda detrás de confirmación individual porque puede interrumpir routing/NAT/VPN/gateways/containers. Validar rutas y consola de recuperación. |
 | `auditd-hardening.sh` / `rsyslog-hardening.sh` | Pueden aumentar volumen de logs o afectar reglas y destinos existentes. |
 | `configure-time-sync.sh` | Cambios bruscos de hora pueden afectar certificados, autenticación y correlación de logs. |
 | `bash-hardening.sh` | Logging de comandos puede elevar volumen de logs y capturar argumentos sensibles. |

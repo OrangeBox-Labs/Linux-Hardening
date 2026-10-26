@@ -203,7 +203,7 @@ ssh_setting_impact() {
     ciphers) echo "Restringe cifrados; equipos legacy pueden dejar de negociar una sesión." ;;
     macs) echo "Restringe algoritmos MAC; clientes antiguos pueden perder compatibilidad." ;;
     permitemptypasswords) echo "Impide autenticación mediante contraseñas vacías." ;;
-    challenger esponseauthentication|kbdinteractiveauthentication) echo "Desactiva keyboard-interactive; puede romper MFA o módulos PAM que dependan de ese método." ;;
+    challengeresponseauthentication|kbdinteractiveauthentication) echo "Desactiva keyboard-interactive; puede romper MFA o módulos PAM que dependan de ese método." ;;
     kerberosauthentication|gssapiauthentication) echo "Desactiva autenticación integrada Kerberos/GSSAPI; identidades de dominio o SSO pueden verse afectadas." ;;
     x11forwarding) echo "Deshabilita aplicaciones gráficas remotas por SSH." ;;
     allowtcpforwarding) echo "Deshabilita túneles TCP/port-forwarding SSH; puede afectar bastiones, proxies y automatización." ;;
@@ -212,7 +212,7 @@ ssh_setting_impact() {
     maxauthtries) echo "Limita intentos de login por conexión; puede afectar usuarios con varios métodos/llaves." ;;
     logingracetime) echo "Limita el tiempo para autenticarse; clientes de autenticación lenta pueden fallar." ;;
     maxsessions) echo "Limita sesiones multiplexadas por conexión." ;;
-    us epam|usepam) echo "Cambia la integración con PAM y puede afectar autenticación, MFA o políticas de sesión." ;;
+    usepam) echo "Cambia la integración con PAM y puede afectar autenticación, MFA o políticas de sesión." ;;
     *) echo "Modifica la política SSH; valida clientes y accesos administrativos desde una segunda sesión." ;;
   esac
 }
