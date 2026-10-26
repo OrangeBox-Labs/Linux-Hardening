@@ -9,6 +9,15 @@
 #              CIS 1.7.1, 1.7.2, 1.7.3, 1.7.5, 1.7.6, 1.7.7
 # ==============================================
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd -P)"
+if [ -r "$SCRIPT_DIR/lib/orangebox-motd.sh" ]; then
+  # shellcheck source=lib/orangebox-motd.sh
+  source "$SCRIPT_DIR/lib/orangebox-motd.sh"
+else
+  echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -52,15 +61,8 @@ Si no cuenta con autorizacion, desconectese inmediatamente.
 *******************************************************************************
 "
 
-# El MOTD se muestra después de autenticar; no repetir la advertencia SSH.
-MOTD_TEXT="
-*******************************************************************************
-                         ORANGEBOX IT SERVICES
-*******************************************************************************
-Sesion iniciada en un sistema administrado por OrangeBox.
-Respete las politicas de uso de la organizacion.
-*******************************************************************************
-"
+# El contenido del MOTD se genera dinámicamente por sesión.
+MOTD_TEXT=""
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
@@ -101,10 +103,18 @@ configure_banner_file() {
 
   if [ "$AUTO_FIX" = true ]; then
     local content="$BANNER_TEXT"
+    local content_source="$3"
     if [ "$file" = "/etc/motd" ]; then
       content="$MOTD_TEXT"
     fi
-    printf '%s' "$content" > "$file"
+    if [ -n "$content_source" ]; then
+      if ! cp "$content_source" "$file"; then
+        echo -e "$RED[!] No se pudo copiar el contenido a $file$NC"
+        return 1
+      fi
+    else
+      printf '%s' "$content" > "$file"
+    fi
     if [ "$file" = "/etc/motd" ]; then
       echo -e "${GREEN}[✓] MOTD breve configurado en $file${NC}"
     else
@@ -191,11 +201,21 @@ create_backup_dir() {
 # CONFIGURAR ETC/MOTD (CIS 1.7.1, 1.7.5)
 # ==============================================
 configure_motd() {
-  echo -e "\n${BLUE}[*] CIS 1.7.1, 1.7.5 - Configurando /etc/motd${NC}"
+  echo -e "\n$BLUE[*] CIS 1.7.1, 1.7.5 - Configurando MOTD dinámico$NC"
+  local profile_tmp
+  orangebox_motd_ensure_figlet "$AUTO_FIX" || true
+  profile_tmp="$(mktemp)" || { echo -e "$RED[!] No se pudo crear el perfil MOTD$NC"; return 1; }
+  if ! orangebox_motd_write_profile "$profile_tmp"; then
+    rm -f "$profile_tmp"
+    echo -e "$RED[!] No se pudo generar el perfil MOTD$NC"
+    return 1
+  fi
   configure_banner_file "/etc/motd" "Message of the Day"
   configure_permissions "/etc/motd" "644" "root" "root"
+  configure_banner_file "/etc/profile.d/99-orangebox-motd.sh" "Dynamic Message of the Day" "$profile_tmp"
+  configure_permissions "/etc/profile.d/99-orangebox-motd.sh" "644" "root" "root"
+  rm -f "$profile_tmp"
 }
-
 # ==============================================
 # CONFIGURAR ETC/ISSUE (CIS 1.7.2, 1.7.6)
 # ==============================================
@@ -296,15 +316,15 @@ show_summary() {
   fi
 
   echo -e "\n${YELLOW}ARCHIVOS CONFIGURADOS:${NC}"
-  echo -e "  /etc/motd - Mensaje del dia (se muestra despues del login)"
+  echo -e "  /etc/motd - Vacío; el banner dinámico se muestra desde /etc/profile.d/99-orangebox-motd.sh"
   echo -e "  /etc/issue - Banner de login local (consola fisica)"
   echo -e "  /etc/issue.net - Banner de login remoto (SSH)"
 
   echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
-  echo -e "  cat /etc/motd"
+  echo -e "  cat /etc/profile.d/99-orangebox-motd.sh"
   echo -e "  cat /etc/issue"
   echo -e "  cat /etc/issue.net"
-  echo -e "  stat /etc/motd /etc/issue /etc/issue.net"
+  echo -e "  stat /etc/motd /etc/profile.d/99-orangebox-motd.sh /etc/issue /etc/issue.net"
   echo -e "  grep Banner /etc/ssh/sshd_config"
 
   if [ "$AUTO_FIX" = true ]; then
