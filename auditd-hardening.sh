@@ -89,16 +89,24 @@ get_auditctl_path() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    [ -f "$AUDIT_CONF" ] && cp "$AUDIT_CONF" "$BACKUP_DIR/"
-    if [ -d /etc/audit/rules.d ]; then
-      cp -r /etc/audit/rules.d "$BACKUP_DIR/"
-    else
-      echo -e "${YELLOW}[!] Directorio /etc/audit/rules.d no existe, no se respalda${NC}"
-    fi
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modificará auditd.${NC}" >&2
+    return 1
   fi
+  if [ -f "$AUDIT_CONF" ] && ! cp -p "$AUDIT_CONF" "$BACKUP_DIR/"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar $AUDIT_CONF; no se modificará auditd.${NC}" >&2
+    return 1
+  fi
+  if [ -d /etc/audit/rules.d ] && ! cp -a /etc/audit/rules.d "$BACKUP_DIR/"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar /etc/audit/rules.d; no se modificarán las reglas.${NC}" >&2
+    return 1
+  fi
+  if [ -f /etc/audit/audit.rules ] && ! cp -p /etc/audit/audit.rules "$BACKUP_DIR/"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar /etc/audit/audit.rules; no se modificará auditd.${NC}" >&2
+    return 1
+  fi
+  echo -e "${GREEN}[✓] Backup de auditd verificado en: $BACKUP_DIR${NC}"
 }
 
 # ==============================================
@@ -634,7 +642,10 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
-    make_backup
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup fallido; se aborta antes de modificar auditd.${NC}" >&2
+      exit 1
+    fi
   else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"

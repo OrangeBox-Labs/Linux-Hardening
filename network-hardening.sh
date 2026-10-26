@@ -87,14 +87,24 @@ show_usage() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    [ -f /etc/sysctl.conf ] && cp -a /etc/sysctl.conf "$BACKUP_DIR/"
-    [ -f "$SYSCTL_FILE" ] && cp -a "$SYSCTL_FILE" "$BACKUP_DIR/"
-    [ -f "$SYSCTL_LEGACY_FILE" ] && cp -a "$SYSCTL_LEGACY_FILE" "$BACKUP_DIR/"
-    [ -d /etc/modprobe.d ] && cp -r /etc/modprobe.d "$BACKUP_DIR/"
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el directorio de backup $BACKUP_DIR; no se aplicará hardening de red.${NC}" >&2
+    return 1
   fi
+  local source
+  for source in /etc/sysctl.conf "$SYSCTL_FILE" "$SYSCTL_LEGACY_FILE"; do
+    [ -f "$source" ] || continue
+    if ! cp -a "$source" "$BACKUP_DIR/"; then
+      echo -e "${RED}[ERROR] No se pudo respaldar $source; no se aplicará hardening de red.${NC}" >&2
+      return 1
+    fi
+  done
+  if [ -d /etc/modprobe.d ] && ! cp -a /etc/modprobe.d "$BACKUP_DIR/"; then
+    echo -e "${RED}[ERROR] No se pudo respaldar /etc/modprobe.d; no se bloquearán módulos.${NC}" >&2
+    return 1
+  fi
+  echo -e "${GREEN}[✓] Backup verificado en: $BACKUP_DIR${NC}"
 }
 
 # ==============================================
@@ -118,21 +128,19 @@ set_sysctl() {
 confirm_module_disable() {
   local module="$1" description="$2" answer
   [ "$AUTO_FIX" = true ] || return 1
-
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
     echo -e "${YELLOW}[WARN] Sin terminal interactiva: se omite el bloqueo de $module.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 1
   fi
-
-  echo -e "${YELLOW}[!] Se propone impedir la carga futura del módulo $module ($description).${NC}"
-  echo "    Si una aplicación o función de red lo requiere, podría dejar de funcionar."
+  echo -e "${YELLOW}[!] Se propone impedir futuras cargas del módulo $module ($description).${NC}"
+  echo "    Si una aplicación o función de red lo requiere, podría dejar de funcionar después de reiniciar o intentar cargarlo."
   if lsmod | awk -v m="$module" '$1 == m {found=1} END {exit !found}'; then
-    echo "    El módulo está cargado; también se intentará descargarlo durante esta ejecución."
+    echo "    El módulo está cargado; no se descargará en caliente. Si se requiere retirarlo del runtime, hágalo en una ventana de mantenimiento autorizada."
   else
     echo "    El módulo no está cargado actualmente."
   fi
-  printf '¿Confirmas deshabilitar %s? [s/N] ' "$module" > /dev/tty
+  printf '¿Confirmas bloquear futuras cargas de %s? [s/N] ' "$module" > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   case "$answer" in
     y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) return 0 ;;
@@ -209,12 +217,8 @@ disable_module() {
   fi
 
   if lsmod | awk -v m="$module" '$1 == m {found=1} END {exit !found}'; then
-    if rmmod "$module" 2>/dev/null; then
-      echo -e "${GREEN}[✓] $module descargado${NC}"
-    else
-      echo -e "${YELLOW}[WARN] No se pudo descargar $module (posiblemente en uso); el bloqueo persistente ya está configurado.${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    echo -e "${YELLOW}[WARN] $module sigue cargado en runtime; no se descarga en caliente. El bloqueo persistente impedirá futuras cargas; una descarga, si procede, requiere una ventana de mantenimiento autorizada.${NC}"
+    WARNINGS=$((WARNINGS + 1))
   fi
 
   if [ "$config_changed" = true ]; then
@@ -538,7 +542,10 @@ main() {
     fi
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    make_backup
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup fallido; se aborta antes de modificar sysctl o configuración de módulos.${NC}" >&2
+      exit 1
+    fi
   else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"

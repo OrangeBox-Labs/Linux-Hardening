@@ -157,13 +157,24 @@ journald_set_main_param() {
 }
 
 make_backup() {
-  if [ "$AUTO_FIX" = true ]; then
-    mkdir -p "$BACKUP_DIR"
-    [ -f "$RSYSLOG_CONF" ] && cp "$RSYSLOG_CONF" "$BACKUP_DIR/"
-    [ -f "$JOURNALD_CONF" ] && cp "$JOURNALD_CONF" "$BACKUP_DIR/"
-    [ -d "$RSYSLOG_D_DIR" ] && cp -r "$RSYSLOG_D_DIR" "$BACKUP_DIR/"
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
+  [ "$AUTO_FIX" = true ] || return 0
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "$RED[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modifica el logging.$NC" >&2
+    return 1
   fi
+  if [ -f "$RSYSLOG_CONF" ] && ! cp -p "$RSYSLOG_CONF" "$BACKUP_DIR/"; then
+    echo -e "$RED[ERROR] No se pudo respaldar $RSYSLOG_CONF; no se modifica el logging.$NC" >&2
+    return 1
+  fi
+  if [ -f "$JOURNALD_CONF" ] && ! cp -p "$JOURNALD_CONF" "$BACKUP_DIR/"; then
+    echo -e "$RED[ERROR] No se pudo respaldar $JOURNALD_CONF; no se modifica el logging.$NC" >&2
+    return 1
+  fi
+  if [ -d "$RSYSLOG_D_DIR" ] && ! cp -a "$RSYSLOG_D_DIR" "$BACKUP_DIR/"; then
+    echo -e "$RED[ERROR] No se pudo respaldar $RSYSLOG_D_DIR; no se modifica el logging.$NC" >&2
+    return 1
+  fi
+  echo -e "$GREEN[✓] Backup de logging verificado en: $BACKUP_DIR$NC"
 }
 
 # ==============================================
@@ -594,7 +605,10 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
-    make_backup
+    if ! make_backup; then
+      echo -e "$RED[ERROR] Backup fallido; se aborta antes de modificar rsyslog/journald.$NC" >&2
+      exit 1
+    fi
   else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
