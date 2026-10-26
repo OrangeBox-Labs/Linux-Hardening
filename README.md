@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.13, compatibilidad legacy CentOS 6 para SYSCTL, listeners, auditd/NTP/GRUB, crypto-policy y PAM, con prueba de regresión de la rama GRUB legacy. |
+| `linux-hardening.sh` | Baseline 1.4.15, compatibilidad legacy CentOS 6 para SYSCTL, listeners, auditd/NTP/GRUB, crypto-policy y PAM, con prueba de regresión de la rama GRUB legacy. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -101,7 +101,7 @@ Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
 El inventario de sockets identifica protocolo, dirección, puerto, proceso y servicio cuando la información está disponible.
 
-El informe principal identifica gestores y backends detectables —CSF, Shorewall, firewalld, nftables, iptables/iptables-nft y cadenas de integración de Imunify360— y lista los servicios que escuchan. Para cada socket no-loopback intenta contrastar protocolo y puerto con las reglas INPUT legibles.
+El informe principal distingue actividad confirmada de mera instalación y presenta un gestor activo solo cuando existe evidencia observable. Detecta CSF, Shorewall, firewalld, el servicio nftables, iptables-services, UFW, backends iptables-nft/legacy y cadenas de integración de Imunify360. Si detecta varios gestores a la vez o ve reglas sin poder atribuirlas, lo advierte en vez de elegir uno a ciegas. Lista todos los listeners TCP/UDP, incluidos los locales, identifica el proceso/servicio cuando la información está disponible y contrasta cada listener remoto por protocolo, puerto y familia con las reglas INPUT legibles.
 
 Los resultados se separan en cuatro estados:
 
