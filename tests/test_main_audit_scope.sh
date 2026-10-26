@@ -33,7 +33,8 @@ source "$ROOT_DIR/lib/sysctl-safe.sh"
 PENDING_ONLY_AUDIT=true
 OK_COUNT=0
 sysctl_safe_log "OK" "control de prueba conforme" > "$OUT"
-grep -Fq '[SYSCTL][OK] control de prueba conforme' "$OUT" || fail "sysctl_safe_log no muestra el estado OK"
+grep -Fq '[SYSCTL][OK]' "$OUT" || fail "sysctl_safe_log no muestra el estado OK"
+grep -Fq 'control de prueba conforme' "$OUT" || fail "sysctl_safe_log no muestra el detalle del estado OK"
 [ "$OK_COUNT" -eq 1 ] || fail "el estado OK de sysctl no incrementa el contador"
 : > "$OUT"
 sysctl_safe_log "INFO" "mensaje informativo oculto" > "$OUT"
