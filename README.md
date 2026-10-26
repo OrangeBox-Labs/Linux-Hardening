@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.20: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
+| `linux-hardening.sh` | Baseline 1.4.21: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -202,7 +202,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.20; reporte de todos los controles corregibles, con estado y resumen. |
+| `linux-hardening.sh` | Baseline 1.4.21; reporte de todos los controles corregibles, con estado y resumen. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
@@ -277,7 +277,7 @@ No son exactamente lo mismo.
 ./linux-hardening.sh
 ```
 
-Muestra todos los controles del baseline interactivo con su estado individual: `[OK]` conforme, `[WARN]` pendiente o que requiere revisión, y `[N/A]` cuando no aplica a la plataforma o está excluido por política. Incluye los nueve parámetros SSH y el banner SSH, `sudoers`/`use_pty`, cada sysctl disponible y cada control IPv6 no aplicable, SYN flood, `Storage=persistent` y `/var/log/journal`, los cuatro archivos de banners/MOTD, cada control del perfil Bash (timeout, historial, protección frente a borrado, timestamp, permisos, Readline, FQDN, prompt y `PROMPT_COMMAND`), los dotfiles de historial y el include de `/etc/bashrc`. También revisa el estado opcional de AIDE (paquete, base y cron), porque `--fix` interactivo lo ofrece. El resumen separa controles correctos, no aplicables, pendientes y errores. La auditoría no cambia archivos ni servicios. Firewall y listeners se auditan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
+Muestra todos los controles del baseline interactivo con su estado individual: `[OK]` conforme, `[WARN]` pendiente o que requiere revisión, y `[N/A]` cuando no aplica a la plataforma o está excluido por política. Incluye los nueve parámetros SSH y el banner SSH, `sudoers`/`use_pty`, cada sysctl disponible y cada control IPv6 no aplicable, SYN flood, `Storage=persistent` y `/var/log/journal`, los cuatro archivos de banners/MOTD, cada control del perfil Bash (timeout, historial, protección frente a borrado, timestamp, permisos, Readline, FQDN, prompt y `PROMPT_COMMAND`), los dotfiles de historial (marcador, `HISTSIZE`, `HISTFILESIZE`, `HISTFILE` readonly y reglas `PROMPT_COMMAND`) y el include de `/etc/bashrc`. También revisa el estado opcional de AIDE (paquete, base y cron diario a las 05:00), porque `--fix` interactivo lo ofrece. El resumen separa controles correctos, no aplicables, pendientes y errores. La auditoría no cambia archivos ni servicios. Firewall y listeners se auditan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
 
 ### Aplicar de forma interactiva
 

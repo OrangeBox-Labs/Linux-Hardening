@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.20 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.21 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.20
+SCRIPT_VERSION=1.4.21
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -980,6 +980,7 @@ grub_module(){
 }
 aide_audit_module() {
   section "AIDE / INTEGRIDAD (OPCIONAL)"
+  local root_crontab
   if ! command -v rpm >/dev/null 2>&1; then
     warn "rpm no está disponible; no se puede comprobar si AIDE está instalado"
     na "La base de AIDE y su tarea periódica no se verifican hasta poder consultar el paquete."
@@ -1001,10 +1002,15 @@ aide_audit_module() {
   fi
   if ! command -v crontab >/dev/null 2>&1; then
     warn "crontab no está disponible; no se puede verificar la comprobación periódica de AIDE"
-  elif crontab -u root -l 2>/dev/null | grep -q "aide --check"; then
-    ok "Verificación periódica de AIDE configurada en el crontab de root"
   else
-    warn "No hay comprobación periódica de AIDE en el crontab de root; --fix puede configurarla tras consentimiento"
+    root_crontab="$(crontab -u root -l 2>/dev/null || true)"
+    if printf '%s\n' "$root_crontab" | grep -Fqx '0 5 * * * /usr/sbin/aide --check'; then
+      ok "Verificación periódica de AIDE configurada diariamente a las 05:00"
+    elif printf '%s\n' "$root_crontab" | grep -q 'aide --check'; then
+      warn "La tarea AIDE existe, pero no coincide exactamente con la frecuencia/comando objetivo: 0 5 * * * /usr/sbin/aide --check"
+    else
+      warn "No hay comprobación periódica objetivo de AIDE en el crontab de root; --fix puede configurarla tras consentimiento"
+    fi
   fi
 }
 
@@ -1032,6 +1038,40 @@ normalize_history_dotfile() {
     warn "$file es un enlace simbólico; no se reemplaza automáticamente."
     return 1
   fi
+
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    if [ ! -f "$file" ]; then
+      warn "$file no existe; no hay historial ilimitado configurado para ese usuario/modelo"
+      return 0
+    fi
+    if grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file"; then
+      ok "$file: bloque OrangeBox de historial identificado"
+    else
+      warn "$file: falta el bloque administrado OrangeBox de historial"
+    fi
+    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file"; then
+      ok "$file: HISTSIZE=-1"
+    else
+      warn "$file: HISTSIZE no está fijado a -1"
+    fi
+    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file"; then
+      ok "$file: HISTFILESIZE=-1"
+    else
+      warn "$file: HISTFILESIZE no está fijado a -1"
+    fi
+    if grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file"; then
+      warn "$file: HISTFILE está readonly y puede impedir la política de historial; --fix lo normalizará"
+    else
+      ok "$file: HISTFILE no está bloqueado como readonly"
+    fi
+    if grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
+      warn "$file: PROMPT_COMMAND contiene una regla que limpia/recarga el historial en cada prompt"
+    else
+      ok "$file: no se detectó el patrón de limpieza de historial en PROMPT_COMMAND"
+    fi
+    return 0
+  fi
+
   if [ -f "$file" ] &&
      grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
      grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&

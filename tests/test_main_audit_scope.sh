@@ -62,13 +62,16 @@ grep -Fq 'echo "No aplicables: $NOT_APPLICABLE_COUNT"' "$MAIN" || fail "falta re
 grep -Fq 'aide_audit_module' "$MAIN" || fail "la auditoría predeterminada omite el hardening opcional AIDE"
 grep -Fq 'Base de referencia AIDE inicializada' "$MAIN" || fail "AIDE no informa el estado de su base"
 grep -Fq 'Verificación periódica de AIDE configurada' "$MAIN" || fail "AIDE no informa el estado del cron"
+grep -Fq 'frecuencia/comando objetivo: 0 5 * * * /usr/sbin/aide --check' "$MAIN" || fail "AIDE no audita el cron contra su objetivo exacto"
 if grep -Fq 'if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi' "$MAIN"; then
   fail "kernel/SYN flood siguen ocultando controles si el destino sysctl no es gestionable"
 fi
 grep -Fq 'sysctl_safe_log "N/A"' "$MAIN" || fail "los sysctl no aplicables no muestran un estado explícito"
 grep -Fq 'No se puede confirmar Storage=persistent' "$MAIN" || fail "journald no informa config ausente"
 grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" || fail "Bash no comprueba el include de /etc/bashrc en audit"
-grep -Fq 'no existe; --fix puede crearlo con historial ilimitado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
+grep -Fq 'no existe; no hay historial ilimitado configurado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
+grep -Fq 'HISTSIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTSIZE de dotfiles por separado"
+grep -Fq 'HISTFILESIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTFILESIZE de dotfiles por separado"
 
 # Every managed Bash hardening control must be surfaced separately in audit.
 grep -Fq 'bash_audit_profile_controls "$target"' "$MAIN" || fail "Bash no informa cada control del perfil en audit"
