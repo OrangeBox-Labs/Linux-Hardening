@@ -28,7 +28,7 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)-$"
 
 # ==============================================
 # FUNCION PARA MOSTRAR AYUDA
@@ -63,6 +63,40 @@ show_usage() {
   echo "  # Aplicar los cambios"
   echo "  ./cron-hardening.sh --fix"
   echo ""
+}
+
+make_backup() {
+  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modifica cron/at.${NC}" >&2
+    return 1
+  fi
+  local mode file backup
+  mode="$(stat -c '%a' "$BACKUP_DIR" 2>/dev/null || true)"
+  if [ "$mode" != 700 ]; then
+    echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup de cron/at.${NC}" >&2
+    return 1
+  fi
+  for file in /etc/crontab /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.d /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    if ! cp -a "$file" "$BACKUP_DIR/"; then
+      echo -e "${RED}[ERROR] No se pudo respaldar $file; no se modifica cron/at.${NC}" >&2
+      return 1
+    fi
+    backup="$BACKUP_DIR/$(basename "$file")"
+    if [ -f "$file" ] && [ ! -L "$file" ] && ! cmp -s "$file" "$backup"; then
+      echo -e "${RED}[ERROR] El backup de $file no coincide con el original; no se modifica cron/at.${NC}" >&2
+      return 1
+    fi
+    if [ -d "$file" ] && [ ! -L "$file" ] && ! diff -qr "$file" "$backup" >/dev/null 2>&1; then
+      echo -e "${RED}[ERROR] El backup del directorio $file no coincide; no se modifica cron/at.${NC}" >&2
+      return 1
+    fi
+    if [ -L "$file" ] && [ "$(readlink "$file" 2>/dev/null || true)" != "$(readlink "$backup" 2>/dev/null || true)" ]; then
+      echo -e "${RED}[ERROR] El backup del enlace $file no coincide; no se modifica cron/at.${NC}" >&2
+      return 1
+    fi
+  done
+  echo -e "${GREEN}[✓] Backup de cron/at verificado en: $BACKUP_DIR${NC}"
 }
 
 # ==============================================
@@ -385,13 +419,11 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 
-    # Backup
-    mkdir -p "$BACKUP_DIR"
-    for file in /etc/crontab /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.d /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny; do
-      [ -f "$file" ] && cp "$file" "$BACKUP_DIR/" 2>/dev/null
-      [ -d "$file" ] && cp -r "$file" "$BACKUP_DIR/" 2>/dev/null
-    done
-    echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}\n"
+    # Confirm the rollback copy before touching cron/at configuration.
+    if ! make_backup; then
+      echo -e "${RED}[ERROR] Backup de cron/at falló; se aborta antes de aplicar cambios.${NC}" >&2
+      exit 1
+    fi
 
     # Aplicar cambios
     apply_cron_enabled
