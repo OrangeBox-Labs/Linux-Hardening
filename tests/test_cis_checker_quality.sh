@@ -35,4 +35,10 @@ grep -Fq 'cis_grub_param_check audit_backlog_limit 8192 min' "$CIS" || fail "aud
 grep -Fq 'auditctl -s' "$CIS" || fail "audit backlog must check active kernel status"
 grep -Fq 'No se concede PASS sin ambas evidencias' "$CIS" || fail "audit backlog PASS must require active and persisted evidence"
 
+grep -Fq 'cis_mount_is_exact()' "$CIS" || fail "los checks de filesystem deben exigir el mountpoint exacto"
+grep -Fq 'cis_mount_option_enabled()' "$CIS" || fail "las opciones deben obtenerse del mountpoint exacto"
+if grep -Eq 'findmnt --kernel /(tmp|var|var/tmp|var/log|var/log/audit|home|dev/shm)' "$CIS"; then
+  fail "quedan checks de montaje que pueden heredar el estado del filesystem padre"
+fi
+
 pass "perfil CIS versionado y falsos PASS principales corregidos"
