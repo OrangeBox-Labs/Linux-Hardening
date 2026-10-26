@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.25
+SCRIPT_VERSION=1.4.26
 AUTO_FIX=false
 AUDIT_MODE=false
 AUTO_MODE=false
@@ -640,6 +640,180 @@ password_module() {
   fi
   getent group wheel >/dev/null 2>&1 && ok "wheel existe" || warn "wheel no existe"
 }
+confirm_baseline_parameter() {
+  local prompt="$1" answer=""
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    warn "No hay terminal interactiva; se omite el cambio: $prompt"
+    return 1
+  fi
+  printf '%s [s/N]: ' "$prompt" > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) info "Cambio rechazado; se conserva la configuración actual."; return 1 ;;
+  esac
+}
+
+package_global_gpgcheck() {
+  local file="$1"
+  [ -r "$file" ] || return 0
+  awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[ \t]*[#;]/ { next }
+    /^[ \t]*\[/ { section=tolower(trim($0)); next }
+    section == "[main]" {
+      line=$0; eq=index(line, "="); if (!eq) next
+      key=tolower(trim(substr(line,1,eq-1)))
+      if (key != "gpgcheck") next
+      value=trim(substr(line,eq+1)); sub(/[ \t]*[#;].*$/, "", value); gsub(/[ \t]/, "", value)
+      result=tolower(value)
+    }
+    END { if (result != "") print result }
+  ' "$file" 2>/dev/null
+}
+
+package_repo_gpgcheck_issues() {
+  local file
+  for file in /etc/yum.repos.d/*.repo /etc/dnf/repos.d/*.repo; do
+    [ -f "$file" ] || continue
+    awk -v path="$file" '
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      function flush() { if (section != "" && section != "main" && enabled != "0" && gpgcheck == "0") printf "%s|%s\n", path, section }
+      /^[ \t]*[#;]/ { next }
+      /^[ \t]*\[/ {
+        flush()
+        section=tolower(trim($0)); sub(/^\[/, "", section); sub(/\]$/, "", section)
+        enabled="1"; gpgcheck=""
+        next
+      }
+      {
+        line=$0; eq=index(line, "="); if (!eq || section == "") next
+        key=tolower(trim(substr(line,1,eq-1)))
+        value=trim(substr(line,eq+1)); sub(/[ \t]*[#;].*$/, "", value); gsub(/[ \t]/, "", value); value=tolower(value)
+        if (key == "enabled") enabled=value
+        else if (key == "gpgcheck") gpgcheck=value
+      }
+      END { flush() }
+    ' "$file" 2>/dev/null
+  done
+}
+
+package_set_global_gpgcheck() {
+  local file="$1" tmp mode
+  [ ! -L "$file" ] || { warn "$file es un enlace simbólico; no se modifica automáticamente."; return 1; }
+  backup_once "$file" || return 1
+  tmp="$(mktemp "$file.orangebox.XXXXXX")" || return 1
+  if [ -f "$file" ]; then
+    awk '
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      function ensure_value() { if (section == "[main]" && !written) { print "gpgcheck=1"; written=1 } }
+      /^[ \t]*\[/ {
+        ensure_value()
+        section=tolower(trim($0))
+        if (section == "[main]") { main_seen=1; written=0 }
+        print
+        next
+      }
+      section == "[main]" && $0 !~ /^[ \t]*[#;]/ {
+        line=$0; eq=index(line, "=")
+        if (eq) {
+          key=tolower(trim(substr(line,1,eq-1)))
+          if (key == "gpgcheck") {
+            if (!written) { print "gpgcheck=1"; written=1 }
+            next
+          }
+        }
+      }
+      { print }
+      END {
+        ensure_value()
+        if (!main_seen) { print "[main]"; print "gpgcheck=1" }
+      }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+    mode="$(stat -c "%a" "$file" 2>/dev/null || echo 644)"
+    chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
+    chown --reference="$file" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  else
+    printf '[main]\ngpgcheck=1\n' > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 644 "$tmp" && chown root:root "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  fi
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+  [ "$(package_global_gpgcheck "$file")" = "1" ]
+}
+
+package_set_repo_gpgcheck() {
+  local file="$1" target="$2" tmp mode
+  [ -f "$file" ] && [ ! -L "$file" ] || { warn "No se puede modificar $file de forma segura."; return 1; }
+  backup_once "$file" || return 1
+  tmp="$(mktemp "$file.orangebox.XXXXXX")" || return 1
+  awk -v target="$target" '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[ \t]*\[/ {
+      section=tolower(trim($0)); sub(/^\[/, "", section); sub(/\]$/, "", section)
+      print
+      next
+    }
+    section == target && $0 !~ /^[ \t]*[#;]/ {
+      line=$0; eq=index(line, "=")
+      if (eq) {
+        key=tolower(trim(substr(line,1,eq-1)))
+        value=trim(substr(line,eq+1)); sub(/[ \t]*[#;].*$/, "", value); gsub(/[ \t]/, "", value)
+        if (key == "gpgcheck" && tolower(value) == "0") {
+          if (!changed) { sub(/=[ \t]*[^#;]*/, "=1", line); print line; changed=1; next }
+          next
+        }
+      }
+    }
+    { print }
+    END { if (!changed) exit 1 }
+  ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se encontró una directiva gpgcheck=0 modificable en [$target] ($file)."; return 1; }
+  mode="$(stat -c "%a" "$file" 2>/dev/null || echo 644)"
+  chmod "$mode" "$tmp" || { rm -f "$tmp"; return 1; }
+  chown --reference="$file" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+package_repo_module() {
+  section "PACKAGE REPOSITORY SIGNATURE VERIFICATION"
+  local conf="" global="" issues="" file repo total_files=0
+  if command -v dnf >/dev/null 2>&1; then conf=/etc/dnf/dnf.conf; else conf=/etc/yum.conf; fi
+  global="$(package_global_gpgcheck "$conf")"
+  issues="$(package_repo_gpgcheck_issues)"
+  for file in /etc/yum.repos.d/*.repo /etc/dnf/repos.d/*.repo; do [ -f "$file" ] && total_files=$((total_files+1)); done
+
+  if [ "$global" = "1" ]; then
+    ok "gpgcheck=1 explícito en [main] de $conf"
+  else
+    warn "gpgcheck global en [main] de $conf no es 1 (actual: $global)."
+    info "Qué hace: verifica la firma GPG antes de instalar paquetes. Riesgo: actualizaciones pueden fallar si faltan firmas o la clave GPG legítima del proveedor."
+    if [ "$AUTO_FIX" = true ] && confirm_baseline_parameter "¿Activar gpgcheck=1 en $conf?"; then
+      if package_set_global_gpgcheck "$conf"; then FIXED=$((FIXED + 1)); ok "gpgcheck global=1 aplicado y verificado."; else warn "No se pudo validar gpgcheck global."; fi
+    fi
+  fi
+
+  if [ -n "$issues" ]; then
+    while IFS='|' read -r file repo; do
+      [ -n "$file" ] || continue
+      warn "Repositorio [$repo] en $file tiene gpgcheck=0 mientras está habilitado."
+      info "Qué hace: verifica la firma del paquete de ese repositorio. Riesgo: sus paquetes pueden dejar de instalarse si faltan firmas o su clave legítima."
+      if [ "$AUTO_FIX" = true ] && confirm_baseline_parameter "¿Activar gpgcheck=1 para [$repo] en $file?"; then
+        if package_set_repo_gpgcheck "$file" "$repo"; then FIXED=$((FIXED + 1)); ok "gpgcheck=1 aplicado a [$repo]."; else warn "No se pudo validar el cambio para [$repo]."; fi
+      fi
+    done <<< "$issues"
+  fi
+
+  global="$(package_global_gpgcheck "$conf")"
+  issues="$(package_repo_gpgcheck_issues)"
+  if [ "$total_files" -eq 0 ]; then
+    warn "No se encontraron archivos de repositorio; el inventario de excepciones es incompleto."
+  elif [ "$global" = "1" ] && [ -z "$issues" ]; then
+    ok "gpgcheck global y overrides de repositorios habilitados cumplen."
+  else
+    warn "La política GPG sigue pendiente; revise los mensajes anteriores."
+  fi
+}
+
 kernel_module(){
   section "KERNEL / SYSCTL"
   local forwarding rp_filter ipv6_forward
@@ -1532,14 +1706,14 @@ Uso:
   $0 --module <modulo> [--fix] [--auto] [--allow-risky]
 
 Baseline genérico incluido en all:
-  ssh banners bash-full password-full sudo-full kernel-full network-full
+  ssh banners bash-full password-full sudo-full kernel-full network-full package-repos
   auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full
   selinux-setup time-sync services fapolicyd aide
 
 Módulos adicionales:
   aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
   packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
-  network-full password-full gui-remove xinetd-remove rsyslog-full
+  network-full package-repos password-full gui-remove xinetd-remove rsyslog-full
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
 
 Evaluaciones independientes:
@@ -1841,6 +2015,7 @@ run_module() {
     ssh) ssh_module ;;
     sudo) sudo_module ;;
     password) password_module ;;
+    package-repos) package_repo_module ;;
     kernel) kernel_module ;;
     synflood) synflood_module ;;
     filesystem) filesystem_module ;;
@@ -1911,7 +2086,7 @@ main() {
     run_module banners
     local previous_fix="$AUTO_FIX"
     AUTO_FIX=false
-    for m in ssh bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
+    for m in ssh bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
     AUTO_FIX="$previous_fix"
@@ -1923,7 +2098,7 @@ main() {
     echo -e "$BLUE[INFO]$NC Algunos controles kernel/red/montajes piden una confirmación por parámetro. El baseline global no modifica NTP; solo lo audita."
     run_module banners
     run_internal_module_with_confirmation ssh
-    for m in bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup; do
+    for m in bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup; do
       run_module "$m"
     done
     # Explicitly preserve time-sync settings during a global baseline --fix.
@@ -1933,7 +2108,7 @@ main() {
     run_module aide
   elif [ "$MODULE" = "all" ]; then
     info "MODO AUDITORÍA: solo lectura"
-    for m in ssh banners bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
+    for m in ssh banners bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
     aide_audit_module
