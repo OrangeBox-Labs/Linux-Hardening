@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.7, detección compatible con CentOS 6, controles idempotentes y separación del aviso pre-login frente al MOTD de shell. |
+| `linux-hardening.sh` | Baseline 1.4.8, detección compatible con CentOS 6 y banner de acceso separado del panel de métricas de shell. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -157,11 +157,11 @@ El proyecto diferencia claramente:
 
 ### Antes del login
 
-`/etc/issue` y `/etc/issue.net` contienen el aviso legal.
+`/etc/issue` y `/etc/issue.net` contienen el logo OrangeBox (FIGlet generado al aplicar, o ASCII de fallback) y el aviso legal/de seguridad antes de la autenticación.
 
 ### Después del login
 
-`/etc/motd` queda vacío para evitar duplicados. El banner dinámico se imprime desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas, con la IP remota SSH, la IP del servidor, uptime normalizado, load average y kernel. FIGlet se utiliza si está disponible; en modo `--fix` se intenta instalar desde repositorios ya configurados, y si falla se usa un logo ASCII integrado.
+`/etc/motd` queda vacío para evitar duplicados. El perfil `/etc/profile.d/99-orangebox-motd.sh` muestra solo datos útiles al abrir una shell interactiva: IP interna del servidor, uptime normalizado, load average de 1/5/15 minutos y fecha/hora. No repite el logo ni el aviso de seguridad. FIGlet pertenece al banner previo al login: en modo `--fix` se intenta instalar desde repositorios ya configurados y, si falla, se genera el logo ASCII de fallback.
 
 El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
 
@@ -387,11 +387,11 @@ Copyright (c) 2025 Felipe Roman - OrangeBox Labs
 
 ## MOTD dinámico por sesión
 
-El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra el logo OrangeBox, IP interna del servidor, uptime calculado desde `/proc/uptime` y load average desde `/proc/loadavg`. No muestra la IP remota ni el aviso de seguridad, que pertenecen al aviso previo a la autenticación.
+El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra únicamente IP interna del servidor, uptime calculado desde `/proc/uptime`, load average desde `/proc/loadavg` y fecha/hora local. No muestra logo, IP remota ni aviso de seguridad.
 
-FIGlet es una mejora opcional. Durante `--fix`, si FIGlet o la fuente `small` no están disponibles, el instalador intenta instalar el paquete desde los repositorios ya configurados. No habilita EPEL ni otros repositorios automáticamente y no ejecuta una actualización completa del sistema. Si no puede instalarse, el perfil utiliza un logo ASCII embebido. El uptime y la carga se obtienen de `/proc`, por lo que no dependen de `uptime -p` en CentOS 6.
+FIGlet se usa para generar el logo estático del banner previo a la autenticación. Durante `--fix`, si FIGlet o la fuente `small` no están disponibles, se intenta instalar desde los repositorios ya configurados. No se habilitan repositorios ni se actualiza el sistema completo. Si no puede instalarse, `/etc/issue` y `/etc/issue.net` reciben un logo ASCII embebido. El uptime y la carga del panel de shell se obtienen de `/proc`, compatibles con CentOS 6.
 
 
 ### Limitación de la IP remota antes del login
 
-El `Banner` estándar de OpenSSH envía el contenido estático de `/etc/issue.net`; no expande una variable distinta por conexión. Por eso el aviso previo al login no puede imprimir la IP concreta del cliente usando solamente ese archivo. La IP de origen debe verificarse en los registros de autenticación SSH. Mostrarla interactivamente antes de autenticar requeriría una integración PAM específica, que no se aplica automáticamente porque modifica la cadena de autenticación.
+El `Banner` estándar de OpenSSH envía el contenido estático de `/etc/issue.net`; no expande una variable distinta por conexión. Por eso el aviso previo al login no puede imprimir la IP concreta del cliente usando solamente ese archivo. La IP de origen debe verificarse en los registros de autenticación SSH. El panel de shell muestra la IP interna del servidor a la que se conectó el cliente.
