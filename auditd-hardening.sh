@@ -461,7 +461,11 @@ EOF
     fi
   done
 
-  report_auditd_immutable_status "$auditctl"
+  # En modo auditoría este es el reporte autoritativo. En --fix,
+  # configure_audit_immutable() informa el estado antes del consentimiento.
+  if [ "$AUTO_FIX" != true ]; then
+    report_auditd_immutable_status "$auditctl"
+  fi
 }
 
 # ==============================================
@@ -520,12 +524,18 @@ configure_audit_immutable() {
   local effect="" state="" enabled_state=""
   auditctl="$(get_auditctl_path)"
   enabled_state="$(get_auditd_enabled_state "$auditctl" 2>/dev/null)" || enabled_state=""
+
+  # add_audit_rules() ya reportó el estado completo en modo auditoría.
+  # No volver a imprimir ni contabilizar la misma condición.
+  if [ "$AUTO_FIX" != true ]; then
+    return 0
+  fi
+
   if [ "$enabled_state" = "2" ]; then
     echo -e "${GREEN}[✓] auditd ya está en modo inmutable (enabled 2)${NC}"
     return 0
   fi
   echo -e "${YELLOW}[!] auditd no está en modo inmutable (enabled ${enabled_state:-desconocido})${NC}"
-  [ "$AUTO_FIX" = true ] || { WARNINGS=$((WARNINGS + 1)); return 0; }
 
   effect="La opción -e 2 bloquea cambios posteriores a las reglas de auditd hasta reiniciar el sistema. Refuerza la integridad, pero puede impedir corregir errores de reglas sin reinicio y complicar la recuperación remota. Solo se aplica después de las demás modificaciones y con una vía de consola/recuperación probada."
   if ! ob_confirm_hardening_change "activar inmutabilidad de reglas auditd (-e 2)" "auditctl enabled distinto de 2" "persistir -e 2 y cargar reglas" "$effect"; then

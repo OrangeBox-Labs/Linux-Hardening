@@ -61,7 +61,28 @@ assert_state() {
   if [ -n "$forbidden" ] && printf '%s\n' "$output" | grep -Fq -- "$forbidden"; then
     fail "enabled=$state mostró un estado incompatible: $forbidden"
   fi
-  pass "enabled=$state se interpreta correctamente"
+  pass "ruta legacy: enabled=$state se interpreta correctamente"
+
+  # Reproduce el orden moderno: add_audit_rules informa el estado y luego
+  # configure_audit_immutable ejecuta su preflight. La segunda función debe
+  # estar silenciosa en modo auditoría para no duplicar ni sumar la advertencia.
+  AUTO_FIX=false
+  WARNINGS=0
+  : > "$TMP_DIR/modern-output"
+  add_audit_rules > "$TMP_DIR/modern-output" 2>&1 ||
+    fail "add_audit_rules falló con enabled=$state"
+  warnings_after_report="$WARNINGS"
+  configure_audit_immutable >> "$TMP_DIR/modern-output" 2>&1 ||
+    fail "configure_audit_immutable falló con enabled=$state"
+  [ "$WARNINGS" -eq "$warnings_after_report" ] ||
+    fail "configure_audit_immutable sumó una advertencia duplicada con enabled=$state"
+  modern_output="$(cat "$TMP_DIR/modern-output")"
+  printf '%s\n' "$modern_output" | grep -Fq -- "$expected" ||
+    fail "la ruta moderna no mostró el estado esperado para enabled=$state: $expected"
+  if printf '%s\n' "$modern_output" | grep -Eq 'auditd no está en modo inmutable|auditd ya está en modo inmutable'; then
+    fail "la ruta moderna duplicó el estado auditd para enabled=$state"
+  fi
+  pass "ruta moderna: enabled=$state se reporta una vez y no duplica advertencias"
 }
 
 assert_state "1"   "auditd está habilitado (enabled 1), pero las reglas siguen siendo modificables"   "Configuración de auditd inmutable - OK"
