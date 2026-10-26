@@ -542,13 +542,47 @@ check_usb_storage() {
 # 1.2.2 - ASEGURAR GPGCHECK ACTIVADO GLOBALMENTE
 # ==============================================
 check_gpgcheck() {
-  if grep -q "^gpgcheck=1" /etc/dnf/dnf.conf 2>/dev/null; then
-    if ! grep -q "gpgcheck=0" /etc/yum.repos.d/*.repo 2>/dev/null; then
-      log_result "PASS" "1.2.2 - Asegurar gpgcheck activado globalmente" "" "" "$GREEN"
-      return 0
-    fi
+  local config="" global_value="" disabled_repos="" file
+
+  # Read the package manager's active global config; comments are not settings.
+  if command -v dnf >/dev/null 2>&1; then config="/etc/dnf/dnf.conf"; else config="/etc/yum.conf"; fi
+  if [ -r "$config" ]; then
+    global_value="$(awk -F= '
+      /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+      {
+        key=$1; gsub(/[[:space:]]/, "", key)
+        if (key=="gpgcheck") {
+          value=$2; sub(/[[:space:]]*#.*/, "", value); gsub(/[[:space:]]/, "", value)
+          current=value
+        }
+      }
+      END {print current}
+    ' "$config")"
   fi
-  log_result "FAIL" "1.2.2 - Asegurar gpgcheck activado globalmente" "gpgcheck no esta configurado correctamente" "Editar /etc/dnf/dnf.conf y establecer gpgcheck=1. En /etc/yum.repos.d/*.repo cambiar gpgcheck=0 a gpgcheck=1" "$RED"
+
+  # A repository-level gpgcheck=0 overrides the global setting.
+  for file in /etc/yum.repos.d/*.repo; do
+    [ -f "$file" ] || continue
+    if awk -F= '
+      /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+      {
+        key=$1; gsub(/[[:space:]]/, "", key)
+        if (key=="gpgcheck") {
+          value=$2; sub(/[[:space:]]*#.*/, "", value); gsub(/[[:space:]]/, "", value)
+          if (value=="0") found=1
+        }
+      }
+      END {exit(found ? 0 : 1)}
+    ' "$file"; then
+      disabled_repos="$disabled_repos $file"
+    fi
+  done
+
+  if [ "$global_value" = "1" ] && [ -z "$disabled_repos" ]; then
+    log_result "PASS" "1.2.2 - Asegurar gpgcheck activado globalmente" "gpgcheck=1 activo en $config y no hay overrides activos gpgcheck=0 en repositorios." "" "$GREEN"
+    return 0
+  fi
+  log_result "FAIL" "1.2.2 - Asegurar gpgcheck activado globalmente" "Configuración efectiva: $config gpgcheck=${global_value:-no definido}; repositorios con overrides gpgcheck=0:${disabled_repos:- ninguno detectado}." "Establecer gpgcheck=1 en $config y corregir directivas activas gpgcheck=0 en /etc/yum.repos.d/*.repo. Las líneas comentadas no cuentan como configuración efectiva." "$RED"
   return 1
 }
 
@@ -1103,11 +1137,18 @@ check_rpcbind() {
     log_result "PASS" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "" "" "$GREEN"
     return 0
   fi
-  if systemctl is-enabled rpcbind 2>/dev/null | grep -q "masked"; then
-    log_result "PASS" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "rpcbind esta masked" "" "$GREEN"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_result "WARN" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "rpcbind está instalado pero systemctl no está disponible; no se pueden verificar servicio y socket." "En plataformas legacy, revisar manualmente el servicio/socket rpcbind y su configuración de inicio." "$YELLOW"
+    return 2
+  fi
+  local service_state="" socket_state=""
+  service_state="$(systemctl is-enabled rpcbind.service 2>/dev/null || true)"
+  socket_state="$(systemctl is-enabled rpcbind.socket 2>/dev/null || true)"
+  if [ "$service_state" = "masked" ] && { [ "$socket_state" = "masked" ] || [ "$socket_state" = "not-found" ] || [ -z "$socket_state" ]; }; then
+    log_result "PASS" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "rpcbind.service=$service_state; rpcbind.socket=${socket_state:-no definido}." "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "rpcbind instalado y no masked" "Maskear servicios: systemctl mask rpcbind.service rpcbind.socket" "$RED"
+  log_result "FAIL" "2.2.17 - Asegurar rpcbind no instalado o servicios masked" "rpcbind.service=${service_state:-no definido}; rpcbind.socket=${socket_state:-no definido}; el servicio debe estar masked si el paquete se conserva." "Antes de enmascarar, confirmar si el servidor necesita NFS/RPC: hacerlo puede interrumpir montajes o aplicaciones dependientes. No se aplica automáticamente desde el verificador." "$RED"
   return 1
 }
 
@@ -1237,11 +1278,23 @@ check_auditd_enabled() {
 # 4.1.2.1 - ASEGURAR TAMAÑO DE LOGS DE AUDITORIA
 # ==============================================
 check_audit_log_size() {
-  if grep -q "^max_log_file" /etc/audit/auditd.conf 2>/dev/null; then
-    log_result "PASS" "4.1.2.1 - Asegurar tamaño de logs de auditoria configurado" "" "" "$GREEN"
+  local value=""
+  value="$(awk -F= '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+    {
+      key=$1; gsub(/[[:space:]]/, "", key)
+      if (key=="max_log_file") {
+        v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v
+      }
+    }
+    END {print current}
+  ' /etc/audit/auditd.conf 2>/dev/null)"
+
+  if [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -gt 0 ]; then
+    log_result "PASS" "4.1.2.1 - Asegurar tamaño de logs de auditoria configurado" "max_log_file=$value MB es una directiva activa, numérica y mayor que cero. El tamaño debe dimensionarse de acuerdo con la tasa de eventos y el espacio disponible." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "4.1.2.1 - Asegurar tamaño de logs de auditoria configurado" "max_log_file no configurado" "Editar /etc/audit/auditd.conf y establecer: max_log_file = 50 (o segun politica)" "$YELLOW"
+  log_result "WARN" "4.1.2.1 - Asegurar tamaño de logs de auditoria configurado" "max_log_file activo no existe o no es un entero positivo (valor detectado: ${value:-no definido}); una directiva comentada no cuenta." "Definir max_log_file como entero positivo según el volumen de eventos y la capacidad de /var/log/audit. Un valor pequeño aumenta la rotación; uno demasiado alto requiere más espacio." "$YELLOW"
   return 2
 }
 
@@ -1261,11 +1314,25 @@ check_audit_log_keep() {
 # 4.1.2.3 - ASEGURAR SISTEMA DESHABILITADO CUANDO LOGS LLENOS
 # ==============================================
 check_audit_full_action() {
-  if grep -q "^admin_space_left_action = halt" /etc/audit/auditd.conf 2>/dev/null; then
-    log_result "PASS" "4.1.2.3 - Asegurar sistema deshabilitado cuando logs llenos" "" "" "$GREEN"
+  local full_action="" error_action=""
+  full_action="$(awk -F= '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+    {key=$1; gsub(/[[:space:]]/, "", key); if(key=="disk_full_action"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}}
+    END{print current}
+  ' /etc/audit/auditd.conf 2>/dev/null)"
+  error_action="$(awk -F= '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
+    {key=$1; gsub(/[[:space:]]/, "", key); if(key=="disk_error_action"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}}
+    END{print current}
+  ' /etc/audit/auditd.conf 2>/dev/null)"
+
+  case "$full_action" in single|halt) ;; *) full_action="" ;; esac
+  case "$error_action" in single|halt) ;; *) error_action="" ;; esac
+  if [ -n "$full_action" ] && [ -n "$error_action" ]; then
+    log_result "PASS" "4.1.2.3 - Asegurar sistema deshabilitado cuando logs llenos" "disk_full_action=$full_action; disk_error_action=$error_action. Ambas acciones impiden continuar en modo normal cuando auditd no puede registrar eventos." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "4.1.2.3 - Asegurar sistema deshabilitado cuando logs llenos" "admin_space_left_action no es halt" "Editar /etc/audit/auditd.conf: admin_space_left_action = halt" "$YELLOW"
+  log_result "WARN" "4.1.2.3 - Asegurar sistema deshabilitado cuando logs llenos" "Acciones activas detectadas: disk_full_action=${full_action:-no válida/no definida}, disk_error_action=${error_action:-no válida/no definida}." "Definir disk_full_action y disk_error_action como single o halt según la política de recuperación. single interrumpe servicios multiusuario y requiere recuperación administrativa; halt detiene el host y puede provocar una interrupción completa." "$YELLOW"
   return 2
 }
 
@@ -1440,6 +1507,36 @@ check_audit_immutable() {
 # ==============================================
 # 5.1.1 - ASEGURAR SERVICIO CRON HABILITADO
 # ==============================================
+
+# ==============================================
+# CONTROL COMPLEMENTARIO - AVISO CUANDO EL ESPACIO DE AUDIT ES BAJO
+# ==============================================
+check_audit_low_space_warning() {
+  local space_left="" admin_space_left="" space_action="" admin_action="" mail_acct=""
+  local space_num="" admin_num="" good=true
+
+  space_left="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="space_left"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}} END{print current}' /etc/audit/auditd.conf 2>/dev/null)"
+  admin_space_left="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="admin_space_left"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}} END{print current}' /etc/audit/auditd.conf 2>/dev/null)"
+  space_action="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="space_left_action"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}} END{print current}' /etc/audit/auditd.conf 2>/dev/null)"
+  admin_action="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="admin_space_left_action"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}} END{print current}' /etc/audit/auditd.conf 2>/dev/null)"
+  mail_acct="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="action_mail_acct"){v=$2; sub(/[[:space:]]*#.*/, "", v); gsub(/[[:space:]]/, "", v); current=v}} END{print current}' /etc/audit/auditd.conf 2>/dev/null)"
+
+  case "$space_left" in *%) space_num="${space_left%%%}";; *) space_num="$space_left";; esac
+  case "$admin_space_left" in *%) admin_num="${admin_space_left%%%}";; *) admin_num="$admin_space_left";; esac
+  [[ "$space_num" =~ ^[0-9]+$ ]] && [ "$space_num" -gt 0 ] || good=false
+  [[ "$admin_num" =~ ^[0-9]+$ ]] && [ "$admin_num" -gt 0 ] || good=false
+  if [[ "$space_num" =~ ^[0-9]+$ ]] && [[ "$admin_num" =~ ^[0-9]+$ ]] && [ "$admin_num" -ge "$space_num" ]; then good=false; fi
+  case "$space_action" in email|exec) ;; *) good=false ;; esac
+  [ "$admin_action" = single ] || good=false
+  [ -n "$mail_acct" ] || good=false
+
+  if $good; then
+    log_result "PASS" "4.1.2.4 - Asegurar advertencia cuando el espacio de audit es bajo" "space_left=$space_left; space_left_action=$space_action; admin_space_left=$admin_space_left; admin_space_left_action=$admin_action; action_mail_acct=$mail_acct." "" "$GREEN"
+    return 0
+  fi
+  log_result "WARN" "4.1.2.4 - Asegurar advertencia cuando el espacio de audit es bajo" "Configuración incompleta/incoherente: space_left=${space_left:-no definido}, space_left_action=${space_action:-no definido}, admin_space_left=${admin_space_left:-no definido}, admin_space_left_action=${admin_action:-no definido}, action_mail_acct=${mail_acct:-no definido}." "Configurar umbrales con admin_space_left menor que space_left; usar email/exec para advertir y admin_space_left_action=single para permitir recuperación. single interrumpe servicios y requiere acceso administrativo/console." "$YELLOW"
+  return 2
+}
 check_cron_enabled() {
   if systemctl is-enabled crond &>/dev/null; then
     log_result "PASS" "5.1.1 - Asegurar servicio cron habilitado" "" "" "$GREEN"
@@ -2425,6 +2522,7 @@ main() {
   run_test "4.1.2.1 - Tamano logs audit" check_audit_log_size
   run_test "4.1.2.2 - Logs no eliminados" check_audit_log_keep
   run_test "4.1.2.3 - Accion logs llenos" check_audit_full_action
+  run_test "4.1.2.4 - Advertencia cuando espacio audit es bajo" check_audit_low_space_warning
   run_test "4.1.3.1 - audit sudoers" check_audit_sudoers
   run_test "4.1.3.2 - audit user emulation" check_audit_user_emulation
   run_test "4.1.3.4 - audit time changes" check_audit_time

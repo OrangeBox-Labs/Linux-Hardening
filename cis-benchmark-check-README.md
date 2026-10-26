@@ -35,6 +35,8 @@ Sabemos que existen herramientas como Lynis y OpenSCAP, y son excelentes. Pero e
 
 El script ejecuta un subconjunto de controles basado en CIS Benchmark, organizado en las siguientes secciones. La cantidad de pruebas implementadas no implica cobertura completa ni certificación de cumplimiento del benchmark oficial.
 
+Los controles de `gpgcheck`, `max_log_file`, las acciones de `auditd` y `rpcbind` verifican directivas activas y valores utilizables; una línea comentada o la mera presencia de un paquete no cuenta como evidencia suficiente. El control que actúa al llenarse el disco se separa del aviso cuando el espacio es bajo. Estas comprobaciones siguen siendo un subconjunto local, no una evaluación CIS completa por versión.
+
 | Sección | Descripción |
 |---------|-------------|
 | 1.1 | Configuración del sistema de archivos (particiones, opciones de montaje) |

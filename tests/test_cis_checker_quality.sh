@@ -19,6 +19,12 @@ grep -Fq 'fail_interval=900' "$CIS" || fail "lockout no verifica fail_interval/u
 grep -Fq 'crontab -u root -l' "$CIS" || fail "AIDE checker no acepta cron del instalador OrangeBox"
 grep -Fq 'netstat' "$CIS" || fail "el chequeo MTA no tiene fallback para sistemas sin ss"
 grep -Fq 'ENCRYPT_METHOD' "$CIS" || fail "hashing de contraseñas no se comprueba"
+grep -Fq 'gpgcheck=1 activo en' "$CIS" || fail "gpgcheck debe comprobar la configuración activa y los overrides de repositorio"
+grep -Fq 'disk_full_action' "$CIS" || fail "auditd debe comprobar las acciones al llenarse el disco"
+grep -Fq 'check_audit_low_space_warning' "$CIS" || fail "falta comprobar umbrales y acciones cuando el espacio audit es bajo"
+grep -Fq 'systemctl is-enabled rpcbind.socket' "$CIS" || fail "rpcbind debe comprobar servicio y socket"
+grep -Fq 'max_log_file activo no existe o no es un entero positivo' "$CIS" || fail "max_log_file debe validar un valor activo numérico";
+
 
 [ -f "$ROOT_DIR/cis-profile-versions.md" ] || fail "no existe el mapa versionado CIS"
 grep -Fq '2026-10-26' "$ROOT_DIR/cis-profile-versions.md" || fail "el mapa CIS no declara fecha de revisión"
