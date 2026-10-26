@@ -62,7 +62,7 @@ confirm_fs_change() {
 }
 
 backup_fs_file() {
-  local source="$1" backup_dir="/var/backups/orangebox-filesystem-hardening/$(date +%Y%m%d-%H%M%S)-$$"
+  local source="$1" backup_dir="/var/backups/orangebox-filesystem-hardening/$(date +%Y%m%d-%H%M%S)-$RANDOM"
   [ -e "$source" ] || return 0
   [ ! -L "$source" ] || { echo "[ERROR] $source es un enlace simbólico; no se modifica."; return 1; }
   mkdir -p "$backup_dir" && chmod 700 "$backup_dir" && cp -p "$source" "$backup_dir/" || {

@@ -656,6 +656,10 @@ kernel_module(){
   set_sysctl kernel.dmesg_restrict 1
   set_kptr_restrict_policy
   set_sysctl kernel.randomize_va_space 2
+  set_sysctl kernel.yama.ptrace_scope 1
+  set_sysctl vm.mmap_min_addr 65536
+  set_sysctl kernel.unprivileged_bpf_disabled 1
+  set_sysctl user.max_user_namespaces 0
   set_sysctl fs.protected_fifos 2
   set_sysctl fs.protected_regular 2
   set_sysctl fs.protected_hardlinks 1
@@ -1753,7 +1757,7 @@ run_companion_module() {
     ssh-cis) script="ssh-hardening.sh"; risky=true ;;
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
     sudo-full) script="sudo-hardening.sh"; risky=true ;;
-    filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
+    filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="--fix" ;;
     *) die "Módulo desconocido: $name" ;;
   esac
 

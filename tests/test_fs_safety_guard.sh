@@ -12,7 +12,8 @@ grep -Fq 'confirm_fs_change()' "$FS" || fail "faltan confirmaciones por parámet
 grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$FS" || fail "cambio no se omite en modo no interactivo"
 grep -Fq 'noexec) effect=' "$FS" || fail "noexec no explica que puede romper ejecución de aplicaciones"
 grep -Fq 'hidepid=2' "$FS" || fail "hidepid no se verifica"
-grep -Fq 'puede romper o limitar agentes de monitoreo' "$FS" || fail "hidepid no explica impacto en monitoreo"
+grep -Fiq 'puede romper o limitar agentes de monitoreo' "$FS" || fail "hidepid no explica impacto en monitoreo"
 if grep -Eq 'rmmod[[:space:]]+"?\$module' "$FS"; then fail "FS-hardening no debe descargar módulos de filesystem en caliente"; fi
 grep -Fq 'backup_fs_file /etc/fstab' "$FS" || fail "fstab no se respalda antes de cambios de montaje"
+grep -Fq 'fix_arg="--fix"' "$CORE" || fail "el orquestador no pasa --fix al módulo filesystem-full"
 pass "filesystem: modo auditoría por defecto, confirmación por parámetro, backups y sin rmmod en caliente"

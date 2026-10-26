@@ -17,6 +17,9 @@ grep -Fq 'set_sysctl fs.suid_dumpable 0' "$CORE" || fail "baseline no fuerza fs.
 grep -Fq 'set_sysctl kernel.dmesg_restrict 1' "$CORE" || fail "baseline no fuerza kernel.dmesg_restrict=1 como objetivo"
 grep -Fq 'check_sysctl_param "fs.suid_dumpable" "0"' "$KERNEL" || fail "kernel-hardening no contempla fs.suid_dumpable=0"
 grep -Fq 'check_sysctl_param "kernel.dmesg_restrict" "1"' "$KERNEL" || fail "kernel-hardening no contempla kernel.dmesg_restrict=1"
+for key in 'kernel.yama.ptrace_scope' 'vm.mmap_min_addr' 'kernel.unprivileged_bpf_disabled' 'user.max_user_namespaces'; do
+  grep -Fq "set_sysctl $key " "$CORE" || fail "el baseline principal no evalúa $key"
+done
 grep -Fq 'set_kptr_restrict_policy' "$CORE" || fail "baseline no utiliza la política condicional de kptr_restrict"
 grep -Fq 'check_kptr_restrict_policy' "$KERNEL" || fail "kernel-hardening no utiliza la política condicional de kptr_restrict"
 if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr_restrict" "2"' "$CORE" "$KERNEL"; then
