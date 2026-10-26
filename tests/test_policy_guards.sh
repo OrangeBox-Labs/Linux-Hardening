@@ -63,6 +63,12 @@ for script in "$SELINUX" "$POST_INSTALL"; do
 done
 pass "SELinux solo se audita; no hay acciones de cambio en los módulos SELinux"
 
+# Kernel LPE mitigation must not overstate the user-namespace control or infer patch state from changelog text.
+LPE="$ROOT_DIR/kernel-lpe-2026-mitigation.sh"
+grep -Fq 'no mitiga DiagSpill (CVE-2026-74469)' "$LPE" || fail "user namespaces se presenta como mitigación de las cuatro CVE"
+grep -Fq 'NO prueba que falte el parche' "$LPE" || fail "la ausencia de una CVE en changelog se presenta como prueba de falta de parche"
+pass "el módulo LPE distingue la mitigación por user namespaces y el estado no concluyente del changelog"
+
 # fapolicyd is never installed or activated by the baseline; Wazuh is reported when found.
 grep -Fq 'Wazuh detectado:' "$CORE" || fail "no se informa cuando Wazuh está instalado"
 grep -Fq 'no instalará ni activará fapolicyd' "$CORE" || fail "falta la política de no instalación/activación de fapolicyd"

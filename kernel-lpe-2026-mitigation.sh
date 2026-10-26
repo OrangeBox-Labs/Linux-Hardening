@@ -15,8 +15,8 @@ set -euo pipefail
 #   incorpora los cuatro fixes.
 #
 # Mitigaciones:
-#   - user.max_user_namespaces=0 bloquea la via local normal de las tres
-#     primeras vulnerabilidades.
+#   - user.max_user_namespaces=0 reduce la via local de user namespaces para las tres
+#     primeras vulnerabilidades; NO mitiga por si solo CVE-2026-74469 (DiagSpill).
 #   - ah6, pppoe, sctp y sctp_diag se bloquean persistentemente.
 #   - tun/tap queda fuera del modo conservador porque puede ser necesario para
 #     VPN, OpenVPN/WireGuard, contenedores y networking de usuariospace.
@@ -287,7 +287,7 @@ check_vendor_fix_status() {
       ok "$cve aparece en el changelog del kernel en ejecucion."
       found=$((found + 1))
     else
-      warn "$cve no aparece en el changelog del kernel en ejecucion."
+      warn "$cve no aparece en el changelog del kernel en ejecucion; el estado del parche no queda confirmado por esta comprobacion."
     fi
   done
 
@@ -297,6 +297,7 @@ check_vendor_fix_status() {
     return 0
   fi
 
+  warn "La ausencia de un ID CVE en el changelog NO prueba que falte el parche; confirme el NEVRA y el advisory del proveedor."
   return 1
 }
 
@@ -308,13 +309,15 @@ check_userns() {
   local v
   v="$(current_userns)"
 
+  info "user.max_user_namespaces solo afecta la via de user namespaces para DirtyAH6, TUNderflow y PPPoEject; no mitiga DiagSpill (CVE-2026-74469), que no requiere user namespaces."
+
   if [[ -z "$v" ]]; then
-    # CentOS 6 usa kernel 2.6.x y no dispone de user namespaces modernos.
-    # No forzamos un sysctl que el kernel no conoce.
+    # No forzamos un sysctl que el kernel no conoce. La ausencia de user namespaces
+    # no se presenta como mitigacion completa del quartet.
     if [[ "$(uname -r)" == 2.6.* ]]; then
-      ok "Este kernel 2.6.x no expone user.max_user_namespaces; el mecanismo de user namespaces requerido por estas vias de explotacion no esta disponible."
+      warn "Este kernel 2.6.x no expone user.max_user_namespaces; esto reduce la via que depende de user namespaces, pero NO establece que las cuatro CVE estén mitigadas. Revise especialmente SCTP/DiagSpill y el parche del proveedor."
     else
-      warn "user.max_user_namespaces no esta disponible en este kernel; no se puede verificar ni aplicar esta mitigacion mediante sysctl."
+      warn "user.max_user_namespaces no esta disponible en este kernel; no se puede verificar esta mitigacion y no se considera una mitigacion completa del quartet."
     fi
     return 0
   fi
