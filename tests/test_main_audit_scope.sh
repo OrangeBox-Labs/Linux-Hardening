@@ -90,4 +90,9 @@ done
 grep -Fq 'net.ipv6.conf.default.accept_ra: este kernel no expone' "$MAIN" || fail "falta estado IPv6 N/A granular"
 grep -Fq 'journald no aplica a CentOS/RHEL 6' "$MAIN" || fail "falta estado N/A de journald en EL6"
 
+grep -Fq 'ssh_report_unverifiable_settings "$reason"' "$MAIN" || fail "SSH no muestra todos los parámetros cuando no puede verificar sshd"
+grep -Fq 'bash_audit_system_bashrc_include' "$MAIN" || fail "Bash puede ocultar el include de /etc/bashrc si falla mktemp"
+grep -Fq 'banners_audit_unverifiable()' "$MAIN" || fail "los controles banner/MOTD pueden desaparecer si falla la generación temporal"
+grep -Fq 'SSH $directive: no se pudo verificar' "$MAIN" || fail "falta el estado no verificable por directiva SSH"
+
 pass "auditoría presenta estados OK y pendientes, con resumen y firewall independiente"

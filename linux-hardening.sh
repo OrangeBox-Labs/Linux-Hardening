@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.21 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.22 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.21
+SCRIPT_VERSION=1.4.22
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -202,43 +202,52 @@ SSH_PENDING_DIRECTIVES=()
 
 # Return codes: 0 = compliant; 1 = settings differ; 2 = cannot verify safely.
 # Optional report mode prints pending values before the confirmation prompt or during audit.
-ssh_state_status() {
-  local report="${1:-quiet}" output setting key desired directive actual status=0 rest
+ssh_report_unverifiable_settings() {
+  local reason="$1" setting rest desired directive
   SSH_PENDING_DIRECTIVES=()
+  for setting in "${SSH_EXPECTED_SETTINGS[@]}"; do
+    rest="${setting#*|}"
+    desired="${rest%%|*}"
+    directive="${rest#*|}"
+    SSH_PENDING_DIRECTIVES+=("$directive $desired")
+    warn "SSH $directive: no se pudo verificar; objetivo='$desired'; motivo: $reason."
+  done
+}
 
-  if [ ! -f /etc/ssh/sshd_config ] || ! command -v sshd >/dev/null 2>&1; then
+ssh_state_status() {
+  local report="${1:-quiet}" output setting key desired directive actual status=0 rest reason
+  SSH_PENDING_DIRECTIVES=()
+  if [ ! -f /etc/ssh/sshd_config ]; then
+    reason="sshd_config no existe"
+  elif ! command -v sshd >/dev/null 2>&1; then
+    reason="el binario sshd no está disponible"
+  else
+    reason=""
+  fi
+  if [ -n "$reason" ]; then
     case "$report" in
-      preflight) info "No se puede verificar SSH (sshd_config o sshd ausente); se omite aplicación automática." ;;
-      audit) warn "No se puede verificar SSH (sshd_config o sshd ausente)." ;;
-      apply) info "No se puede verificar SSH (sshd_config o sshd ausente); no se modificará." ;;
+      audit) ssh_report_unverifiable_settings "$reason" ;;
+      preflight) info "No se puede verificar SSH ($reason); se omite aplicación automática." ;;
+      apply) info "No se puede verificar SSH ($reason); no se modificará." ;;
     esac
     return 2
   fi
-
-  output="$(sshd -T 2>/dev/null)" || {
+  output="$(sshd -T 2>/dev/null)" || output=""
+  if [ -z "$output" ]; then
+    reason="sshd -T no pudo interpretar/devolver la configuración"
     case "$report" in
-      preflight) info "sshd -T no pudo interpretar la configuración; no se aplicará SSH automáticamente." ;;
-      audit) warn "sshd -T no pudo interpretar la configuración; no se puede verificar SSH." ;;
-      apply) info "sshd -T no pudo interpretar la configuración; no se modificará SSH." ;;
+      audit) ssh_report_unverifiable_settings "$reason" ;;
+      preflight) info "$reason; no se aplicará SSH automáticamente." ;;
+      apply) info "$reason; no se modificará SSH." ;;
     esac
     return 2
-  }
-  [ -n "$output" ] || {
-    case "$report" in
-      preflight) info "sshd -T no devolvió valores; no se aplicará SSH automáticamente." ;;
-      audit) warn "sshd -T no devolvió valores; no se puede verificar SSH." ;;
-      apply) info "sshd -T no devolvió valores; no se modificará SSH." ;;
-    esac
-    return 2
-  }
-
+  fi
   for setting in "${SSH_EXPECTED_SETTINGS[@]}"; do
     key="${setting%%|*}"
     rest="${setting#*|}"
     desired="${rest%%|*}"
     directive="${rest#*|}"
     actual="$(awk -v k="$key" '$1==k{$1="";sub(/^ /,"");print;exit}' <<< "$output")"
-
     if [ -z "$actual" ] || [ "$actual" != "$desired" ]; then
       status=1
       SSH_PENDING_DIRECTIVES+=("$directive $desired")
@@ -253,12 +262,6 @@ ssh_state_status() {
   done
   return "$status"
 }
-
-# OpenSSH reads the first value for most global directives. Prefer a drop-in
-# only when sshd_config includes it before any Match block. Otherwise use a
-# marked block at the top of sshd_config, with backup, validation and rollback.
-SSH_MANAGED_BEGIN="# BEGIN ORANGEBOX SSH HARDENING MANAGED BLOCK"
-SSH_MANAGED_END="# END ORANGEBOX SSH HARDENING MANAGED BLOCK"
 
 ssh_dropin_include_enabled() {
   [ "${OS_VERSION:-0}" -ge 8 ] || return 1
@@ -458,8 +461,16 @@ ssh_apply_pending_settings() {
 ssh_module() {
   local perms policy ssh_status reason
   section "SSH"
-  [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }
-  command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
+  if [ ! -f /etc/ssh/sshd_config ] || ! command -v sshd >/dev/null 2>&1; then
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+      ssh_state_status audit
+    elif [ ! -f /etc/ssh/sshd_config ]; then
+      warn "sshd_config no existe"
+    else
+      warn "sshd no disponible"
+    fi
+    return
+  fi
   if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
     perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true)
     [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
@@ -869,14 +880,32 @@ configure_ssh_banner() {
   fi
 }
 
+banners_audit_unverifiable() {
+  local reason="$1" target
+  for target in /etc/motd /etc/profile.d/99-orangebox-motd.sh /etc/issue /etc/issue.net; do
+    warn "$target: no se pudo verificar contenido/permisos porque $reason"
+  done
+}
+
 banners_module() {
   section "BANNERS / MOTD"
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then configure_ssh_banner; fi
   local login_tmp motd_tmp session_motd_tmp target content_tmp mode owner group
 
-  login_tmp="$(mktemp)" || { warn "No se pudo crear el banner previo al login"; return; }
-  motd_tmp="$(mktemp)" || { rm -f "$login_tmp"; warn "No se pudo crear el MOTD"; return; }
-  session_motd_tmp="$(mktemp)" || { rm -f "$login_tmp" "$motd_tmp"; warn "No se pudo crear el MOTD dinámico"; return; }
+  if ! login_tmp="$(mktemp)"; then
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then banners_audit_unverifiable "falló mktemp"; else warn "No se pudo crear el banner previo al login"; fi
+    return
+  fi
+  if ! motd_tmp="$(mktemp)"; then
+    rm -f "$login_tmp"
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then banners_audit_unverifiable "falló mktemp"; else warn "No se pudo crear el MOTD"; fi
+    return
+  fi
+  if ! session_motd_tmp="$(mktemp)"; then
+    rm -f "$login_tmp" "$motd_tmp"
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then banners_audit_unverifiable "falló mktemp"; else warn "No se pudo crear el MOTD dinámico"; fi
+    return
+  fi
 
   # FIGlet sólo se necesita en el banner previo a la autenticación.
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
@@ -886,7 +915,7 @@ banners_module() {
   fi
   if ! orangebox_motd_write_login_banner "$login_tmp"; then
     rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
-    warn "No se pudo generar el banner previo al login"
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then banners_audit_unverifiable "no se pudo generar el banner de login"; else warn "No se pudo generar el banner previo al login"; fi
     return
   fi
 
@@ -895,7 +924,7 @@ banners_module() {
   : > "$motd_tmp"
   if ! orangebox_motd_write_profile "$session_motd_tmp"; then
     rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
-    warn "No se pudo generar el MOTD dinámico"
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then banners_audit_unverifiable "no se pudo generar el MOTD dinámico"; else warn "No se pudo generar el MOTD dinámico"; fi
     return
   fi
 
@@ -983,7 +1012,8 @@ aide_audit_module() {
   local root_crontab
   if ! command -v rpm >/dev/null 2>&1; then
     warn "rpm no está disponible; no se puede comprobar si AIDE está instalado"
-    na "La base de AIDE y su tarea periódica no se verifican hasta poder consultar el paquete."
+    na "Base de referencia AIDE: no verificable porque rpm no está disponible."
+    na "Verificación periódica AIDE: no verificable porque rpm no está disponible."
     return
   fi
   if ! rpm -q aide >/dev/null 2>&1; then
@@ -1178,6 +1208,18 @@ bash_audit_profile_controls() {
   fi
 }
 
+bash_audit_system_bashrc_include() {
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  else
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  fi
+}
+
 bash_module() {
   section "BASH / HISTORIAL / PROMPT"
   local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
@@ -1192,6 +1234,15 @@ bash_module() {
     else
       warn "/etc/profile.d no existe; se requiere crearlo para instalar el perfil Bash OrangeBox"
     fi
+  fi
+
+  # The compact baseline audit must not depend on temporary-file creation.
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+    normalize_history_dotfile /root/.bashrc
+    normalize_history_dotfile /etc/skel/.bashrc
+    bash_audit_system_bashrc_include
+    return
   fi
 
   # La configuración externa ajena al baseline se revisa en el modo detallado.
