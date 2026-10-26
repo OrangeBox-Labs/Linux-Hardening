@@ -145,6 +145,29 @@ is_system_account() {
   return 1
 }
 
+// Filesystem paths must be exact mountpoints for partition and mount-option checks.
+// findmnt --target /tmp can return the parent filesystem and produce false PASSes;
+// inspect the complete active mount table and match TARGET exactly instead.
+cis_mount_is_exact() {
+  local mountpoint="$1"
+  command -v findmnt >/dev/null 2>&1 || return 2
+  findmnt -rn -o TARGET 2>/dev/null |
+    awk -v expected="$mountpoint" '$0 == expected { found=1 } END { exit(found ? 0 : 1) }'
+}
+
+cis_mount_option_enabled() {
+  local mountpoint="$1" option="$2" options=""
+  cis_mount_is_exact "$mountpoint" || return 1
+  options="$(findmnt -rn -o TARGET,OPTIONS 2>/dev/null |
+    awk -v expected="$mountpoint" '$1 == expected { print $2; exit }')"
+  [ -n "$options" ] || return 1
+  case ",$options," in
+    *,"$option",*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+
 # ==============================================
 # 1.1.1.1 - DESHABILITAR SQUASHFS (CORREGIDO)
 # ==============================================
@@ -216,7 +239,7 @@ check_udf() {
 # 1.1.2.1 - ASEGURAR PARTICION SEPARADA PARA /tmp
 # ==============================================
 check_tmp_partition() {
-  if findmnt --kernel /tmp &>/dev/null; then
+  if cis_mount_is_exact "/tmp"; then
     log_result "PASS" "1.1.2.1 - Asegurar que /tmp es una particion separada" "" "" "$GREEN"
     return 0
   fi
@@ -228,7 +251,7 @@ check_tmp_partition() {
 # 1.1.2.2 - OPCION NODEV EN /tmp
 # ==============================================
 check_tmp_nodev() {
-  if findmnt --kernel /tmp | grep -q "nodev"; then
+  if cis_mount_option_enabled "/tmp" "nodev"; then
     log_result "PASS" "1.1.2.2 - Asegurar opcion nodev en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -240,7 +263,7 @@ check_tmp_nodev() {
 # 1.1.2.3 - OPCION NOEXEC EN /tmp
 # ==============================================
 check_tmp_noexec() {
-  if findmnt --kernel /tmp | grep -q "noexec"; then
+  if cis_mount_option_enabled "/tmp" "noexec"; then
     log_result "PASS" "1.1.2.3 - Asegurar opcion noexec en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -252,7 +275,7 @@ check_tmp_noexec() {
 # 1.1.2.4 - OPCION NOSUID EN /tmp
 # ==============================================
 check_tmp_nosuid() {
-  if findmnt --kernel /tmp | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/tmp" "nosuid"; then
     log_result "PASS" "1.1.2.4 - Asegurar opcion nosuid en particion /tmp" "" "" "$GREEN"
     return 0
   fi
@@ -264,7 +287,7 @@ check_tmp_nosuid() {
 # 1.1.3.1 - ASEGURAR PARTICION SEPARADA PARA /var
 # ==============================================
 check_var_partition() {
-  if findmnt --kernel /var &>/dev/null; then
+  if cis_mount_is_exact "/var"; then
     log_result "PASS" "1.1.3.1 - Asegurar particion separada para /var" "" "" "$GREEN"
     return 0
   fi
@@ -276,7 +299,7 @@ check_var_partition() {
 # 1.1.3.2 - OPCION NODEV EN /var
 # ==============================================
 check_var_nodev() {
-  if findmnt --kernel /var | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var" "nodev"; then
     log_result "PASS" "1.1.3.2 - Asegurar opcion nodev en particion /var" "" "" "$GREEN"
     return 0
   fi
@@ -288,7 +311,7 @@ check_var_nodev() {
 # 1.1.3.3 - OPCION NOSUID EN /var
 # ==============================================
 check_var_nosuid() {
-  if findmnt --kernel /var | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var" "nosuid"; then
     log_result "PASS" "1.1.3.3 - Asegurar opcion nosuid en particion /var" "" "" "$GREEN"
     return 0
   fi
@@ -300,7 +323,7 @@ check_var_nosuid() {
 # 1.1.4.1 - ASEGURAR PARTICION SEPARADA PARA /var/tmp
 # ==============================================
 check_var_tmp_partition() {
-  if findmnt --kernel /var/tmp &>/dev/null; then
+  if cis_mount_is_exact "/var/tmp"; then
     log_result "PASS" "1.1.4.1 - Asegurar particion separada para /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -312,7 +335,7 @@ check_var_tmp_partition() {
 # 1.1.4.2 - OPCION NOEXEC EN /var/tmp
 # ==============================================
 check_var_tmp_noexec() {
-  if findmnt --kernel /var/tmp | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/tmp" "noexec"; then
     log_result "PASS" "1.1.4.2 - Asegurar opcion noexec en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -324,7 +347,7 @@ check_var_tmp_noexec() {
 # 1.1.4.3 - OPCION NOSUID EN /var/tmp
 # ==============================================
 check_var_tmp_nosuid() {
-  if findmnt --kernel /var/tmp | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/tmp" "nosuid"; then
     log_result "PASS" "1.1.4.3 - Asegurar opcion nosuid en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -336,7 +359,7 @@ check_var_tmp_nosuid() {
 # 1.1.4.4 - OPCION NODEV EN /var/tmp
 # ==============================================
 check_var_tmp_nodev() {
-  if findmnt --kernel /var/tmp | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/tmp" "nodev"; then
     log_result "PASS" "1.1.4.4 - Asegurar opcion nodev en particion /var/tmp" "" "" "$GREEN"
     return 0
   fi
@@ -348,7 +371,7 @@ check_var_tmp_nodev() {
 # 1.1.5.1 - ASEGURAR PARTICION SEPARADA PARA /var/log
 # ==============================================
 check_var_log_partition() {
-  if findmnt --kernel /var/log &>/dev/null; then
+  if cis_mount_is_exact "/var/log"; then
     log_result "PASS" "1.1.5.1 - Asegurar particion separada para /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -360,7 +383,7 @@ check_var_log_partition() {
 # 1.1.5.2 - OPCION NODEV EN /var/log
 # ==============================================
 check_var_log_nodev() {
-  if findmnt --kernel /var/log | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/log" "nodev"; then
     log_result "PASS" "1.1.5.2 - Asegurar opcion nodev en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -372,7 +395,7 @@ check_var_log_nodev() {
 # 1.1.5.3 - OPCION NOEXEC EN /var/log
 # ==============================================
 check_var_log_noexec() {
-  if findmnt --kernel /var/log | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/log" "noexec"; then
     log_result "PASS" "1.1.5.3 - Asegurar opcion noexec en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -384,7 +407,7 @@ check_var_log_noexec() {
 # 1.1.5.4 - OPCION NOSUID EN /var/log
 # ==============================================
 check_var_log_nosuid() {
-  if findmnt --kernel /var/log | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/log" "nosuid"; then
     log_result "PASS" "1.1.5.4 - Asegurar opcion nosuid en particion /var/log" "" "" "$GREEN"
     return 0
   fi
@@ -396,7 +419,7 @@ check_var_log_nosuid() {
 # 1.1.6.1 - ASEGURAR PARTICION SEPARADA PARA /var/log/audit
 # ==============================================
 check_var_log_audit_partition() {
-  if findmnt --kernel /var/log/audit &>/dev/null; then
+  if cis_mount_is_exact "/var/log/audit"; then
     log_result "PASS" "1.1.6.1 - Asegurar particion separada para /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -408,7 +431,7 @@ check_var_log_audit_partition() {
 # 1.1.6.2 - OPCION NOEXEC EN /var/log/audit
 # ==============================================
 check_var_log_audit_noexec() {
-  if findmnt --kernel /var/log/audit | grep -q "noexec"; then
+  if cis_mount_option_enabled "/var/log/audit" "noexec"; then
     log_result "PASS" "1.1.6.2 - Asegurar opcion noexec en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -420,7 +443,7 @@ check_var_log_audit_noexec() {
 # 1.1.6.3 - OPCION NODEV EN /var/log/audit
 # ==============================================
 check_var_log_audit_nodev() {
-  if findmnt --kernel /var/log/audit | grep -q "nodev"; then
+  if cis_mount_option_enabled "/var/log/audit" "nodev"; then
     log_result "PASS" "1.1.6.3 - Asegurar opcion nodev en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -432,7 +455,7 @@ check_var_log_audit_nodev() {
 # 1.1.6.4 - OPCION NOSUID EN /var/log/audit
 # ==============================================
 check_var_log_audit_nosuid() {
-  if findmnt --kernel /var/log/audit | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/var/log/audit" "nosuid"; then
     log_result "PASS" "1.1.6.4 - Asegurar opcion nosuid en particion /var/log/audit" "" "" "$GREEN"
     return 0
   fi
@@ -444,7 +467,7 @@ check_var_log_audit_nosuid() {
 # 1.1.7.1 - ASEGURAR PARTICION SEPARADA PARA /home
 # ==============================================
 check_home_partition() {
-  if findmnt --kernel /home &>/dev/null; then
+  if cis_mount_is_exact "/home"; then
     log_result "PASS" "1.1.7.1 - Asegurar particion separada para /home" "" "" "$GREEN"
     return 0
   fi
@@ -456,7 +479,7 @@ check_home_partition() {
 # 1.1.7.2 - OPCION NODEV EN /home
 # ==============================================
 check_home_nodev() {
-  if findmnt --kernel /home | grep -q "nodev"; then
+  if cis_mount_option_enabled "/home" "nodev"; then
     log_result "PASS" "1.1.7.2 - Asegurar opcion nodev en particion /home" "" "" "$GREEN"
     return 0
   fi
@@ -468,7 +491,7 @@ check_home_nodev() {
 # 1.1.7.3 - OPCION NOSUID EN /home
 # ==============================================
 check_home_nosuid() {
-  if findmnt --kernel /home | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/home" "nosuid"; then
     log_result "PASS" "1.1.7.3 - Asegurar opcion nosuid en particion /home" "" "" "$GREEN"
     return 0
   fi
@@ -480,7 +503,7 @@ check_home_nosuid() {
 # 1.1.8.1 - ASEGURAR PARTICION SEPARADA PARA /dev/shm
 # ==============================================
 check_dev_shm_partition() {
-  if findmnt --kernel /dev/shm &>/dev/null; then
+  if cis_mount_is_exact "/dev/shm"; then
     log_result "PASS" "1.1.8.1 - Asegurar /dev/shm como particion separada" "" "" "$GREEN"
     return 0
   fi
@@ -492,7 +515,7 @@ check_dev_shm_partition() {
 # 1.1.8.2 - OPCION NODEV EN /dev/shm
 # ==============================================
 check_dev_shm_nodev() {
-  if findmnt --kernel /dev/shm | grep -q "nodev"; then
+  if cis_mount_option_enabled "/dev/shm" "nodev"; then
     log_result "PASS" "1.1.8.2 - Asegurar opcion nodev en /dev/shm" "" "" "$GREEN"
     return 0
   fi
@@ -504,7 +527,7 @@ check_dev_shm_nodev() {
 # 1.1.8.3 - OPCION NOEXEC EN /dev/shm
 # ==============================================
 check_dev_shm_noexec() {
-  if findmnt --kernel /dev/shm | grep -q "noexec"; then
+  if cis_mount_option_enabled "/dev/shm" "noexec"; then
     log_result "PASS" "1.1.8.3 - Asegurar opcion noexec en /dev/shm" "" "" "$GREEN"
     return 0
   fi
@@ -516,7 +539,7 @@ check_dev_shm_noexec() {
 # 1.1.8.4 - OPCION NOSUID EN /dev/shm
 # ==============================================
 check_dev_shm_nosuid() {
-  if findmnt --kernel /dev/shm | grep -q "nosuid"; then
+  if cis_mount_option_enabled "/dev/shm" "nosuid"; then
     log_result "PASS" "1.1.8.4 - Asegurar opcion nosuid en /dev/shm" "" "" "$GREEN"
     return 0
   fi
