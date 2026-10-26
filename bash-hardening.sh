@@ -110,7 +110,7 @@ make_backup() {
 }
 
 # ==============================================
-# CONFIGURAR PROFILE.D CON BANNER Y PROMPT
+# CONFIGURAR PROFILE.D DE BASH Y PROMPT
 # ==============================================
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando banner de login y prompt de bash...${NC}"
@@ -132,7 +132,7 @@ configure_profile() {
 
 # ORANGEBOX_SESSION_DISPLAY=external-motd
 # Logo, estado y datos de conexión se muestran una sola vez en
-#+ /etc/profile.d/99-orangebox-motd.sh. Este perfil configura Bash.
+# /etc/profile.d/99-orangebox-motd.sh. Este perfil configura Bash.
 
 # Resolver hostname FQDN una vez por shell para mostrarlo en el prompt.
 ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
