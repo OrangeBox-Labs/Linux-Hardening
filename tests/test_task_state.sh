@@ -30,7 +30,7 @@ grep -Fq '## Cómo reanudar tras interrupción o límite del chat' "$PROTOCOL" |
 grep -Fq '## Regla de actualización tipo journal' "$PROTOCOL" ||
   fail "el protocolo no define cómo actualizar y retirar pendientes"
 
-state_value="$(awk '/^- \*\*Estado:/ { gsub(/[^A-Z_]/, "", $0); print; exit }' "$STATE")"
+state_value="$(sed -n 's/^- \\*\\*Estado:\\*\\* //p' "$STATE" | sed 's/^[^A-Z_]*//; s/[^A-Z_].*$//')"
 pending_block="$(sed -n '/^## Pendientes de la tarea activa$/,/^## Decisiones tomadas$/p' "$STATE")"
 case "$state_value" in
   IN_PROGRESS|BLOCKED|PAUSED|READY_FOR_REVIEW)
