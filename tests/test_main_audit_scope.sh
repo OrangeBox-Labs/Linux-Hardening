@@ -2,14 +2,20 @@
 set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 MAIN="$ROOT_DIR/linux-hardening.sh"
+NETWORK="$ROOT_DIR/network-hardening.sh"
 FIREWALL="$ROOT_DIR/audit-firewall-listeners.sh"
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 [ -f "$MAIN" ] || fail "falta linux-hardening.sh"
+[ -f "$NETWORK" ] || fail "falta network-hardening.sh"
 [ -f "$FIREWALL" ] || fail "falta el auditor independiente"
-if grep -Eq 'source .*lib/(listener-firewall-audit|firewall-detect)\.sh|lfa_audit_listener_firewall|firewall_report_detected' "$MAIN"; then
-  fail "el orquestador aún incorpora la auditoría detallada de firewall"
+if grep -Eq 'source .*lib/(listener-firewall-audit|firewall-detect)\.sh|lfa_audit_listener_firewall|firewall_report_detected|check_firewall_conflicts|firewall_print_backend_diagnostics|firewall_has_imunify360_rules|csf_rules_active|LISTENERS TCP/UDP|Auditoría de solo lectura: firewall y sockets' "$MAIN" "$NETWORK"; then
+  fail "el baseline o network-hardening aún incorporan el análisis detallado de firewall/listeners"
 fi
+# El módulo de red conserva solo el control de seguridad necesario para no
+# aplicar cambios sysctl/módulos cuando Shorewall está activo sin autorización.
+grep -Fq 'shorewall_is_active()' "$NETWORK" || fail "falta la detección mínima de Shorewall para la barrera de cambios"
+grep -Fq 'shorewall_is_active && [ "$ALLOW_SHOREWALL" != true ]' "$NETWORK" || fail "network-hardening permite cambios con Shorewall sin autorización explícita"
 grep -Fq 'PENDING_ONLY_AUDIT=true' "$MAIN" || fail "falta el modo de pendientes corregibles"
 for module in ssh banners bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
   grep -Fq "$module" "$MAIN" || fail "el baseline global omite el módulo $module"
@@ -124,4 +130,4 @@ grep -Fq 'bash_audit_system_bashrc_include' "$MAIN" || fail "Bash puede ocultar 
 grep -Fq 'banners_audit_unverifiable()' "$MAIN" || fail "los controles banner/MOTD pueden desaparecer si falla la generación temporal"
 grep -Fq 'SSH $directive: no se pudo verificar' "$MAIN" || fail "falta el estado no verificable por directiva SSH"
 
-pass "auditoría presenta estados OK y pendientes, con resumen y firewall independiente"
+pass "baseline de hardening separado del análisis firewall/listeners independiente"
