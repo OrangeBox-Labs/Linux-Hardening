@@ -20,6 +20,7 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
+GRUB_PARAMS_CHANGED=false
 
 GRUB_CONFIG="/etc/default/grub"
 GRUB_CFG="/boot/grub2/grub.cfg"
@@ -30,6 +31,38 @@ BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)"
 # ==============================================
 # FUNCION PARA MOSTRAR USO
 # ==============================================
+confirm_grub_change() {
+  local control="$1" effect="$2" answer=""
+  echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then return 1; fi
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    echo -e "$YELLOW[WARN] No hay terminal interactiva; no se modifica GRUB.$NC"
+    return 1
+  fi
+  printf '¿Confirmas este cambio? [s/N]: ' > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  case "$answer" in s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) echo -e "$BLUE[INFO] Cambio rechazado; se conserva la configuración actual.$NC"; return 1 ;;
+  esac
+}
+
+grub_config_has_param() {
+  local file="$1" param="$2"
+  [ -r "$file" ] || return 1
+  awk -v param="$param" '
+    /^[ \t]*#/ { next }
+    /^[ \t]*GRUB_CMDLINE_LINUX=/ {
+      line=$0
+      sub(/^[^=]*=/, "", line)
+      gsub(/"/, " ", line)
+      n=split(line, tokens, /[ \t]+/)
+      for (i=1; i<=n; i++) if (tokens[i] == param) found=1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
@@ -62,64 +95,94 @@ make_backup() {
 # FUNCION PARA AGREGAR PARAMETROS AL KERNEL
 # ==============================================
 add_kernel_param() {
-  local param="$1"
-  local description="$2"
-
-  # Verificar si el parametro ya existe en GRUB_CMDLINE_LINUX
-  if grep -q "^GRUB_CMDLINE_LINUX=.*$param" "$GRUB_CONFIG" 2>/dev/null; then
-    echo -e "${GREEN}[✓] $description - ya configurado${NC}"
+  local param="$1" description="$2" effect="" tmp="" mode=""
+  if grub_config_has_param "$GRUB_CONFIG" "$param"; then
+    echo -e "$GREEN[✓] $description - ya configurado$NC"
     return 0
   fi
 
-  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
+  echo -e "$RED[!] $description - NO CONFIGURADO$NC"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
 
-  if [ "$AUTO_FIX" = true ]; then
-    # Agregar el parametro a GRUB_CMDLINE_LINUX
-    sed -i "s/^GRUB_CMDLINE_LINUX=\"\(.*\)\"/GRUB_CMDLINE_LINUX=\"\1 $param\"/" "$GRUB_CONFIG"
-    echo -e "${GREEN}[✓] $description agregado: $param${NC}"
-    FIXED=$((FIXED + 1))
-  else
+  effect="Añade el parámetro $param a GRUB_CMDLINE_LINUX y requiere regenerar la configuración de GRUB. Puede cambiar el comportamiento del kernel tras reiniciar; un valor no compatible o un error de configuración puede impedir el arranque. Verifica consola/recuperación y mantén una sesión administrativa disponible."
+  if ! confirm_grub_change "$description ($param)" "$effect"; then
     WARNINGS=$((WARNINGS + 1))
+    return 0
   fi
-}
 
-# ==============================================
-# FUNCION PARA VERIFICAR PERMISOS
-# ==============================================
-check_permissions() {
-  local file="$1"
-  local expected_perms="$2"
-  local description="$3"
-
-  if [ ! -f "$file" ]; then
-    echo -e "${YELLOW}[!] $file no existe${NC}"
+  if ! grep -Eq '^[[:space:]]*GRUB_CMDLINE_LINUX="[^\"]*"$' "$GRUB_CONFIG"; then
+    echo -e "$RED[!] No hay una asignación GRUB_CMDLINE_LINUX con comillas dobles que pueda actualizarse de forma segura; no se modifica.$NC"
+    WARNINGS=$((WARNINGS + 1))
     return 1
   fi
 
-  local current_perms=$(stat -c "%a" "$file" 2>/dev/null)
-  local current_owner=$(stat -c "%U" "$file" 2>/dev/null)
-  local current_group=$(stat -c "%G" "$file" 2>/dev/null)
-
-  if [ "$current_perms" = "$expected_perms" ] && [ "$current_owner" = "root" ] && [ "$current_group" = "root" ]; then
-    echo -e "${GREEN}[✓] $description permisos correctos: $expected_perms root:root${NC}"
-    return 0
+  tmp="$(mktemp "$GRUB_CONFIG.orangebox.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  awk -v param="$param" '
+    /^[ \t]*GRUB_CMDLINE_LINUX="/ && /"$/ {
+      line=$0
+      sub(/"$/, " " param "\"", line)
+      print line
+      changed=1
+      next
+    }
+    { print }
+    END { if (!changed) exit 1 }
+  ' "$GRUB_CONFIG" > "$tmp" || { rm -f "$tmp"; echo -e "$RED[!] No se pudo preparar GRUB_CMDLINE_LINUX.$NC"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  mode="$(stat -c "%a" "$GRUB_CONFIG" 2>/dev/null || echo 600)"
+  chmod "$mode" "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  chown --reference="$GRUB_CONFIG" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  if ! grub_config_has_param "$tmp" "$param"; then
+    rm -f "$tmp"
+    echo -e "$RED[!] El cambio temporal no contiene el parámetro esperado; no se instala.$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
-
-  echo -e "${RED}[!] $description permisos incorrectos: $current_perms $current_owner:$current_group (debe ser $expected_perms root:root)${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    chmod "$expected_perms" "$file"
-    chown root:root "$file"
-    echo -e "${GREEN}[✓] $description permisos corregidos${NC}"
+  if mv "$tmp" "$GRUB_CONFIG" && grub_config_has_param "$GRUB_CONFIG" "$param"; then
+    echo -e "$GREEN[✓] $description agregado y verificado: $param$NC"
     FIXED=$((FIXED + 1))
+    GRUB_PARAMS_CHANGED=true
   else
+    rm -f "$tmp"
+    echo -e "$RED[!] No se pudo instalar/verificar $param en $GRUB_CONFIG$NC"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
 
-# ==============================================
-# FUNCION PARA VERIFICAR CONTRASEÑA DE GRUB
-# ==============================================
+check_permissions() {
+  local file="$1" expected_perms="$2" description="$3"
+  local current_perms="" current_owner="" current_group="" effect=""
+  if [ ! -f "$file" ]; then
+    echo -e "$YELLOW[!] $file no existe$NC"
+    return 1
+  fi
+
+  current_perms="$(stat -c "%a" "$file" 2>/dev/null || true)"
+  current_owner="$(stat -c "%U" "$file" 2>/dev/null || true)"
+  current_group="$(stat -c "%G" "$file" 2>/dev/null || true)"
+  if [ "$current_perms" = "$expected_perms" ] && [ "$current_owner" = "root" ] && [ "$current_group" = "root" ]; then
+    echo -e "$GREEN[✓] $description permisos correctos: $expected_perms root:root$NC"
+    return 0
+  fi
+
+  echo -e "$RED[!] $description permisos incorrectos: $current_perms $current_owner:$current_group (debe ser $expected_perms root:root)$NC"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
+
+  effect="Restringe la modificación/lectura del archivo de arranque $file a root. Puede afectar herramientas administrativas o automatizaciones que lean GRUB; evita que usuarios no privilegiados alteren parámetros de arranque."
+  if ! confirm_grub_change "permisos de $file -> $expected_perms root:root" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if chmod "$expected_perms" "$file" && chown root:root "$file" &&
+     [ "$(stat -c "%a" "$file" 2>/dev/null)" = "$expected_perms" ] &&
+     [ "$(stat -c "%U:%G" "$file" 2>/dev/null)" = "root:root" ]; then
+    echo -e "$GREEN[✓] $description permisos corregidos y verificados$NC"
+    FIXED=$((FIXED + 1))
+  else
+    echo -e "$RED[!] No se pudo verificar el cambio de permisos de $file$NC"
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
 check_grub_password() {
   echo -e "\n${BLUE}[*] 1.4.1 - Verificando contraseña de bootloader...${NC}"
 
@@ -200,37 +263,86 @@ check_audit_backlog() {
 # ==============================================
 # 1.6.1.2 - ASEGURAR SELINUX NO DESHABILITADO EN BOOT
 # ==============================================
+remove_kernel_param() {
+  local param="$1" description="$2" effect="$3" tmp="" mode=""
+  if ! grub_config_has_param "$GRUB_CONFIG" "$param"; then return 0; fi
+  if ! confirm_grub_change "$description ($param)" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  tmp="$(mktemp "$GRUB_CONFIG.orangebox.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  awk -v param="$param" '
+    /^[ \t]*GRUB_CMDLINE_LINUX="/ && /"$/ {
+      line=$0
+      eq=index(line, "=")
+      prefix=substr(line, 1, eq)
+      value=substr(line, eq+1)
+      sub(/^"/, "", value)
+      sub(/"$/, "", value)
+      n=split(value, fields, /[ \t]+/)
+      rebuilt=""
+      removed=0
+      for (i=1; i<=n; i++) {
+        if (fields[i] == param) { removed=1; continue }
+        if (fields[i] == "") continue
+        if (rebuilt != "") rebuilt=rebuilt " "
+        rebuilt=rebuilt fields[i]
+      }
+      if (removed) {
+        print prefix "\"" rebuilt "\""
+        changed=1
+        next
+      }
+    }
+    { print }
+    END { if (!changed) exit 1 }
+  ' "$GRUB_CONFIG" > "$tmp" || { rm -f "$tmp"; echo -e "$RED[!] No se pudo preparar la eliminación de $param.$NC"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  mode="$(stat -c "%a" "$GRUB_CONFIG" 2>/dev/null || echo 600)"
+  chmod "$mode" "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  chown --reference="$GRUB_CONFIG" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
+  if grep -qF "$param" "$tmp"; then
+    rm -f "$tmp"
+    echo -e "$RED[!] El parámetro $param sigue presente; no se instala el cambio.$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+  if mv "$tmp" "$GRUB_CONFIG"; then
+    echo -e "$GREEN[✓] $description eliminado y verificado$NC"
+    FIXED=$((FIXED + 1))
+    GRUB_PARAMS_CHANGED=true
+  else
+    rm -f "$tmp"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+}
+
 check_selinux_boot() {
-  echo -e "\n${BLUE}[*] 1.6.1.2 - Verificando SELinux no deshabilitado en boot...${NC}"
+  echo -e "\n$BLUE[*] 1.6.1.2 - Verificando SELinux no deshabilitado en boot...$NC"
 
-  if grep -q "selinux=0" "$GRUB_CONFIG" 2>/dev/null; then
-    echo -e "${RED}[!] selinux=0 encontrado en GRUB_CMDLINE_LINUX${NC}"
+  if grub_config_has_param "$GRUB_CONFIG" "selinux=0"; then
+    echo -e "$RED[!] selinux=0 encontrado en GRUB_CMDLINE_LINUX$NC"
     if [ "$AUTO_FIX" = true ]; then
-      # Eliminar selinux=0 de la linea
-      sed -i 's/selinux=0//g' "$GRUB_CONFIG"
-      sed -i 's/  / /g' "$GRUB_CONFIG"
-      echo -e "${GREEN}[✓] selinux=0 eliminado de GRUB_CMDLINE_LINUX${NC}"
-      FIXED=$((FIXED + 1))
+      effect="Quitar selinux=0 permite que SELinux pueda inicializarse tras el próximo arranque, según /etc/selinux/config. Si la política/contextos están mal preparados, servicios pueden quedar bloqueados; puede requerirse relabel y consola de recuperación."
+      remove_kernel_param "selinux=0" "evitar SELinux deshabilitado al arrancar" "$effect"
     else
       WARNINGS=$((WARNINGS + 1))
     fi
     return 1
   fi
 
-  if grep -q "enforcing=0" "$GRUB_CONFIG" 2>/dev/null; then
-    echo -e "${RED}[!] enforcing=0 encontrado en GRUB_CMDLINE_LINUX${NC}"
+  if grub_config_has_param "$GRUB_CONFIG" "enforcing=0"; then
+    echo -e "$RED[!] enforcing=0 encontrado en GRUB_CMDLINE_LINUX$NC"
     if [ "$AUTO_FIX" = true ]; then
-      sed -i 's/enforcing=0//g' "$GRUB_CONFIG"
-      sed -i 's/  / /g' "$GRUB_CONFIG"
-      echo -e "${GREEN}[✓] enforcing=0 eliminado de GRUB_CMDLINE_LINUX${NC}"
-      FIXED=$((FIXED + 1))
+      effect="Quitar enforcing=0 puede pasar SELinux a enforcing en el próximo arranque cuando SELinux esté configurado como enabled. Aplicaciones con políticas o contextos incompletos pueden fallar; verifica AVCs y conserva consola de recuperación."
+      remove_kernel_param "enforcing=0" "evitar desactivar SELinux enforcing al arrancar" "$effect"
     else
       WARNINGS=$((WARNINGS + 1))
     fi
     return 1
   fi
 
-  echo -e "${GREEN}[✓] SELinux no esta deshabilitado en boot${NC}"
+  echo -e "$GREEN[✓] SELinux no está deshabilitado en boot$NC"
   return 0
 }
 
@@ -281,24 +393,47 @@ check_additional_params() {
 # REGENERAR CONFIGURACION DE GRUB
 # ==============================================
 regenerate_grub() {
-  if [ "$AUTO_FIX" = true ]; then
-    echo -e "\n${BLUE}[*] Regenerando configuracion de GRUB...${NC}"
+  local output="/boot/grub2/grub.cfg" os_major="" efi_cfgs="" count=0 effect=""
+  [ "$AUTO_FIX" = true ] || return 0
+  [ "$GRUB_PARAMS_CHANGED" = true ] || {
+    echo -e "$BLUE[INFO] No se regenera GRUB porque no cambió GRUB_CMDLINE_LINUX.$NC"
+    return 0
+  }
 
-    # Regenerar grub.cfg
-    if [ -d /sys/firmware/efi ]; then
-      # Sistema UEFI
-      grub2-mkconfig -o /boot/efi/EFI/*/grub.cfg 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg
-    else
-      # Sistema BIOS
-      grub2-mkconfig -o /boot/grub2/grub.cfg
+  if [ -d /sys/firmware/efi ]; then
+    os_major="$(get_el_major)"
+    if [ "$os_major" = "7" ]; then
+      efi_cfgs="$(find /boot/efi/EFI -maxdepth 2 -type f -name grub.cfg -print 2>/dev/null)"
+      count="$(printf '%s\n' "$efi_cfgs" | grep -c . || true)"
+      if [ "$count" -eq 1 ]; then
+        output="$efi_cfgs"
+      elif [ "$count" -gt 1 ]; then
+        echo -e "$RED[!] Hay múltiples grub.cfg en particiones EFI; no se elige un destino automáticamente. Revise manualmente.$NC"
+        WARNINGS=$((WARNINGS + 1))
+        return 1
+      fi
     fi
+  fi
 
-    if [ $? -eq 0 ]; then
-      echo -e "${GREEN}[✓] Configuracion de GRUB regenerada${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] Error al regenerar configuracion de GRUB${NC}"
-    fi
+  if ! command -v grub2-mkconfig >/dev/null 2>&1; then
+    echo -e "$RED[!] grub2-mkconfig no está disponible; los cambios en GRUB_CMDLINE_LINUX aún no están aplicados al archivo generado.$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  effect="Regenera $output a partir de la configuración GRUB. Un destino incorrecto o error de generación puede impedir el arranque; verifica el backup y la consola de recuperación, y no reinicies hasta comprobar la salida."
+  if ! confirm_grub_change "regenerar la configuración de GRUB en $output" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  if grub2-mkconfig -o "$output" && [ -s "$output" ]; then
+    echo -e "$GREEN[✓] Configuración GRUB regenerada y archivo de salida no vacío: $output$NC"
+    FIXED=$((FIXED + 1))
+  else
+    echo -e "$RED[!] Error al regenerar GRUB; no reinicie. Revise backup y salida del comando.$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
 }
 
@@ -458,7 +593,7 @@ main() {
   check_additional_params
 
   # Regenerar configuracion de GRUB si se hicieron cambios
-  if [ "$AUTO_FIX" = true ] && [ $FIXED -gt 0 ]; then
+  if [ "$AUTO_FIX" = true ] && [ "$GRUB_PARAMS_CHANGED" = true ]; then
     regenerate_grub
     echo -e "\n${YELLOW}[!] Se recomienda reiniciar el sistema para aplicar los cambios${NC}"
   fi
