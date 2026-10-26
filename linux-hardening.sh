@@ -899,6 +899,8 @@ kernel_module(){
   set_sysctl fs.protected_symlinks 1
   set_sysctl net.ipv4.conf.all.accept_redirects 0
   set_sysctl net.ipv4.conf.default.accept_redirects 0
+  set_sysctl net.ipv6.conf.all.accept_redirects 0
+  set_sysctl net.ipv6.conf.default.accept_redirects 0
   set_sysctl net.ipv4.conf.all.send_redirects 0
   set_sysctl net.ipv4.conf.default.send_redirects 0
   set_sysctl net.ipv4.conf.all.accept_source_route 0
