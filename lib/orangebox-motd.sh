@@ -46,8 +46,8 @@ orangebox_motd_ensure_figlet() {
 
 orangebox_motd_center_login_line() {
   local text="$1"
-  local width="\${2:-79}"
-  local pad=$(( (width - \${#text}) / 2 ))
+  local width="${2:-79}"
+  local pad=$(( (width - ${#text}) / 2 ))
   [ "$pad" -ge 0 ] || pad=0
   printf '%*s%s\n' "$pad" '' "$text"
 }
