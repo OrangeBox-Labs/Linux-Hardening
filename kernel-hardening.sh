@@ -285,6 +285,12 @@ network_hardening() {
   fi
   check_sysctl_param "net.ipv4.conf.all.accept_redirects" "0" "net.ipv4.conf.all.accept_redirects"
   check_sysctl_param "net.ipv4.conf.default.accept_redirects" "0" "net.ipv4.conf.default.accept_redirects"
+  if [ -d /proc/sys/net/ipv6 ]; then
+    check_sysctl_param "net.ipv6.conf.all.accept_redirects" "0" "net.ipv6.conf.all.accept_redirects"
+    check_sysctl_param "net.ipv6.conf.default.accept_redirects" "0" "net.ipv6.conf.default.accept_redirects"
+  else
+    echo "[N/A] IPv6 ICMP redirects no están expuestos por este kernel; no aplica."
+  fi
   check_sysctl_param "net.ipv4.conf.all.send_redirects" "0" "net.ipv4.conf.all.send_redirects"
   check_sysctl_param "net.ipv4.conf.default.send_redirects" "0" "net.ipv4.conf.default.send_redirects"
   check_sysctl_param "net.ipv4.tcp_syncookies" "1" "net.ipv4.tcp_syncookies"
