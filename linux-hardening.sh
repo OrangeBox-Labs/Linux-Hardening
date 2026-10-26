@@ -1995,10 +1995,23 @@ companion_module_owns_parameter_consent() {
   esac
 }
 
+# Invoke a companion script with up to two optional arguments without expanding
+# empty arrays. Bash releases used by CentOS 6 can reject "${array[@]}" under -u.
+run_companion_script() {
+  local script="$1"
+  local arg1="${2:-}" arg2="${3:-}"
+  if [ -n "$arg2" ]; then
+    bash "$script" "$arg1" "$arg2"
+  elif [ -n "$arg1" ]; then
+    bash "$script" "$arg1"
+  else
+    bash "$script"
+  fi
+}
+
 run_companion_module() {
-  local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  local name="$1" script="" fix_arg="--fix" audit_arg="" fix_extra_arg="" risky=false audit_only=false block_fix=false interactive=false
   local apply_fix="$AUTO_FIX" child_rc=0
-  local -a audit_args=() fix_args=()
 
   if [ "$name" = "cis" ]; then
     die "El benchmark CIS es independiente de los módulos de hardening. Ejecuta: ./cis-benchmark-check.sh"
@@ -2043,9 +2056,6 @@ run_companion_module() {
   if [ ! -f "$SCRIPT_DIR/$script" ]; then
     die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
   fi
-  [ -n "$audit_arg" ] && audit_args=("$audit_arg")
-  [ -n "$fix_arg" ] && fix_args=("$fix_arg")
-
   # Time sync is audit-only during global --fix. For intentional NTP changes, select
   # --module time-sync --fix; clock changes can affect Kerberos/Samba AD and log correlation.
   if [ "$AUTO_FIX" = true ] && [ "$MODULE" = "all" ] && [ "$name" = "time-sync" ]; then
@@ -2063,7 +2073,7 @@ run_companion_module() {
   # Audit first, then ask for consent. Do not mutate when audit cannot be performed safely.
   echo
   echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
-  if bash "$SCRIPT_DIR/$script" "${audit_args[@]}"; then
+  if run_companion_script "$SCRIPT_DIR/$script" "$audit_arg"; then
     child_rc=0
   else
     child_rc=$?
@@ -2103,10 +2113,10 @@ run_companion_module() {
   echo
   echo "[INFO] Aplicando '$name' después del preflight y la autorización."
   if [ "$name" = "network-full" ]; then
-    fix_args=(--fix)
-    [ "$ALLOW_SHOREWALL" = true ] && fix_args+=(--allow-shorewall)
+    fix_arg=--fix
+    [ "$ALLOW_SHOREWALL" = true ] && fix_extra_arg=--allow-shorewall
   fi
-  if bash "$SCRIPT_DIR/$script" "${fix_args[@]}"; then
+  if run_companion_script "$SCRIPT_DIR/$script" "$fix_arg" "$fix_extra_arg"; then
     COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
     echo "[OK] Módulo $name finalizado."
   else
