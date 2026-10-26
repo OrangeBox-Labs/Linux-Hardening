@@ -568,22 +568,46 @@ check_aide() {
 # 1.3.2 - ASEGURAR VERIFICACION PERIODICA DE INTEGRIDAD
 # ==============================================
 check_aide_timer() {
-  local timer_unit=false service_unit=false
-  { [ -f /etc/systemd/system/aidecheck.timer ] || [ -f /usr/lib/systemd/system/aidecheck.timer ] || [ -f /lib/systemd/system/aidecheck.timer ]; } && timer_unit=true
-  { [ -f /etc/systemd/system/aidecheck.service ] || [ -f /usr/lib/systemd/system/aidecheck.service ] || [ -f /lib/systemd/system/aidecheck.service ]; } && service_unit=true
+  local timer_unit=false service_unit=false cron_job=false cron_running=false
+  local root_crontab="" file service_content=""
 
-  if ! command -v systemctl >/dev/null 2>&1; then
-    log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "systemctl no está disponible; no se pudo verificar el timer." "Validar el mecanismo de scheduling apropiado para este sistema." "$YELLOW"
+  if ! command -v aide >/dev/null 2>&1; then
+    log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "No se encuentra el ejecutable aide; una tarea programada no podría ejecutar la comprobación." "Instalar/inicializar AIDE primero y luego verificar el mecanismo de ejecución periódica." "$YELLOW"
     return 2
   fi
-  if systemctl is-enabled --quiet aidecheck.timer 2>/dev/null &&
-     systemctl is-active --quiet aidecheck.timer 2>/dev/null &&
-     $timer_unit && $service_unit &&
-     command -v aide >/dev/null 2>&1; then
-    log_result "PASS" "1.3.2 - Asegurar verificacion periodica de integridad" "aidecheck.timer habilitado/activo; unidad de servicio presente y ejecutable aide disponible." "" "$GREEN"
+
+  # Accept either a complete systemd timer/service or the root-crontab mechanism used by OrangeBox.
+  if command -v systemctl >/dev/null 2>&1; then
+    { [ -f /etc/systemd/system/aidecheck.timer ] || [ -f /usr/lib/systemd/system/aidecheck.timer ] || [ -f /lib/systemd/system/aidecheck.timer ]; } && timer_unit=true
+    { [ -f /etc/systemd/system/aidecheck.service ] || [ -f /usr/lib/systemd/system/aidecheck.service ] || [ -f /lib/systemd/system/aidecheck.service ]; } && service_unit=true
+    service_content="$(systemctl cat aidecheck.service 2>/dev/null || true)"
+    if systemctl is-enabled --quiet aidecheck.timer 2>/dev/null &&
+       systemctl is-active --quiet aidecheck.timer 2>/dev/null &&
+       $timer_unit && $service_unit &&
+       printf '%s\n' "$service_content" | grep -Eq 'aide([[:space:]]|[^[:alnum:]_]).*--check|aide[[:space:]]+--check'; then
+      log_result "PASS" "1.3.2 - Asegurar verificacion periodica de integridad" "aidecheck.timer habilitado/activo; servicio asociado presente y ejecuta aide --check." "" "$GREEN"
+      return 0
+    fi
+    if systemctl is-active --quiet crond 2>/dev/null || systemctl is-active --quiet cron 2>/dev/null; then cron_running=true; fi
+  elif command -v service >/dev/null 2>&1; then
+    service crond status >/dev/null 2>&1 && cron_running=true
+    service cron status >/dev/null 2>&1 && cron_running=true
+  fi
+
+  if command -v crontab >/dev/null 2>&1; then
+    root_crontab="$(crontab -u root -l 2>/dev/null || true)"
+    if printf '%s\n' "$root_crontab" | grep -Eq '^[[:space:]]*[^#[:space:]][^#]*aide[[:space:]]+--check'; then cron_job=true; fi
+  fi
+  for file in /etc/crontab /etc/cron.d/*; do
+    [ -f "$file" ] || continue
+    if grep -Eiv '^[[:space:]]*#|^[[:space:]]*$' "$file" 2>/dev/null | grep -Eq '(^|[[:space:]])/usr/sbin/aide[[:space:]]+--check|(^|[[:space:]])aide[[:space:]]+--check'; then cron_job=true; fi
+  done
+  if $cron_job && $cron_running; then
+    log_result "PASS" "1.3.2 - Asegurar verificacion periodica de integridad" "Tarea cron activa detectada para aide --check y servicio cron en ejecución." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "No se comprobó el timer y servicio completos (enabled/active/unit files/aide)." "Revisar systemctl status aidecheck.timer, systemctl cat aidecheck.timer aidecheck.service y journalctl -u aidecheck.service." "$YELLOW"
+
+  log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "No se verificó un timer systemd completo ni una tarea cron utilizable (job=$cron_job, cron_running=$cron_running)." "Configurar una tarea periódica que ejecute /usr/sbin/aide --check; se acepta root crontab o un timer systemd con unidad de servicio válida." "$YELLOW"
   return 2
 }
 
@@ -1849,12 +1873,42 @@ check_su_restricted() {
 # 5.5.1 - REQUISITOS DE CREACION DE CONTRASEÑAS
 # ==============================================
 check_password_requirements() {
-  local minlen=$(grep "^minlen" /etc/security/pwquality.conf 2>/dev/null | awk -F= '{print $2}' | tr -d ' ')
-  if [ -n "$minlen" ] && [ "$minlen" -ge 14 ]; then
-    log_result "PASS" "5.5.1 - Requisitos de creacion de contraseñas configurados" "" "" "$GREEN"
+  local os_major="" pam_lines="" minlen="" minclass="" token="" f
+  if [ -r /etc/os-release ]; then
+    os_major="$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); split($2,v,"."); print v[1]; exit}' /etc/os-release)"
+  elif [ -r /etc/redhat-release ]; then
+    os_major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\\1/p' /etc/redhat-release | head -1)"
+  fi
+
+  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+    [ -r "$f" ] || continue
+    pam_lines="$(printf '%s\n%s' "$pam_lines" "$(grep -E '^[[:space:]]*password[[:space:]]+[^#].*pam_pwquality\\.so' "$f" 2>/dev/null || true)")"
+  done
+
+  minlen="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {key=$1; gsub(/[[:space:]]/, "", key); if (key=="minlen") {v=$2; gsub(/[[:space:]#].*/, "", v); value=v}} END{print value}' /etc/security/pwquality.conf 2>/dev/null)"
+  minclass="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {key=$1; gsub(/[[:space:]]/, "", key); if (key=="minclass") {v=$2; gsub(/[[:space:]#].*/, "", v); value=v}} END{print value}' /etc/security/pwquality.conf 2>/dev/null)"
+
+  token="$(printf '%s\n' "$pam_lines" | tr ' ' '\n' | awk -F= '$1=="minlen" && $2~/^[0-9]+$/ {v=$2} END{print v}')"
+  [ -n "$token" ] && minlen="$token"
+  token="$(printf '%s\n' "$pam_lines" | tr ' ' '\n' | awk -F= '$1=="minclass" && $2~/^[0-9]+$/ {v=$2} END{print v}')"
+  [ -n "$token" ] && minclass="$token"
+
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 6 ] && grep -Eq '^[[:space:]]*password[[:space:]]+[^#].*pam_cracklib\\.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null; then
+    log_result "WARN" "5.5.1 - Requisitos de creacion de contraseñas configurados" "EL6 usa pam_cracklib; esta prueba de pwquality no valida sus parámetros equivalentes." "Revisar minlen, difok, retry, dcredit/ucredit/lcredit/ocredit y la pila PAM legacy sin editarla automáticamente." "$YELLOW"
+    return 2
+  fi
+
+  if [ -z "$pam_lines" ]; then
+    log_result "WARN" "5.5.1 - Requisitos de creacion de contraseñas configurados" "No se detectó pam_pwquality.so en líneas password activas; pwquality.conf por sí solo no demuestra que las reglas se apliquen." "Revisar authselect/PAM y habilitar la política mediante el mecanismo soportado por la distribución; una edición PAM incorrecta puede bloquear cambios de contraseña y accesos." "$YELLOW"
+    return 2
+  fi
+
+  if [[ "$minlen" =~ ^[0-9]+$ ]] && [ "$minlen" -ge 14 ] &&
+     [[ "$minclass" =~ ^[0-9]+$ ]] && [ "$minclass" -ge 4 ]; then
+    log_result "PASS" "5.5.1 - Requisitos de creacion de contraseñas configurados" "pam_pwquality activo; minlen=$minlen y minclass=$minclass." "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "5.5.1 - Requisitos de creacion de contraseñas configurados" "Password requirements no configurados" "Editar /etc/security/pwquality.conf: minlen=14, minclass=4 o dcredit=-1, ucredit=-1, ocredit=-1, lcredit=-1" "$RED"
+  log_result "FAIL" "5.5.1 - Requisitos de creacion de contraseñas configurados" "pam_pwquality está activo, pero minlen=$minlen y/o minclass=$minclass no alcanzan el objetivo OrangeBox (minlen>=14, minclass>=4)." "Configurar minlen=14 y minclass=4 en /etc/security/pwquality.conf o en la directiva PAM efectiva. Esto afecta la creación/cambio de contraseñas nuevas; puede rechazar contraseñas débiles, pero no cambia las contraseñas existentes. No editar una pila authselect manualmente." "$RED"
   return 1
 }
 
@@ -1862,28 +1916,51 @@ check_password_requirements() {
 # 5.5.2 - BLOQUEO POR INTENTOS FALLIDOS
 # ==============================================
 check_password_lockout() {
-  local files="/etc/pam.d/system-auth /etc/pam.d/password-auth"
-  local active="" has_preauth=false has_authfail=false has_account=false has_legacy=false
-  local f
-  for f in $files; do
-    [ -r "$f" ] || continue
-    active="$active
-$(grep -Ev '^[[:space:]]*(#|$)' "$f" 2>/dev/null | grep -E 'pam_(faillock|tally2)\.so' || true)"
-  done
-  printf '%s\n' "$active" | grep -Eq 'pam_faillock\.so.*preauth|preauth.*pam_faillock\.so' && has_preauth=true
-  printf '%s\n' "$active" | grep -Eq 'pam_faillock\.so.*authfail|authfail.*pam_faillock\.so' && has_authfail=true
-  printf '%s\n' "$active" | grep -Eq '^[[:space:]]*account[[:space:]].*pam_faillock\.so' && has_account=true
-  printf '%s\n' "$active" | grep -q 'pam_tally2\.so' && has_legacy=true
+  local active="" f phase configured=""
+  local has_preauth=false has_authfail=false has_account=false has_legacy=false
+  local deny="" fail_interval="" unlock_time=""
 
-  if $has_preauth && $has_authfail && $has_account; then
-    log_result "PASS" "5.5.2 - Bloqueo por intentos fallidos configurado" "Reglas activas pam_faillock detectadas para preauth, authfail y account." "" "$GREEN"
+  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+    [ -r "$f" ] || continue
+    active="$(printf '%s\n%s' "$active" "$(grep -E '^[[:space:]]*(auth|account)[[:space:]]+[^#].*pam_(faillock|tally2)\\.so' "$f" 2>/dev/null || true)")"
+  done
+
+  printf '%s\n' "$active" | grep -Eq 'pam_faillock\\.so.*preauth|preauth.*pam_faillock\\.so' && has_preauth=true
+  printf '%s\n' "$active" | grep -Eq 'pam_faillock\\.so.*authfail|authfail.*pam_faillock\\.so' && has_authfail=true
+  printf '%s\n' "$active" | grep -Eq '^[[:space:]]*account[[:space:]].*pam_faillock\\.so' && has_account=true
+  printf '%s\n' "$active" | grep -q 'pam_tally2\\.so' && has_legacy=true
+
+  if [ -r /etc/security/faillock.conf ]; then
+    deny="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="deny"){v=$2; gsub(/[[:space:]#]/, "", v); value=v}} END{print value}' /etc/security/faillock.conf)"
+    fail_interval="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="fail_interval"){v=$2; gsub(/[[:space:]#]/, "", v); value=v}} END{print value}' /etc/security/faillock.conf)"
+    unlock_time="$(awk -F= '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {k=$1; gsub(/[[:space:]]/, "", k); if(k=="unlock_time"){v=$2; gsub(/[[:space:]#]/, "", v); value=v}} END{print value}' /etc/security/faillock.conf)"
+  fi
+  for phase in deny fail_interval unlock_time; do
+    configured="$(printf '%s\n' "$active" | tr ' ' '\n' | awk -F= -v k="$phase" '$1==k && $2~/^[0-9]+$/ {v=$2} END{print v}')"
+    [ -n "$configured" ] || continue
+    case "$phase" in
+      deny) deny="$configured" ;;
+      fail_interval) fail_interval="$configured" ;;
+      unlock_time) unlock_time="$configured" ;;
+    esac
+  done
+
+  if $has_preauth && $has_authfail && $has_account &&
+     [[ "$deny" =~ ^[0-9]+$ ]] && [ "$deny" -eq 5 ] &&
+     [[ "$fail_interval" =~ ^[0-9]+$ ]] && [ "$fail_interval" -eq 900 ] &&
+     [[ "$unlock_time" =~ ^[0-9]+$ ]] && [ "$unlock_time" -eq 900 ]; then
+    log_result "PASS" "5.5.2 - Bloqueo por intentos fallidos configurado" "pam_faillock tiene preauth/authfail/account y deny=5, fail_interval=900, unlock_time=900 explícitos." "" "$GREEN"
     return 0
   fi
   if $has_legacy; then
-    log_result "WARN" "5.5.2 - Bloqueo por intentos fallidos configurado" "Se detectó pam_tally2 legacy; requiere validación de umbral, desbloqueo y funcionamiento efectivo." "Auditar la configuración PAM legacy sin convertir la pila automáticamente; una edición incorrecta puede bloquear todos los accesos." "$YELLOW"
+    log_result "WARN" "5.5.2 - Bloqueo por intentos fallidos configurado" "Se detectó pam_tally2 legacy; no se pudieron confirmar umbral, intervalo y desbloqueo con el perfil moderno." "Validar deny/fail-time/unlock_time y probar un procedimiento de recuperación. No editar PAM automáticamente: un orden incorrecto puede bloquear administradores." "$YELLOW"
     return 2
   fi
-  log_result "FAIL" "5.5.2 - Bloqueo por intentos fallidos configurado" "No se encontró una configuración activa completa de pam_faillock en system-auth/password-auth." "Validar la política de authselect y el orden de PAM antes de añadir preauth/authfail/account; una configuración incorrecta puede bloquear administradores." "$RED"
+  if $has_preauth || $has_authfail || $has_account; then
+    log_result "WARN" "5.5.2 - Bloqueo por intentos fallidos configurado" "Estado parcial o parámetros no verificables: preauth=$has_preauth authfail=$has_authfail account=$has_account deny=$deny fail_interval=$fail_interval unlock_time=$unlock_time." "Completar las tres fases y validar deny=5, fail_interval=900 y unlock_time=900 en /etc/security/faillock.conf o argumentos efectivos. Una política demasiado estricta puede bloquear cuentas; no se modifica PAM automáticamente." "$YELLOW"
+    return 2
+  fi
+  log_result "FAIL" "5.5.2 - Bloqueo por intentos fallidos configurado" "No se encontró una configuración activa completa de pam_faillock/pam_tally2 en system-auth/password-auth." "Revisar el mecanismo de PAM de la distribución. Configurar lockout requiere validar authselect y el orden de reglas; una configuración incorrecta puede bloquear todos los accesos." "$RED"
   return 1
 }
 
@@ -1891,11 +1968,28 @@ $(grep -Ev '^[[:space:]]*(#|$)' "$f" 2>/dev/null | grep -E 'pam_(faillock|tally2
 # 5.5.3 - LIMITAR REUSO DE CONTRASEÑAS
 # ==============================================
 check_password_reuse() {
-  if grep -q "remember" /etc/pam.d/system-auth 2>/dev/null; then
-    log_result "PASS" "5.5.3 - Reuso de contraseñas limitado" "" "" "$GREEN"
-    return 0
+  local active="" f line module value remember=""
+  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+    [ -r "$f" ] || continue
+    active="$(printf '%s\n%s' "$active" "$(grep -E '^[[:space:]]*password[[:space:]]+[^#].*pam_(pwhistory|unix)\\.so' "$f" 2>/dev/null || true)")"
+  done
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in *pam_pwhistory.so*) module="pam_pwhistory.so" ;; *pam_unix.so*) module="pam_unix.so" ;; *) continue ;; esac
+    value="$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '$1=="remember" && $2~/^[0-9]+$/ {v=$2} END{print v}')"
+    if [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 5 ]; then
+      remember="$value"
+      log_result "PASS" "5.5.3 - Reuso de contraseñas limitado" "Regla activa $module con remember=$remember." "" "$GREEN"
+      return 0
+    fi
+  done <<< "$active"
+
+  if [ -z "$active" ]; then
+    log_result "WARN" "5.5.3 - Reuso de contraseñas limitado" "No se detectó una regla password activa de pam_pwhistory.so ni una opción remember en pam_unix.so." "Validar PAM/authselect; una directiva comentada no cuenta como control. Las modificaciones PAM automáticas pueden bloquear cambios de contraseña." "$YELLOW"
+    return 2
   fi
-  log_result "FAIL" "5.5.3 - Reuso de contraseñas limitado" "remember no configurado" "Agregar 'remember=5' a la linea pam_unix.so en /etc/pam.d/system-auth" "$RED"
+  log_result "FAIL" "5.5.3 - Reuso de contraseñas limitado" "Se encontró un módulo de password activo, pero no una opción remember numérica >=5 (valor detectado: $remember)." "Configurar remember=5 o superior en una regla efectiva pam_pwhistory.so (preferido) o pam_unix.so según la plataforma. Impide reutilizar contraseñas anteriores; puede complicar el cambio y requiere validar el flujo PAM." "$RED"
   return 1
 }
 

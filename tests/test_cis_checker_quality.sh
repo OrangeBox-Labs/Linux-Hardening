@@ -13,6 +13,10 @@ grep -Fq 'chronyd activo; fuente seleccionada' "$CIS" || fail "chrony aún tiene
 grep -Fq 'systemctl is-active --quiet aidecheck.timer' "$CIS" || fail "AIDE timer solo valida enabled"
 grep -Fq 'ClientAliveCountMax entre 1 y 3 en EL8+' "$CIS" || fail "SSH idle timeout no valida límites ni versión OpenSSH"
 grep -Fq 'authfail' "$CIS" || fail "PAM faillock no revisa authfail"
+grep -Fq 'pam_pwquality activo; minlen=' "$CIS" || fail "pwquality debe validar PAM activo y valores explícitos"
+grep -Fq 'pam_pwhistory.so' "$CIS" || fail "reuso debe validar módulos PAM activos"
+grep -Fq 'fail_interval=900' "$CIS" || fail "lockout no verifica fail_interval/unlock_time"
+grep -Fq 'crontab -u root -l' "$CIS" || fail "AIDE checker no acepta cron del instalador OrangeBox"
 grep -Fq 'netstat' "$CIS" || fail "el chequeo MTA no tiene fallback para sistemas sin ss"
 grep -Fq 'ENCRYPT_METHOD' "$CIS" || fail "hashing de contraseñas no se comprueba"
 
