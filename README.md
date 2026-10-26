@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.8, detección compatible con CentOS 6 y banner de acceso separado del panel de métricas de shell. |
+| `linux-hardening.sh` | Baseline 1.4.9, detección compatible con CentOS 6, banner pre-login centrado y panel operativo de shell. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -157,7 +157,7 @@ El proyecto diferencia claramente:
 
 ### Antes del login
 
-`/etc/issue` y `/etc/issue.net` contienen el logo OrangeBox (FIGlet generado al aplicar, o ASCII de fallback) y el aviso legal/de seguridad antes de la autenticación.
+`/etc/issue` y `/etc/issue.net` contienen el logo OrangeBox centrado (FIGlet generado al aplicar, o ASCII de fallback) y el aviso legal/de seguridad antes de la autenticación. El título y la web se centran en un ancho fijo de 79 columnas; los párrafos tienen una sangría uniforme.
 
 ### Después del login
 
