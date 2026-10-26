@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.24 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.25 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.24
+SCRIPT_VERSION=1.4.25
 AUTO_FIX=false
 AUDIT_MODE=false
 AUTO_MODE=false
@@ -1193,12 +1193,14 @@ ORANGEBOX_UNLIMITED_HISTORY
 }
 
 bash_profile_check() {
-  local file="$1" label="$2" needle="$3" detail="${4:-}"
+  local file="$1" label="$2" needle="$3" detail="${4:-}" detail2="${5:-}"
   if [ ! -f "$file" ]; then
     warn "$label: no verificable; falta $file"
     return 0
   fi
-  if grep -Fq -- "$needle" "$file" && { [ -z "$detail" ] || grep -Fq -- "$detail" "$file"; }; then
+  if grep -Fq -- "$needle" "$file" &&
+     { [ -z "$detail" ] || grep -Fq -- "$detail" "$file"; } &&
+     { [ -z "$detail2" ] || grep -Fq -- "$detail2" "$file"; }; then
     ok "$label"
   else
     warn "$label: falta o difiere en $file"
@@ -1210,9 +1212,10 @@ bash_audit_profile_controls() {
   bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
   bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
   bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
-  bash_profile_check "$file" "Bash: HISTSIZE=-1 (sin límite de líneas en memoria)" 'export HISTSIZE=-1'
-  bash_profile_check "$file" "Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)" 'export HISTFILESIZE=-1'
-  bash_profile_check "$file" "Bash: no omite comandos del historial" 'export HISTCONTROL=' 'unset HISTIGNORE'
+  bash_profile_check "$file" "Bash: HISTSIZE=-1 (sin límite de líneas en memoria)" 'orangebox_history_guard() {' 'HISTSIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'
+  bash_profile_check "$file" "Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)" 'orangebox_history_guard() {' 'HISTFILESIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'
+  bash_profile_check "$file" "Bash: HISTCONTROL vacío (no se omiten comandos)" 'orangebox_history_guard() {' 'HISTCONTROL=' 'export HISTCONTROL'
+  bash_profile_check "$file" "Bash: HISTIGNORE eliminado" 'orangebox_history_guard() {' 'unset HISTIGNORE'
   bash_profile_check "$file" "Bash: historial acumulativo entre sesiones" 'shopt -s histappend'
   bash_profile_check "$file" "Bash: historial con fecha y hora" "export HISTTIMEFORMAT='%F %T '"
   bash_profile_check "$file" "Bash: bloquea history -c/-d/-w desde el wrapper" 'history() {' '*c*|*d*|*w*)'

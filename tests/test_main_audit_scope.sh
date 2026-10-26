@@ -93,6 +93,10 @@ grep -Fq 'IP forwarding=1: se usa rp_filter=2' "$MAIN" || fail "la política de 
 
 # Every managed Bash hardening control must be surfaced separately in audit.
 grep -Fq 'bash_audit_profile_controls "$target"' "$MAIN" || fail "Bash no informa cada control del perfil en audit"
+grep -Fq "'orangebox_history_guard() {' 'HISTSIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTSIZE no acepta la implementación del guard"
+grep -Fq "'orangebox_history_guard() {' 'HISTFILESIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTFILESIZE no acepta la implementación del guard"
+grep -Fq "'orangebox_history_guard() {' 'HISTCONTROL=' 'export HISTCONTROL'" "$MAIN" || fail "el audit de HISTCONTROL no acepta su exportación en líneas separadas"
+grep -Fq 'Bash: HISTIGNORE eliminado' "$MAIN" || fail "el perfil no revisa HISTIGNORE de forma individual"
 for control in \
   'Bash timeout de usuario: TMOUT=120 y readonly' \
   'Bash: HISTSIZE=-1 (sin límite de líneas en memoria)' \
