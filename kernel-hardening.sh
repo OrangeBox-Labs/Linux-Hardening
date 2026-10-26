@@ -70,8 +70,12 @@ kernel_backup_file() {
   [ ! -L "$source" ] || { echo "[ERROR] $source es un symlink; no se modifica." >&2; return 1; }
   backup="$backup_dir$source"
   parent="$(dirname "$backup")"
-  if ! mkdir -p "$parent" || ! chmod 700 "$backup_dir" 2>/dev/null && [ ! -d "$backup_dir" ]; then
-    echo "[ERROR] No se pudo preparar el destino del backup para $source."
+  if ! mkdir -p "$parent"; then
+    echo "[ERROR] No se pudo preparar el destino del backup para $source." >&2
+    return 1
+  fi
+  if [ -L "$backup_dir" ] || [ ! -d "$backup_dir" ] || ! chmod 700 "$backup_dir"; then
+    echo "[ERROR] No se pudo asegurar el directorio del backup de kernel." >&2
     return 1
   fi
   mode="$(stat -c '%a' "$backup_dir" 2>/dev/null || true)"
