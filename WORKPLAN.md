@@ -33,7 +33,7 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Cambiar `FS-hardening.sh` a auditoría por defecto y `--fix` explícito; pedir aprobación individual para restricciones de montaje, `hidepid=2`, bloqueo de módulos y deshabilitación de autofs; no descargar módulos cargados en caliente.
 - [x] Añadir al baseline principal los controles `kernel.yama.ptrace_scope`, `vm.mmap_min_addr`, `kernel.unprivileged_bpf_disabled` y `user.max_user_namespaces`, usando la ruta de validación/confirmación de sysctl.
 - [x] Añadir pruebas iniciales para los comportamientos de filesystem y calidad del verificador CIS.
-- [ ] Confirmar CI de los cambios de este ciclo; el seguimiento vigente está en «Auditoría CIS / estado del repositorio» más abajo.
+- [x] El código funcional del commit `45d3cd2f5d2c658556bcc3ab9ed8fbd9d5b92e2c` pasó CI run `40402420319` (sintaxis, regresiones y compatibilidad CentOS 6/7 + AlmaLinux 8/9/10); revalidar el HEAD final tras las actualizaciones documentales.
 
 ### Auditoría CIS / estado del repositorio — 2026-10-26
 
@@ -42,8 +42,9 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [x] Detectar un falso PASS en las comprobaciones de montaje: `findmnt --kernel /ruta` podía devolver el filesystem padre y hacer creer que la ruta tenía montaje dedicado/opciones propias.
 - [x] Añadir en la rama `cis-mount-audit-and-status` helpers de mountpoint exacto, prueba unitaria con `findmnt` simulado y ejecución desde el workflow CI.
 - [x] Alinear el comentario de versión del baseline con `SCRIPT_VERSION=1.4.26` y enlazar el tablero `PROJECT-STATUS.md` desde README.
-- [ ] Validar la sintaxis de los archivos modificados y ejecutar las pruebas CIS en esta rama.
-- [ ] Confirmar CI completo y compatibilidad CentOS 6/7 + AlmaLinux 8/9/10; no integrar en `main` antes de comprobarlo.
+- [x] Validar sintaxis y ejecutar las pruebas CIS/nuevas regresiones en la rama (CI run `40402420319`, commit funcional `45d3cd2f5d2c658556bcc3ab9ed8fbd9d5b92e2c`).
+- [x] Confirmar la matriz CI CentOS 6/7 + AlmaLinux 8/9/10 para ese commit.
+- [ ] Confirmar CI verde para el HEAD final tras las actualizaciones documentales; no integrar en `main` antes de comprobarlo.
 - [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9. Añadir tests de lectura CIS para sysctl de red y logging; elegir/tailorear el perfil journald o rsyslog sin deshabilitar colectores automáticamente.
 - [x] Corregir en la rama el control SELinux de arranque para revisar kernel activo y fuentes BLS/GRUB/EFI, y los checks de core dumps para resolver `systemd-analyze cat-config`/drop-ins; evidencia incompleta queda en WARN.
 - [x] Añadida `tests/test_cis_effective_config.sh` para verificar overrides de systemd y argumentos de arranque, y conectada al workflow.
@@ -68,10 +69,11 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 
 ### Validación final pendiente
 
-- [ ] Ejecutar `bash -n` sobre todos los scripts modificados.
-- [ ] Ejecutar las regresiones nuevas y las existentes.
-- [ ] Confirmar CI para CentOS 6/7 y AlmaLinux 8/9/10.
-- [ ] Verificar el árbol Git y que todos los entrypoints conserven `100755`.
+- [x] Ejecutar `bash -n` sobre todos los scripts modificados (CI run `40402420319`).
+- [x] Ejecutar las regresiones nuevas y las existentes (incluye los tests de mountpoint, coredump/SELinux, policy guards y SSH avanzado).
+- [x] Confirmar CI para CentOS 6/7 y AlmaLinux 8/9/10 para el commit funcional validado.
+- [x] Verificar el árbol Git y que los entrypoints conserven `100755` mediante el paso automatizado de CI.
+- [ ] Reconfirmar CI para el HEAD final después de actualizar este plan y `PROJECT-STATUS.md`.
 - [ ] Actualizar este archivo con el commit final y las limitaciones que sigan abiertas.
 
 ## Punto de reanudación
