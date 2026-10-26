@@ -316,7 +316,7 @@ check_userns() {
     else
       warn "user.max_user_namespaces no esta disponible en este kernel; no se puede verificar ni aplicar esta mitigacion mediante sysctl."
     fi
-    return 2
+    return 0
   fi
 
   if [[ "$v" == "0" ]]; then

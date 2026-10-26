@@ -36,7 +36,7 @@ classify_listening_process() {
       case "$port" in 25|465|587) printf '%s\n' CORREO ;; *) printf '%s\n' NO_CLASIFICADO ;; esac
       ;;
     mariadbd|mysqld|mongod|postgres|postgresql|redis-server|memcached) printf '%s\n' BASE_DATOS ;;
-    zabbix_agent2|zabbix_agentd|node_exporter|fluent-bit|otelcol|otelopscol|opentelemetry-collector|prometheus|grafana-server|dcgm-exporter)
+    zabbix_agent2|zabbix_agentd|zabbix_proxy|zabbix_server|snmpd|node_exporter|fluent-bit|otelcol|otelopscol|opentelemetry-collector|prometheus|grafana-server|dcgm-exporter)
       printf '%s\n' MONITOREO ;;
     *) printf '%s\n' NO_CLASIFICADO ;;
   esac
@@ -97,11 +97,13 @@ parse_netstat_socket_line() {
 audit_listening_ports() {
   local socket_output="" line parsed protocol state port local_addr process category scope note proto_upper first_token
   local count=0 skipped=0 ss_ok=false netstat_ok=false
+  local ss_output_nonempty=false netstat_output_nonempty=false
   local -a rows=()
 
   if command -v ss >/dev/null 2>&1; then
     if socket_output="$(ss -H -lntup 2>/dev/null)"; then
       ss_ok=true
+      [ -n "$socket_output" ] && ss_output_nonempty=true
       while IFS= read -r line; do
         [ -n "$line" ] || continue
         if parsed="$(parse_ss_socket_line "$line")"; then
@@ -117,11 +119,12 @@ audit_listening_ports() {
 
   # ss puede existir y aun así usar un formato no soportado por este parser.
   # Si hay líneas de socket no interpretadas, usa netstat cuando esté disponible.
-  if [ "$ss_ok" != true ] || [ "$skipped" -gt 0 ]; then
+  if [ "$ss_ok" != true ] || [ "$skipped" -gt 0 ] || [ "$count" -eq 0 ] || [ "$ss_output_nonempty" != true ]; then
     if command -v netstat >/dev/null 2>&1; then
       echo "[INFO] ss no produjo un inventario interpretable completo; intentando netstat."
       if socket_output="$(netstat -plntu 2>/dev/null)"; then
         netstat_ok=true
+        [ -n "$socket_output" ] && netstat_output_nonempty=true
         rows=()
         count=0
         skipped=0
@@ -168,7 +171,12 @@ audit_listening_ports() {
   echo "todos los backends de firewall, las rutas y las reglas externas."
   echo "Los procesos NO_CLASIFICADO quedan para revisión; no se recomiendan eliminaciones de paquetes."
 
-  if [ "$skipped" -gt 0 ] || { [ "$count" -eq 0 ] && [ "$ss_ok" != true ] && [ "$netstat_ok" != true ]; }; then
+  if [ "$skipped" -gt 0 ] || {
+    [ "$count" -eq 0 ] &&
+    { [ "$ss_ok" != true ] || [ "$ss_output_nonempty" != true ]; } &&
+    { [ "$netstat_ok" != true ] || [ "$netstat_output_nonempty" != true ]; }
+  }; then
+    echo "[ERROR] No se pudo confirmar un inventario interpretable de sockets; no se informa como auditoría correcta." >&2
     return 2
   fi
 }

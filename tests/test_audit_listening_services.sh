@@ -60,4 +60,25 @@ IFS=$'\t' read -r protocol state port address process category scope <<< "$unkno
 if grep -qiE 'yum remove|dnf remove|ELIMINAR' "$ROOT_DIR/audit-listening-services.sh"; then
   fail "el auditor contiene sugerencias de eliminación de paquetes"
 fi
-pass "TCP/UDP, netstat legacy, Pure-FTPd, PowerDNS, MongoDB, monitoreo, bind y procesos desconocidos"
+# Regression: old ss versions can exist but return empty output with modern flags.
+mockbin="$(mktemp -d)"
+trap 'rm -rf "$mockbin"' EXIT
+cat >"$mockbin/ss" <<'MOCK'
+#!/bin/sh
+exit 0
+MOCK
+cat >"$mockbin/netstat" <<'MOCK'
+#!/bin/sh
+cat <<'OUT'
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address Foreign Address State PID/Program name
+tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN 123/sshd
+udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd
+OUT
+MOCK
+chmod +x "$mockbin/ss" "$mockbin/netstat"
+fallback_output="$(PATH="$mockbin:$PATH" audit_listening_ports)" || fail "empty ss did not recover netstat"
+printf '%s\n' "$fallback_output" | grep -Fq 'Fuente: netstat (compatibilidad legacy)' || fail "netstat source not reported"
+printf '%s\n' "$fallback_output" | grep -Fq 'Sockets procesados: 2' || fail "netstat fallback did not process both sockets"
+pass "fallback to netstat when ss exists but returns empty output"
+pass "TCP/UDP, netstat legacy, Pure-FTPd, PowerDNS, MongoDB, monitoring, bind and unknown processes"

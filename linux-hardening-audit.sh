@@ -185,13 +185,20 @@ run_audit_module() {
     return 1
   fi
 
-  if [ "$name" = "ssh-complete" ] &&
-     [[ "$OS_MAJOR" =~ ^[0-9]+$ ]] && [ "$OS_MAJOR" -lt 7 ]; then
-    echo
-    echo "========== AUDITORÍA: $name ($script) =========="
-    echo "[N/A] $script declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10; se omite en ${OS_NAME:-EL $OS_VERSION}."
-    MODULES_SKIPPED=$((MODULES_SKIPPED + 1))
-    return 0
+  local skip_reason=""
+  if [[ "$OS_MAJOR" =~ ^[0-9]+$ ]] && [ "$OS_MAJOR" -lt 7 ]; then
+    case "$name" in
+      ssh-complete) skip_reason="declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10" ;;
+      grub-full) skip_reason="usa rutas y controles de GRUB2; CentOS 6 utiliza GRUB legacy" ;;
+      auditd-full) skip_reason="declara soporte para RHEL/CentOS/Rocky/AlmaLinux 7-10" ;;
+    esac
+    if [ -n "$skip_reason" ]; then
+      echo
+      echo "========== AUDITORÍA: $name ($script) =========="
+      echo "[N/A] $script $skip_reason; se omite en ${OS_NAME:-EL $OS_VERSION} para evitar conclusiones falsas."
+      MODULES_SKIPPED=$((MODULES_SKIPPED + 1))
+      return 0
+    fi
   fi
 
   echo

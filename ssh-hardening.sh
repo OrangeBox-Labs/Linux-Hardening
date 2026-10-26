@@ -328,7 +328,10 @@ check_idle_timeout() {
   local interval=$(sshd -T 2>/dev/null | grep -i "clientaliveinterval" | awk '{print $2}')
   local count=$(sshd -T 2>/dev/null | grep -i "clientalivecountmax" | awk '{print $2}')
 
-  if [ -n "$interval" ] && [ "$interval" -le 300 ] 2>/dev/null && [ "$count" -le 3 ] 2>/dev/null; then
+  if [ -n "$interval" ] && [ "$interval" -gt 0 ] 2>/dev/null &&
+     [ "$interval" -le 300 ] 2>/dev/null &&
+     [ -n "$count" ] && [ "$count" -ge 1 ] 2>/dev/null &&
+     [ "$count" -le 3 ] 2>/dev/null; then
     echo -e "${GREEN}[✓] Idle timeout configurado: $interval segundos, $count intentos${NC}"
   else
     echo -e "${RED}[!] Idle timeout no configurado correctamente${NC}"
@@ -337,11 +340,11 @@ check_idle_timeout() {
       sed -i '/^#\?\s*ClientAliveInterval/d' "$SSHD_CONFIG"
       sed -i '/^#\?\s*ClientAliveCountMax/d' "$SSHD_CONFIG"
       echo "ClientAliveInterval 300" >>"$SSHD_CONFIG"
-      echo "ClientAliveCountMax 0" >>"$SSHD_CONFIG"
-      echo -e "${GREEN}[✓] Idle timeout configurado: 300 segundos${NC}"
+      echo "ClientAliveCountMax 3" >>"$SSHD_CONFIG"
+      echo -e "${GREEN}[✓] ClientAliveInterval=300 y ClientAliveCountMax=3 configurados${NC}"
       FIXED=$((FIXED + 1))
     else
-      echo -e "${YELLOW}    Recomendacion: ClientAliveInterval 300 y ClientAliveCountMax 0${NC}"
+      echo -e "${YELLOW}    Recomendacion: ClientAliveInterval 300 y ClientAliveCountMax 3${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   fi
@@ -436,7 +439,7 @@ check_extra_security() {
   elif [ "$ssh_version" -ge 7 ] 2>/dev/null; then
     check_sshd_param "pubkeyacceptedkeytypes" "$accepted_key_algorithms" "Algoritmos de clave publica" "PubkeyAcceptedKeyTypes $accepted_key_algorithms"
   else
-    echo -e "${YELLOW}[!] No se pudo detectar version, omitiendo configuracion de algoritmos de clave${NC}"
+    echo -e "${YELLOW}[!] OpenSSH antiguo detectado (versión < 7 o no identificada); los algoritmos modernos no se evalúan ni aplican aquí. Requiere revisión específica.${NC}"
   fi
 
   check_sshd_param "compression" "no" "Compresion" "Compression no"
@@ -482,7 +485,11 @@ show_summary() {
   echo -e "\n${YELLOW}RESUMEN:${NC}"
   echo -e "  • Correcciones aplicadas: ${GREEN}$FIXED${NC}"
   echo -e "  • Advertencias pendientes: ${YELLOW}$WARNINGS${NC}"
-  echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "  • Backup disponible en: ${GREEN}$BACKUP_DIR${NC}"
+  else
+    echo -e "  • Backup: no creado (modo auditoría)"
+  fi
 
   echo -e "\n${YELLOW}PARA VERIFICAR CONFIGURACION:${NC}"
   echo -e "  sshd -T"

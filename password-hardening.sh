@@ -63,7 +63,7 @@ password_aging_module(){
   current_max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' "$LOGIN_DEFS")
   info "PASS_MAX_DAYS=${current_max:-no definido} se conserva sin cambios por política operacional."
   set_conf_value "$LOGIN_DEFS" PASS_MIN_DAYS 0
-  set_conf_value "$LOGIN_DEFS" PASS_WARN_AGE -1
+  set_conf_value "$LOGIN_DEFS" PASS_WARN_AGE 7
   info "login.defs solo define defaults; no cambia el aging de cuentas existentes. Se auditan abajo y no se ejecuta chage masivo automáticamente."
 
   if command -v chage >/dev/null 2>&1; then
