@@ -28,7 +28,7 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)-$"
+BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 
 # ==============================================
 # FUNCION PARA MOSTRAR AYUDA
