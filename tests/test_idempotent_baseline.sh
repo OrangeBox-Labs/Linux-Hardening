@@ -38,11 +38,28 @@ grep -Fq ': > "$motd_tmp"' "$CORE" || fail "/etc/motd estático debe quedar vac�
 grep -Fq 'figlet -f small OrangeBox' "$MOTD_LIB" || fail "falta FIGlet con la fuente small"
 grep -Fq 'yum -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con yum"
 grep -Fq 'dnf -y install figlet' "$MOTD_LIB" || fail "falta el intento de instalación con dnf"
-grep -Fq 'SSH_CONNECTION' "$MOTD_LIB" || fail "el MOTD no detecta la IP remota SSH"
+grep -Fq 'SSH_CONNECTION' "$MOTD_LIB" || fail "el MOTD no detecta la IP local de la sesión SSH"
 grep -Fq '/proc/uptime' "$MOTD_LIB" || fail "uptime no es compatible con sistemas antiguos"
 grep -Fq '/proc/loadavg' "$MOTD_LIB" || fail "el MOTD no incluye load average"
-grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$MOTD_LIB" || fail "falta el título del banner"
-grep -Fq 'AVISO DE SEGURIDAD' "$MOTD_LIB" || fail "falta el aviso de seguridad"
+grep -Fq 'IP interna:' "$MOTD_LIB" || fail "el MOTD no rotula la IP interna"
+if grep -Eq 'IP remota:|OB_REMOTE_IP|AVISO DE SEGURIDAD|Todas las conexiones y los comandos ejecutados quedan|reportado a las autoridades' "$MOTD_LIB"; then
+  fail "el MOTD de shell todavía contiene la IP remota o el aviso pre-login"
+fi
+grep -Fq 'SISTEMA DE ACCESO RESTRINGIDO' "$CORE" || fail "falta el título del banner previo a autenticación"
+grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$CORE" || fail "el aviso de auditoría no está en el banner pre-login"
+grep -Fq 'reportado a las autoridades competentes.' "$CORE" || fail "falta el aviso de reporte de actividad no autorizada"
+grep -Fq 'IP remota' "$CORE" && fail "la IP remota no debe mostrarse en el MOTD de shell"
+login_banner_tmp="$(mktemp)"
+trap 'rm -f "$login_banner_tmp"' EXIT
+awk '
+  index($0, "cat > \\"$login_tmp\\" <<\\047ORANGEBOX_LOGIN_BANNER\\047") { in_banner=1; next }
+  in_banner && $0 == "ORANGEBOX_LOGIN_BANNER" { exit }
+  in_banner { print }
+' "$CORE" > "$login_banner_tmp"
+[ -s "$login_banner_tmp" ] || fail "no se pudo extraer el banner pre-login"
+if grep -Eq '\\| \\(_\\) \\||ORANGEBOX_ASCII|figlet' "$login_banner_tmp"; then
+  fail "el banner pre-login no debe repetir el logotipo ASCII/FIGlet"
+fi
 
 # Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
 grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
@@ -51,7 +68,7 @@ grep -Fq 'readonly TMOUT' "$CORE" || fail "TMOUT no está protegido contra cambi
 grep -Fq 'solo aplica a shells interactivos' "$CORE" || fail "no se limita el resto del perfil a shells interactivos"
 profile_tmp="$(mktemp)"
 motd_profile_tmp="$(mktemp)"
-trap 'rm -f "$profile_tmp" "$motd_profile_tmp"' EXIT
+trap 'rm -f "$profile_tmp" "$motd_profile_tmp" "$login_banner_tmp"' EXIT
 awk '
   index($0, "cat >") && index($0, "ORANGEBOX_BASH") { in_profile=1; next }
   in_profile && $0 == "ORANGEBOX_BASH" { exit }
