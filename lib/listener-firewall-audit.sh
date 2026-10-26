@@ -155,37 +155,85 @@ lfa_family_port_state() {
 }
 
 lfa_audit_listener_firewall() {
-  local line protocol state recvq sendq local_addr peer rest port process families family assessment
+  local line protocol state recvq sendq local_addr peer rest port process families family assessment address
   local sockets=0 checked=0 controlled=0 unprotected=0 unknown=0 skipped=0
+  local socket_output="" socket_source=""
   LFA_WARNINGS=0
-  if ! command -v ss >/dev/null 2>&1; then
-    echo "[INFO] ss no está disponible; no se puede correlacionar listeners con INPUT. Firewall intacto."
+
+  # Do not use ss -H: older iproute/ss builds on CentOS 6 may not support it.
+  if command -v ss >/dev/null 2>&1; then
+    if socket_output="$(ss -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then
+      socket_source=ss
+    fi
+  fi
+  # netstat is a read-only fallback for older/minimal installations without usable ss.
+  if [ -z "$socket_source" ] && command -v netstat >/dev/null 2>&1; then
+    if socket_output="$(netstat -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then
+      socket_source=netstat
+    fi
+  fi
+  if [ -z "$socket_source" ]; then
+    echo "[INFO] Ni ss ni netstat entregaron una lista de sockets en escucha; no se puede verificar la cobertura INPUT. Firewall intacto."
     return 0
   fi
-  local socket_output
-  if ! socket_output="$(ss -H -lntup 2>/dev/null)"; then
-    echo "[INFO] No se pudo consultar ss; no se puede verificar la cobertura INPUT. Firewall intacto."
-    return 0
-  fi
+
   lfa_load_firewall_snapshots
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    IFS=' ' read -r protocol state recvq sendq local_addr peer rest <<< "$line"
-    [ -n "$protocol" ] && [ -n "$local_addr" ] || { skipped=$((skipped+1));continue; }
-    port="${local_addr##*:}"
-    [[ "$port" =~ ^[0-9]+$ ]] || { skipped=$((skipped+1));continue; }
-    process="$(printf '%s\n' "$line" | sed -n 's/.*users:((\"//;t got;b;:got s/\".*//;p')"
-    [ -n "$process" ] || process=desconocido
-    sockets=$((sockets+1))
-    case "$local_addr" in 127.*:*|localhost:*|'[::1]:'*|'::1:'*) continue ;; esac
-    case "$local_addr" in
-      '0.0.0.0:'*) families="ipv4" ;;
-      '[::]:'*|'::: '*|':::'*) families="ipv6" ;;
-      '*:'*) families="ipv4 ipv6" ;;
-      *)
-        if [[ "$local_addr" == *"["* || "$(printf '%s' "$local_addr" | tr -cd ':' | wc -c)" -gt 1 ]]; then families="ipv6"; else families="ipv4"; fi
-        ;;
+    # Headers from ss/netstat are not sockets and should not inflate the skipped count.
+    case "$line" in
+      Netid\ *|State\ *|Proto\ *|Active\ *) continue ;;
     esac
+
+    if [ "$socket_source" = ss ]; then
+      IFS=' ' read -r protocol state recvq sendq local_addr peer rest <<< "$line"
+      case "$protocol" in
+        tcp|tcp6) [ "$state" = LISTEN ] || continue; protocol=tcp ;;
+        udp|udp6) protocol=udp ;;
+        *) skipped=$((skipped+1)); continue ;;
+      esac
+      process="$(printf '%s\n' "$line" | sed -n 's/.*users:(("//;t got;b;:got s/".*//;p')"
+      [ -n "$process" ] || process=desconocido
+    else
+      # netstat -lntup columns: Proto Recv-Q Send-Q Local Foreign State PID/Program.
+      IFS=' ' read -r protocol recvq sendq local_addr peer state rest <<< "$line"
+      case "$protocol" in
+        tcp|tcp6)
+          [ "$state" = LISTEN ] || continue
+          protocol=tcp
+          process="${rest:-desconocido}"
+          ;;
+        udp|udp6)
+          protocol=udp
+          process="${rest:-$state}"
+          state=UNCONN
+          ;;
+        *)
+          skipped=$((skipped+1))
+          continue
+          ;;
+      esac
+    fi
+
+    [ -n "$protocol" ] && [ -n "$local_addr" ] || { skipped=$((skipped+1)); continue; }
+    port="${local_addr##*:}"
+    case "$port" in ''|*[!0-9]*) skipped=$((skipped+1)); continue ;; esac
+
+    sockets=$((sockets+1))
+    address="${local_addr%:$port}"
+    case "$address" in 127.*|localhost|::1|'[::1]') continue ;; esac
+
+    # IPv4 addresses have dots and no colons in the host part. IPv6 addresses
+    # have colons; wildcard '*' is ambiguous and must be checked for both families.
+    case "$address" in
+      0.0.0.0) families=ipv4 ;;
+      ::|'[::]') families=ipv6 ;;
+      '*') families="ipv4 ipv6" ;;
+      *:*) families=ipv6 ;;
+      *.*) families=ipv4 ;;
+      *) families="ipv4 ipv6" ;;
+    esac
+
     for family in $families; do
       [ "$family" != ipv6 ] || [ -d /proc/sys/net/ipv6 ] || continue
       assessment="$(lfa_family_port_state "$family" "$protocol" "$port")"
@@ -202,6 +250,7 @@ lfa_audit_listener_firewall() {
       esac
     done
   done <<< "$socket_output"
+
   [ "$sockets" -gt 0 ] || echo "[INFO] No se encontraron sockets TCP/UDP en escucha."
   [ "$skipped" -eq 0 ] || echo "[INFO] Sockets omitidos por formato no reconocido: $skipped"
   printf '[INFO] Auditoría de listeners/INPUT: sockets=%s; familias verificadas=%s; controladas=%s; sin control detectado=%s; indeterminadas=%s.\n' "$sockets" "$checked" "$controlled" "$unprotected" "$unknown"

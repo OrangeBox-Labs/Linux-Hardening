@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.9, detección compatible con CentOS 6, banner pre-login centrado y panel operativo de shell. |
+| `linux-hardening.sh` | Baseline 1.4.10, detección y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -193,7 +193,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Orquestador principal |
+| `linux-hardening.sh` | Baseline 1.4.10, detección y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
 | `post-install.sh` | Preparación inicial |
@@ -395,3 +395,10 @@ FIGlet se usa para generar el logo estático del banner previo a la autenticaci�
 ### Limitación de la IP remota antes del login
 
 El `Banner` estándar de OpenSSH envía el contenido estático de `/etc/issue.net`; no expande una variable distinta por conexión. Por eso el aviso previo al login no puede imprimir la IP concreta del cliente usando solamente ese archivo. La IP de origen debe verificarse en los registros de autenticación SSH. El panel de shell muestra la IP interna del servidor a la que se conectó el cliente.
+
+
+### Compatibilidad adicional con CentOS/RHEL 6
+
+El auditor de listeners consulta `ss -lntup` sin depender de la opción `-H` no disponible en algunas versiones antiguas y usa `netstat -lntup` como alternativa cuando `ss` no entrega datos. Las cabeceras se ignoran y las direcciones IPv4 no se clasifican como IPv6.
+
+En CentOS/RHEL 6, la persistencia de los parámetros sysctl apunta a `/etc/sysctl.conf`; no se crea `/etc/sysctl.d`. Cada modificación sigue requiriendo confirmación por parámetro. La comprobación de logs verifica `rsyslog` en lugar de exigir `systemd-journald` en ese sistema legacy.

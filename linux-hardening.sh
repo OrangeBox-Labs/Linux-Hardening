@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.9 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.10 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.9
+SCRIPT_VERSION=1.4.10
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -90,8 +90,17 @@ detect_os(){
 }
 prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
+orangebox_sysctl_persistence_target() {
+  if [ "${OS_VERSION:-}" = 6 ]; then
+    printf '%s\\n' /etc/sysctl.conf
+  else
+    printf '%s\\n' /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+  fi
+}
+
 set_sysctl(){
-  local key="$1" value="$2" file=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+  local key="$1" value="$2" file
+  file="$(orangebox_sysctl_persistence_target)"
   if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
@@ -100,7 +109,8 @@ set_sysctl(){
 }
 
 set_kptr_restrict_policy(){
-  local file=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+  local file
+  file="$(orangebox_sysctl_persistence_target)"
   if sysctl_safe_apply_kptr_restrict_policy "$file" "$BACKUP_DIR" "$AUTO_FIX"; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
@@ -111,9 +121,15 @@ set_kptr_restrict_policy(){
 SYNFLOOD_FILE=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
 SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn"
 SYNFLOOD_VALUES=(1 4096 4096)
+synflood_select_persistence_target() {
+  SYNFLOOD_FILE="$(orangebox_sysctl_persistence_target)"
+}
 synflood_module(){
   echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
-  [ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }
+  synflood_select_persistence_target
+  if [ "$SYNFLOOD_FILE" = /etc/sysctl.conf ]; then
+    info "CentOS/RHEL 6: se usa /etc/sysctl.conf; no se crea /etc/sysctl.d."
+  fi
 
   local idx=0 key desired
   for key in $SYNFLOOD_KEYS; do
@@ -132,7 +148,7 @@ synflood_module(){
 # read-only active/persistent checks used by the real module.
 # Output is captured so the preflight does not duplicate the module's report.
 synflood_state_compliant() {
-  [ -d /etc/sysctl.d ] || return 1
+  synflood_select_persistence_target
   local idx=0 key desired check_output
   for key in $SYNFLOOD_KEYS; do
     desired="${SYNFLOOD_VALUES[$idx]}"
@@ -407,9 +423,28 @@ filesystem_module(){
   done
 }
 auditd_module(){ echo -e "\n$BLUE### AUDITD ###$NC"; command -v auditctl >/dev/null 2>&1&&systemctl is-active auditd >/dev/null 2>&1&&ok "auditd activo"||warn "auditd ausente/inactivo"; [ -d /etc/audit/rules.d ]&&ok "rules.d disponible"||warn "rules.d no existe"; }
+rsyslog_legacy_is_active() {
+  if command -v service >/dev/null 2>&1 && service rsyslog status >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v pgrep >/dev/null 2>&1 && pgrep -x rsyslogd >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 rsyslog_module(){
-  echo -e "\n$BLUE### JOURNAL ###$NC"
+  echo -e "\\n$BLUE### JOURNAL / SYSLOG ###$NC"
   local conf=/etc/systemd/journald.conf
+
+  if [ "${OS_VERSION:-}" = 6 ]; then
+    if rsyslog_legacy_is_active; then
+      ok "rsyslog activo; journald no aplica a CentOS/RHEL 6"
+    else
+      warn "rsyslog ausente/inactivo; journald no aplica a CentOS/RHEL 6"
+    fi
+    return
+  fi
 
   if [ "$AUTO_FIX" != true ]; then
     if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf" 2>/dev/null; then
@@ -467,6 +502,10 @@ rsyslog_module(){
 # 0 = already compliant; 1 = configuration/directory requires a change; 2 = unsafe/unavailable.
 rsyslog_state_status() {
   local conf=/etc/systemd/journald.conf
+  if [ "${OS_VERSION:-}" = 6 ]; then
+    rsyslog_legacy_is_active && return 0
+    return 1
+  fi
   [ -f "$conf" ] || return 2
   if [ -d /var/log/journal ] &&
      grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then

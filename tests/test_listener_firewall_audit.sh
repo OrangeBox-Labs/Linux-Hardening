@@ -140,4 +140,42 @@ RULES
 )
 assert_state UNCONTROLLED "$(lfa_nft_text_state "$nft_source_filter" ipv4 tcp 3000)" "regla nft limitada a ciertos orígenes no equivale a control global"
 
+# Live command parser compatibility tests: synthetic fixtures only, no host firewall changes.
+lfa_load_firewall_snapshots() {
+  LFA_FIREWALL_SNAPSHOT_LOADED=true
+  LFA_IPV4_RULES_AVAILABLE=false
+  LFA_IPV6_RULES_AVAILABLE=false
+  LFA_NFT_RULES_AVAILABLE=false
+  LFA_IPV4_RULES=""
+  LFA_IPV6_RULES=""
+  LFA_NFT_RULES=""
+}
+
+ss() {
+  [ "$1" = "-lntup" ] || return 2
+  cat <<'SSFIXTURE'
+Netid State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+tcp   LISTEN 0      128    192.0.2.10:22       0.0.0.0:*       users:(("sshd",123,3))
+udp   UNCONN 0      0      192.0.2.10:53       0.0.0.0:*       users:(("named",456,7))
+SSFIXTURE
+}
+audit_ss="$(lfa_audit_listener_firewall)"
+case "$audit_ss" in *"sockets=2;"*) ;; *) fail "el parser ss con cabecera no contabilizó 2 sockets: $audit_ss" ;; esac
+case "$audit_ss" in *"Sockets omitidos por formato no reconocido"*) fail "la cabecera ss no debe contar como socket omitido" ;; esac
+case "$audit_ss" in *"familia ipv6"*) fail "las direcciones IPv4 se clasificaron incorrectamente como IPv6" ;; esac
+
+ss() { return 1; }
+netstat() {
+  [ "$1" = "-lntup" ] || return 2
+  cat <<'NETSTATFIXTURE'
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address       Foreign Address     State       PID/Program name
+tcp        0      128 192.0.2.11:22      0.0.0.0:*           LISTEN      111/sshd
+udp        0      0   192.0.2.11:53      0.0.0.0:*                       222/named
+NETSTATFIXTURE
+}
+audit_netstat="$(lfa_audit_listener_firewall)"
+case "$audit_netstat" in *"sockets=2;"*) ;; *) fail "el fallback netstat no contabilizó sockets TCP/UDP: $audit_netstat" ;; esac
+case "$audit_netstat" in *"Sockets omitidos por formato no reconocido"*) fail "las cabeceras de netstat no deben contar como sockets omitidos" ;; esac
+
 pass "política INPUT, reglas por puerto, cadenas alcanzables, familia/protocolo y nftables"

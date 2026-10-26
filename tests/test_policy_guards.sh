@@ -69,4 +69,10 @@ grep -Fq 'no instalará ni activará fapolicyd' "$CORE" || fail "falta la polít
 if grep -Eq '(dnf|yum)[[:space:]]+install.*fapolicyd|systemctl[[:space:]]+(enable|start|restart).*fapolicyd' "$CORE"; then
   fail "el baseline intenta instalar o activar fapolicyd"
 fi
+# CentOS/RHEL 6 uses the legacy syslog stack; do not require journald.
+grep -Fq 'rsyslog_legacy_is_active()' "$CORE" || fail "falta comprobar rsyslog en CentOS/RHEL 6"
+grep -Fq 'journald no aplica a CentOS/RHEL 6' "$CORE" || fail "el baseline sigue tratando journald como obligatorio en CentOS 6"
+grep -Fq 'if [ "${OS_VERSION:-}" = 6 ]; then' "$CORE" || fail "no se detecta la generación legacy para la auditoría de logs"
+pass "syslog/journald se distingue correctamente en CentOS/RHEL 6"
+
 pass "fapolicyd no se instala ni activa y se informa la detección de Wazuh"
