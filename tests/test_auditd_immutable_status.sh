@@ -68,14 +68,21 @@ assert_state() {
   # estar silenciosa en modo auditoría para no duplicar ni sumar la advertencia.
   AUTO_FIX=false
   WARNINGS=0
-  modern_output="$(add_audit_rules 2>&1; configure_audit_immutable 2>&1)" ||
-    fail "la comprobación moderna falló con enabled=$state"
-  printf '%s\\n' "$modern_output" | grep -Fq -- "$expected" ||
+  : > "$TMP_DIR/modern-output"
+  add_audit_rules > "$TMP_DIR/modern-output" 2>&1 ||
+    fail "add_audit_rules falló con enabled=$state"
+  warnings_after_report="$WARNINGS"
+  configure_audit_immutable >> "$TMP_DIR/modern-output" 2>&1 ||
+    fail "configure_audit_immutable falló con enabled=$state"
+  [ "$WARNINGS" -eq "$warnings_after_report" ] ||
+    fail "configure_audit_immutable sumó una advertencia duplicada con enabled=$state"
+  modern_output="$(cat "$TMP_DIR/modern-output")"
+  printf '%s\n' "$modern_output" | grep -Fq -- "$expected" ||
     fail "la ruta moderna no mostró el estado esperado para enabled=$state: $expected"
-  if printf '%s\\n' "$modern_output" | grep -Eq 'auditd no está en modo inmutable|auditd ya está en modo inmutable'; then
+  if printf '%s\n' "$modern_output" | grep -Eq 'auditd no está en modo inmutable|auditd ya está en modo inmutable'; then
     fail "la ruta moderna duplicó el estado auditd para enabled=$state"
   fi
-  pass "ruta moderna: enabled=$state se reporta sin duplicación"
+  pass "ruta moderna: enabled=$state se reporta una vez y no duplica advertencias"
 }
 
 assert_state "1"   "auditd está habilitado (enabled 1), pero las reglas siguen siendo modificables"   "Configuración de auditd inmutable - OK"
