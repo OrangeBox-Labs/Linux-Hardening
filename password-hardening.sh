@@ -35,38 +35,124 @@ get_el_major(){
   fi
   printf '%s\n' "$major"
 }
-backup_once(){ local src="$1"; [ -e "$src" ] || return 0; mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; cp -a "$src" "$BACKUP_DIR/$(basename "$src").before"; }
+backup_once(){
+  local src="$1"
+  [ -e "$src" ] || return 0
+  [ ! -L "$src" ] || { echo "[ERROR] $src es un enlace simbólico; no se respalda ni modifica automáticamente."; return 1; }
+  mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" && cp -a "$src" "$BACKUP_DIR/$(basename "$src").before"
+}
+
+password_parameter_description() {
+  case "$1" in
+    minlen) echo "Fija la longitud mínima de una contraseña nueva. Puede rechazar cambios de contraseña demasiado cortos; no modifica credenciales existentes." ;;
+    minclass) echo "Exige caracteres de distintas clases (mayúsculas, minúsculas, dígitos, símbolos). Puede rechazar frases largas que no cumplan las clases requeridas." ;;
+    difok) echo "Exige diferencias respecto de la contraseña anterior; un valor alto puede dificultar rotaciones legítimas." ;;
+    dictcheck) echo "Activa el control contra palabras comunes/de diccionario; puede rechazar frases de contraseña predecibles." ;;
+    usercheck) echo "Evita contraseñas que contengan datos del nombre del usuario; puede rechazar contraseñas que incluyan el identificador del usuario." ;;
+    maxrepeat) echo "Limita caracteres idénticos consecutivos; puede rechazar contraseñas con repeticiones largas." ;;
+    maxsequence) echo "Limita secuencias de caracteres consecutivos; puede rechazar patrones como abc o 123." ;;
+    PASS_MIN_DAYS) echo "Define el mínimo de días entre cambios para cuentas nuevas. 1 reduce la rotación repetitiva, pero puede impedir un cambio inmediato legítimo." ;;
+    PASS_WARN_AGE) echo "Define los días de aviso antes de la expiración para nuevas cuentas. No cambia la expiración de las cuentas existentes." ;;
+    ENCRYPT_METHOD) echo "Define el algoritmo por defecto para nuevos hashes de contraseña; no convierte los hashes existentes y una política incompatible puede afectar herramientas de autenticación antiguas." ;;
+    *) echo "Modifica un parámetro de política de contraseña; valida su efecto antes de aplicarlo." ;;
+  esac
+}
+
+confirm_password_setting() {
+  local file="$1" key="$2" current="$3" value="$4" effect="$5" answer=""
+  printf '\n[WARN] Cambio de política de autenticación: %s -> %s=%s\n' "$file" "$key" "$value"
+  printf 'Valor actual: %s\n' "${current:-no definido}"
+  printf 'Qué hace/riesgo: %s\n' "$effect"
+  printf '%s' "¿Aplicar este parámetro? [s/N]: "
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    printf '\n[WARN] No hay terminal interactiva; se omite el cambio por seguridad.\n'
+    return 1
+  fi
+  IFS= read -r answer </dev/tty || return 1
+  case "$answer" in s|S|si|SI|sí|Sí|SÍ) return 0 ;; *) printf '[INFO] Se conserva el valor actual de %s.\n' "$key"; return 1 ;; esac
+}
 
 set_conf_value(){
-  local file="$1" key="$2" value="$3" current
-  current=$(awk -v k="$key" '$1==k{v=$2} END{print v}' "$file" 2>/dev/null || true)
+  local file="$1" key="$2" value="$3" current="" effect="" style="space" tmp="" mode="644"
+  [ ! -L "$file" ] || { warn "$file es un enlace simbólico; no se modifica."; return 1; }
+  current="$(awk -v k="$key" '
+    function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
+    /^[ \t]*#/ || /^[ \t]*$/ {next}
+    {
+      line=$0; sub(/[ \t]+#.*/, "", line)
+      eq=index(line, "=")
+      if(eq){lhs=trim(substr(line,1,eq-1)); rhs=trim(substr(line,eq+1))}
+      else {split(line, a, /[ \t]+/); lhs=a[1]; rhs=a[2]}
+      if(lhs==k) v=rhs
+    }
+    END{print v}
+  ' "$file" 2>/dev/null || true)"
   if [ "$current" = "$value" ]; then ok "$file: $key=$value"; return 0; fi
-  warn "$file: $key actual=${current:-no configurado}, recomendado=$value"
-  $AUTO_FIX || return 0
-  backup_once "$file"
-  if grep -Eq "^[[:space:]]*${key}[[:space:]]+" "$file"; then
-    sed -ri "s|^[[:space:]]*${key}[[:space:]]+.*|${key} ${value}|" "$file"
+  effect="$(password_parameter_description "$key")"
+  echo -e "$YELLOW[WARN]$NC $file: $key actual=$current, recomendado=$value"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS+1)); return 0; fi
+  if ! confirm_password_setting "$file" "$key" "$current" "$value" "$effect"; then WARNINGS=$((WARNINGS+1)); return 0; fi
+  if [ -e "$file" ]; then
+    backup_once "$file" || { warn "No se pudo respaldar $file; no se modificó."; return 1; }
+    mode="$(stat -c %a "$file" 2>/dev/null || echo 644)"
   else
-    printf '%s %s\n' "$key" "$value" >> "$file"
+    [ -d "$(dirname "$file")" ] || mkdir -p "$(dirname "$file")" || { warn "No se pudo crear el directorio de $file."; return 1; }
+    mode=644
   fi
+  [ "$file" = "$PWQUALITY_CONF" ] && style="equals"
+  tmp="$(mktemp "$(dirname "$file")/.$(basename "$file").orangebox.XXXXXX")" || { warn "No se pudo crear temporal para $file."; return 1; }
+  if [ -f "$file" ]; then
+    awk -v k="$key" -v v="$value" -v style="$style" '
+      function trim(s){sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s}
+      function out(){if(style=="equals") print k " = " v; else print k " " v}
+      /^[ \t]*#/ {print; next}
+      /^[ \t]*$/ {print; next}
+      {
+        original=$0; line=$0; sub(/[ \t]+#.*/, "", line); eq=index(line, "=")
+        if(eq){lhs=trim(substr(line,1,eq-1))}
+        else {split(line, a, /[ \t]+/); lhs=a[1]}
+        if(lhs==k){if(!written){out(); written=1}; next}
+        print original
+      }
+      END{if(!written) out()}
+    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo preparar $file."; return 1; }
+  else
+    if [ "$style" = "equals" ]; then printf '%s = %s\n' "$key" "$value" > "$tmp"
+    else printf '%s %s\n' "$key" "$value" > "$tmp"; fi
+  fi
+  chmod "$mode" "$tmp" || { rm -f "$tmp"; warn "No se pudo ajustar permisos temporales para $file."; return 1; }
+  chown root:root "$tmp" 2>/dev/null || true
+  if ! mv "$tmp" "$file"; then rm -f "$tmp"; warn "No se pudo instalar $file."; return 1; fi
   FIXED=$((FIXED+1)); ok "$file actualizado: $key=$value"
 }
 
 pwquality_module(){
   echo -e "\n$BLUE### PASSWORD QUALITY ###$NC"
-  if [ ! -f "$PWQUALITY_CONF" ]; then
-    local os_major
-    os_major="$(get_el_major)"
-    if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 6 ]; then
-      if grep -q 'pam_cracklib.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null; then
-        info "EL6: pwquality.conf no aplica; se encontró pam_cracklib.so (mecanismo legacy). Revise sus parámetros por separado."
-      else
-        warn "EL6: pwquality.conf no aplica y no se encontró pam_cracklib.so en system-auth/password-auth; revisar calidad de contraseñas."
-      fi
+  local os_major pam_active=false f active_line=""
+  os_major="$(get_el_major)"
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -le 6 ]; then
+    if grep -Eq '^[[:space:]]*password[[:space:]]+[^#].*pam_cracklib\\.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null; then
+      info "EL6 usa pam_cracklib: se audita el mecanismo legacy, no se crea una configuración pwquality que no se utilizaría."
     else
-      warn "$PWQUALITY_CONF no existe; no se crea PAM a ciegas"
+      warn "No se pudo confirmar el módulo legacy de calidad de contraseña en PAM."
     fi
     return
+  fi
+
+  for f in /etc/pam.d/system-auth /etc/pam.d/password-auth; do
+    [ -r "$f" ] || continue
+    active_line="$(grep -E '^[[:space:]]*password[[:space:]]+[^#].*pam_pwquality\\.so' "$f" 2>/dev/null || true)"
+    [ -n "$active_line" ] && pam_active=true
+  done
+  if ! $pam_active; then
+    warn "No hay una regla password activa pam_pwquality.so. Configurar pwquality.conf sin activar el módulo PAM no endurecería contraseñas efectivamente."
+    info "PAM queda en auditoría: active el control mediante authselect o el mecanismo soportado tras validar recuperación; no se edita la pila PAM a ciegas."
+    return
+  fi
+
+  if [ ! -f "$PWQUALITY_CONF" ]; then
+    warn "$PWQUALITY_CONF no existe; se creará solamente si se confirma cada parámetro solicitado."
   fi
   # These settings affect password creation/change, not existing login credentials.
   set_conf_value "$PWQUALITY_CONF" minlen 14
@@ -76,7 +162,6 @@ pwquality_module(){
   set_conf_value "$PWQUALITY_CONF" usercheck 1
   set_conf_value "$PWQUALITY_CONF" maxrepeat 3
   set_conf_value "$PWQUALITY_CONF" maxsequence 3
-  info "No se agrega pam_pwquality.so a password-auth/system-auth: se debe gestionar PAM mediante authselect; la edición manual puede romper autenticación."
 }
 
 password_aging_module(){
@@ -86,7 +171,7 @@ password_aging_module(){
   local current_max
   current_max=$(awk '$1=="PASS_MAX_DAYS"{v=$2}END{print v}' "$LOGIN_DEFS")
   info "PASS_MAX_DAYS=${current_max:-no definido} se conserva sin cambios por política operacional."
-  set_conf_value "$LOGIN_DEFS" PASS_MIN_DAYS 0
+  set_conf_value "$LOGIN_DEFS" PASS_MIN_DAYS 1
   set_conf_value "$LOGIN_DEFS" PASS_WARN_AGE 7
   info "login.defs solo define defaults; no cambia el aging de cuentas existentes. Se auditan abajo y no se ejecuta chage masivo automáticamente."
 
@@ -144,43 +229,103 @@ pam_audit_module(){
 su_wheel_module(){
   echo -e "\n$BLUE### SU -> WHEEL ###$NC"
   getent group wheel >/dev/null 2>&1 || { warn "Grupo wheel no existe; no se toca /etc/pam.d/su"; return; }
-  local members; members=$(getent group wheel | awk -F: '{print $4}')
+  local members rootok tmp effect
+  members="$(getent group wheel | awk -F: '{print $4}')"
   if [ -z "$members" ]; then
     warn "wheel no tiene miembros no-root; NO se activa pam_wheel para evitar dejar sin vía de escalamiento a administradores"
     return
   fi
-  if grep -Eq '^[[:space:]]*auth[[:space:]]+required[[:space:]]+pam_wheel.so([[:space:]]|$)' "$SU_PAM" 2>/dev/null; then
+  if grep -Eq '^[[:space:]]*auth[[:space:]]+(required|requisite)[[:space:]].*pam_wheel\\.so' "$SU_PAM" 2>/dev/null; then
     ok "su ya restringido a wheel"
-  elif [ "$AUTO_FIX" = true ] && [ -f "$SU_PAM" ]; then
-    backup_once "$SU_PAM"
-    printf '\n# OrangeBox: only wheel members may use su\nauth required pam_wheel.so use_uid\n' >> "$SU_PAM"
-    ok "su restringido a wheel"; FIXED=$((FIXED+1))
-  else
+    return 0
+  fi
+  if [ "$AUTO_FIX" != true ] || [ ! -f "$SU_PAM" ]; then
     warn "su no está restringido a wheel"
+    echo "Qué hace: limita su a miembros de wheel. Riesgo: cualquier administrador que no esté en wheel perderá la posibilidad de usar su; sudo no cambia."
+    return
+  fi
+
+  rootok="$(grep -nE '^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_rootok\\.so' "$SU_PAM" | head -1 | cut -d: -f1)"
+  if [ -z "$rootok" ]; then
+    warn "No se detectó auth sufficient pam_rootok.so; no se modifica la pila PAM porque no es seguro insertar la restricción automáticamente."
+    return
+  fi
+  effect="limita el comando su a miembros de wheel; los administradores que no estén en wheel pueden perder ese método de escalamiento. Confirma que hay otra vía administrativa probada."
+  if ! confirm_password_setting "$SU_PAM" "pam_wheel.so use_uid" "no configurado" "restringir su a wheel" "$effect"; then
+    WARNINGS=$((WARNINGS+1)); return
+  fi
+  backup_once "$SU_PAM" || { warn "No se pudo respaldar $SU_PAM; no se modifica."; return; }
+  tmp="$(mktemp "$(dirname "$SU_PAM")/.su.orangebox.XXXXXX")" || { warn "No se pudo crear un temporal para PAM su."; return; }
+  awk '
+    {print}
+    !inserted && $0 ~ /^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_rootok\\.so([[:space:]]|$)/ {
+      print "auth required pam_wheel.so use_uid"
+      inserted=1
+    }
+    END {if (!inserted) exit 1}
+  ' "$SU_PAM" > "$tmp" || { rm -f "$tmp"; warn "No se pudo colocar pam_wheel después de pam_rootok; no se modifica PAM."; return; }
+  chmod --reference="$SU_PAM" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference="$SU_PAM" "$tmp" 2>/dev/null || chown root:root "$tmp"
+  if ! mv "$tmp" "$SU_PAM"; then rm -f "$tmp"; warn "No se pudo instalar la regla pam_wheel."; return; fi
+  if grep -Eq '^[[:space:]]*auth[[:space:]]+required[[:space:]].*pam_wheel\\.so[[:space:]]+use_uid' "$SU_PAM"; then
+    ok "su restringido a wheel; regla insertada tras pam_rootok. Backup en $BACKUP_DIR"
+    FIXED=$((FIXED+1))
+  else
+    warn "No se confirmó la regla pam_wheel tras escribirla; revise PAM inmediatamente."
   fi
   echo "  wheel members: $members"
 }
 
 file_permissions_module(){
   echo -e "\n$BLUE### FILE PERMISSIONS ###$NC"
+  local f p expected effect
   for f in /etc/passwd /etc/group /etc/shadow /etc/gshadow; do
     [ -f "$f" ] || continue
-    local p; p=$(stat -c %a "$f" 2>/dev/null || true)
+    p="$(stat -c %a "$f" 2>/dev/null || true)"
     case "$f" in
-      /etc/passwd|/etc/group) [ "$p" -le 644 ] 2>/dev/null && ok "$f=$p" || warn "$f=$p";;
-      *) [ "$p" = 600 ] || [ "$p" = 640 ] || [ "$p" = 0 ] || [ "$p" = 000 ] && ok "$f=$p" || warn "$f=$p; no se fuerza a 000 porque puede romper herramientas/backup";;
+      /etc/passwd|/etc/group) expected=644; effect="permite leer el mapa de cuentas/grupos para resolución de identidades; el propietario y grupo correctos limitan quién puede modificarlo." ;;
+      *) expected=600; effect="restringe la lectura de hashes y metadatos de credenciales a root; cambios incorrectos pueden afectar herramientas de identidad o autenticación." ;;
     esac
+    owner="$(stat -c %U "$f" 2>/dev/null || true)"
+    group="$(stat -c %G "$f" 2>/dev/null || true)"
+    if [ "$p" = "$expected" ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "$f=$p root:root"
+      continue
+    fi
+    if { [ "$f" = /etc/shadow ] || [ "$f" = /etc/gshadow ]; } &&
+       { [ "$p" = 0 ] || [ "$p" = 600 ] || [ "$p" = 640 ]; } &&
+       [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "$f=$p root:root (más restrictivo o equivalente)"
+      continue
+    fi
+    echo -e "$YELLOW[WARN]$NC $f actual=$p $owner:$group; objetivo=$expected root:root"
+    echo "Qué hace/riesgo: $effect"
+    if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS+1)); continue; fi
+    if ! confirm_password_setting "$f" "mode/owner" "$p $owner:$group" "$expected root:root" "$effect"; then
+      WARNINGS=$((WARNINGS+1)); continue
+    fi
+    backup_once "$f" || { warn "No se pudo respaldar $f; no se modifica."; continue; }
+    if ! chown root:root "$f" || ! chmod "$expected" "$f"; then
+      warn "No se pudieron aplicar propietario/permisos a $f."; continue
+    fi
+    ok "$f actualizado a $expected root:root"
+    FIXED=$((FIXED+1))
   done
 }
 
 encrypt_method_module(){
   echo -e "\n$BLUE### PASSWORD HASHING ###$NC"
-  local current; current=$(awk '$1=="ENCRYPT_METHOD"{v=$2} END{print v}' "$LOGIN_DEFS" 2>/dev/null || true)
-  if [ "$current" = SHA512 ]; then ok "ENCRYPT_METHOD=SHA512"; elif [ -z "$current" ]; then
-    warn "ENCRYPT_METHOD no configurado; SHA-512 es preferible para nuevos hashes"
-    $AUTO_FIX && { backup_once "$LOGIN_DEFS"; printf '\nENCRYPT_METHOD SHA512\n' >> "$LOGIN_DEFS"; FIXED=$((FIXED+1)); }
-  else warn "ENCRYPT_METHOD=$current; no se modifica automáticamente si la plataforma/autenticación externa puede depender de otra configuración"; fi
-  info "No se modifica pam_unix.so mediante sed ni se reescriben system-auth/password-auth automáticamente."
+  local current major expected
+  current="$(awk '$1=="ENCRYPT_METHOD"{v=$2} END{print v}' "$LOGIN_DEFS" 2>/dev/null || true)"
+  major="$(get_el_major)"
+  expected=SHA512
+  if [[ "$major" =~ ^[0-9]+$ ]] && [ "$major" -ge 9 ]; then expected=yescrypt; fi
+  if [ "$current" = "$expected" ]; then
+    ok "ENCRYPT_METHOD=$expected"
+  else
+    set_conf_value "$LOGIN_DEFS" ENCRYPT_METHOD "$expected"
+  fi
+  info "El algoritmo elegido afecta hashes nuevos; no reescribe contraseñas existentes. PAM y herramientas externas no se modifican automáticamente."
 }
 
 main(){
