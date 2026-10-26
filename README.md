@@ -109,6 +109,8 @@ net.core.somaxconn
 
 El baseline no modifica automáticamente `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`, porque esos parámetros dependen de latencia, pérdida, aplicaciones y política operacional.
 
+El hardening también audita `net.ipv6.conf.{all,default}.accept_redirects`. Ignorar redirects ICMPv6 reduce cambios de ruta inducidos por terceros, pero puede afectar redes que dependan de ellos, por lo que cada cambio solicita confirmación; si el kernel no expone IPv6, se informa N/A.
+
 Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
 ## 🌐 Auditoría de firewall
