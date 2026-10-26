@@ -23,7 +23,7 @@ grep -Fq 'OK_COUNT=0' "$MAIN" || fail "falta el contador de controles correctos"
 grep -Fq 'echo "Controles correctos: $OK_COUNT"' "$MAIN" || fail "falta el resumen de controles correctos"
 grep -Fq 'echo "Pendientes: $WARNINGS"' "$MAIN" || fail "falta el resumen de pendientes"
 grep -Fq 'echo "Errores: $ERRORS"' "$MAIN" || fail "falta el resumen de errores"
-grep -Fq 'case "$level" in INFO|CAMBIO\\ PROPUESTO) return 0 ;; esac' "$ROOT_DIR/lib/sysctl-safe.sh" || fail "la biblioteca sysctl sigue ocultando los estados OK"
+grep -Fq 'case "$level" in INFO|CAMBIO\ PROPUESTO) return 0 ;; esac' "$ROOT_DIR/lib/sysctl-safe.sh" || fail "la biblioteca sysctl sigue ocultando los estados OK"
 
 # Exercise the helper with the compact-audit flag exactly as the baseline does.
 OUT="$(mktemp)"
