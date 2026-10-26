@@ -814,6 +814,60 @@ package_repo_module() {
   fi
 }
 
+crypto_policies_module() {
+  section "SYSTEM-WIDE CRYPTOGRAPHIC POLICY"
+  local current="" verified=""
+  if [[ "$OS_VERSION" =~ ^[0-9]+$ ]] && [ "$OS_VERSION" -lt 8 ]; then
+    na "update-crypto-policies no aplica a RHEL/CentOS 6/7."
+    return 0
+  fi
+  if ! command -v update-crypto-policies >/dev/null 2>&1; then
+    na "update-crypto-policies no está disponible; no se pudo consultar una política criptográfica global."
+    return 0
+  fi
+  current="$(update-crypto-policies --show 2>/dev/null || true)"
+  if [ -z "$current" ]; then
+    warn "No se pudo determinar la política criptográfica global; no se modifica."
+    return 0
+  fi
+  case "$current" in
+    DEFAULT|DEFAULT:*)
+      ok "Política criptográfica global=$current."
+      info "DEFAULT controla los algoritmos base permitidos por servicios compatibles."
+      return 0
+      ;;
+    FIPS|FIPS:*|FUTURE|FUTURE:*)
+      ok "Política criptográfica global=$current; el baseline no la debilita."
+      return 0
+      ;;
+    LEGACY|LEGACY:*)
+      warn "Política LEGACY activa: permite algoritmos criptográficos antiguos."
+      ;;
+    *)
+      warn "Política personalizada/no reconocida ($current); se conserva sin cambios."
+      return 0
+      ;;
+  esac
+  info "Qué hace DEFAULT: restringe algoritmos criptográficos antiguos. Cambiar de LEGACY puede cortar conexiones con clientes TLS/SSH, LDAP, Kerberos y aplicaciones legacy."
+  if [ "$AUTO_FIX" != true ]; then return 0; fi
+  if ! confirm_baseline_parameter "¿Cambiar la política criptográfica global de $current a DEFAULT?"; then return 0; fi
+  if [ -f /etc/crypto-policies/config ]; then
+    backup_once /etc/crypto-policies/config || { warn "No se pudo respaldar /etc/crypto-policies/config; no se cambia."; return 1; }
+  fi
+  if update-crypto-policies --set DEFAULT; then
+    verified="$(update-crypto-policies --show 2>/dev/null || true)"
+    if [ "$verified" = "DEFAULT" ]; then
+      FIXED=$((FIXED + 1))
+      ok "Política criptográfica DEFAULT aplicada y verificada."
+      info "Valide SSH/TLS/Kerberos y reinicie los servicios que necesiten recargar la política durante una ventana autorizada."
+    else
+      warn "No se pudo verificar DEFAULT después del cambio; estado actual=$verified."
+    fi
+  else
+    warn "update-crypto-policies --set DEFAULT falló."
+  fi
+}
+
 kernel_module(){
   section "KERNEL / SYSCTL"
   local forwarding rp_filter ipv6_forward
@@ -1256,7 +1310,7 @@ fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
   local installed=false active=false
   if [ -x /var/ossec/bin/wazuh-control ] || rpm -q wazuh-agent >/dev/null 2>&1 || rpm -q wazuh-manager >/dev/null 2>&1; then
-    info "Wazuh detectado: según la política OrangeBox, el control de seguridad se gestiona con Wazuh; Linux-Hardening no instalará ni activará fapolicyd."
+    info "Wazuh/FIM ayuda a detectar cambios, pero no sustituye el control de ejecución de fapolicyd. No se activa automáticamente: una política genérica sin inventario y pruebas permisivas puede bloquear aplicaciones, scripts y runtimes legítimos."
   fi
   rpm -q fapolicyd >/dev/null 2>&1 && installed=true
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet fapolicyd 2>/dev/null; then
@@ -1267,7 +1321,7 @@ fapolicyd_module() {
   elif $installed; then
     info "fapolicyd está instalado pero inactivo; por política no se activa ni modifica."
   else
-    info "fapolicyd no está instalado; por política no se instala ni se activa desde Linux-Hardening."
+    info "fapolicyd no está instalado. Puede restringir ejecución no autorizada, pero no se instala ni activa automáticamente; requiere inventario de software y validación en modo permisivo para evitar bloquear cargas legítimas."
   fi
 }
 normalize_history_dotfile() {
@@ -1706,14 +1760,14 @@ Uso:
   $0 --module <modulo> [--fix] [--auto] [--allow-risky]
 
 Baseline genérico incluido en all:
-  ssh banners bash-full password-full sudo-full kernel-full network-full package-repos
+  ssh banners bash-full password-full sudo-full kernel-full network-full package-repos crypto-policies
   auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full
   selinux-setup time-sync services fapolicyd aide
 
 Módulos adicionales:
   aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
   packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
-  network-full package-repos password-full gui-remove xinetd-remove rsyslog-full
+  network-full package-repos crypto-policies password-full gui-remove xinetd-remove rsyslog-full
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
 
 Evaluaciones independientes:
@@ -2016,6 +2070,7 @@ run_module() {
     sudo) sudo_module ;;
     password) password_module ;;
     package-repos) package_repo_module ;;
+    crypto-policies) crypto_policies_module ;;
     kernel) kernel_module ;;
     synflood) synflood_module ;;
     filesystem) filesystem_module ;;
@@ -2086,7 +2141,7 @@ main() {
     run_module banners
     local previous_fix="$AUTO_FIX"
     AUTO_FIX=false
-    for m in ssh bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
+    for m in ssh bash-full password-full sudo-full kernel-full network-full package-repos crypto-policies auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
     AUTO_FIX="$previous_fix"
@@ -2098,7 +2153,7 @@ main() {
     echo -e "$BLUE[INFO]$NC Algunos controles kernel/red/montajes piden una confirmación por parámetro. El baseline global no modifica NTP; solo lo audita."
     run_module banners
     run_internal_module_with_confirmation ssh
-    for m in bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup; do
+    for m in bash-full password-full sudo-full kernel-full network-full package-repos crypto-policies auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup; do
       run_module "$m"
     done
     # Explicitly preserve time-sync settings during a global baseline --fix.
@@ -2108,7 +2163,7 @@ main() {
     run_module aide
   elif [ "$MODULE" = "all" ]; then
     info "MODO AUDITORÍA: solo lectura"
-    for m in ssh banners bash-full password-full sudo-full kernel-full network-full package-repos auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
+    for m in ssh banners bash-full password-full sudo-full kernel-full network-full package-repos crypto-policies auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
     aide_audit_module
