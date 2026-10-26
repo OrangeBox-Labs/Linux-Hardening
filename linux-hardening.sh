@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.22 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.23 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,8 +23,9 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.22
+SCRIPT_VERSION=1.4.23
 AUTO_FIX=false
+AUDIT_MODE=false
 AUTO_MODE=false
 ALLOW_RISKY=false
 ALLOW_SHOREWALL=false
@@ -623,9 +624,7 @@ kernel_module(){
   rp_filter=1
   if [ "$forwarding" = 1 ]; then
     rp_filter=2
-    if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
-      ok "IP forwarding=1: se usa rp_filter=2 (modo loose) para preservar el enrutamiento"
-    fi
+    ok "IP forwarding=1: se usa rp_filter=2 (modo loose) para preservar el enrutamiento"
   fi
   set_sysctl fs.suid_dumpable 0
   set_sysctl kernel.dmesg_restrict 1
@@ -1088,10 +1087,1615 @@ normalize_history_dotfile() {
     else
       warn "$file: HISTSIZE no está fijado a -1"
     fi
-    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file"; then
+    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*
+      warn "$file: HISTFILE está readonly y puede impedir la política de historial; --fix lo normalizará"
+    else
+      ok "$file: HISTFILE no está bloqueado como readonly"
+    fi
+    if grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
+      warn "$file: PROMPT_COMMAND contiene una regla que limpia/recarga el historial en cada prompt"
+    else
+      ok "$file: no se detectó el patrón de limpieza de historial en PROMPT_COMMAND"
+    fi
+    return 0
+  fi
+
+  if [ -f "$file" ] &&
+     grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file" &&
+     ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file" &&
+     ! grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    return 0
+  fi
+  if [ ! -f "$file" ]; then
+    if ! $AUTO_FIX; then warn "$file no existe; --fix puede crearlo con historial ilimitado."; return 0; fi
+  elif ! $AUTO_FIX; then
+    warn "$file: historial no cumple la política; --fix lo normalizará a ilimitado"
+    return 0
+  fi
+  [ ! -e "$file" ] || backup_once "$file"
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para $file"; return 1; }
+  if [ -f "$file" ]; then
+    awk '
+      $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
+      $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
+      skip { next }
+      /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
+      /^PROMPT_COMMAND="orangebox_history_guard; / { next }
+      /^orangebox_history_guard\(\) \{$/ { skip_guard=1; next }
+      skip_guard && /^\}$/ { skip_guard=0; next }
+      skip_guard { next }
+      /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
+      { print }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
+  else
+    : > "$tmp"
+  fi
+  cat >> "$tmp" <<'ORANGEBOX_UNLIMITED_HISTORY'
+# ORANGEBOX UNLIMITED HISTORY BEGIN
+# El historial interactivo se conserva completo, sin límite de líneas.
+set -o history
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+unset HISTIGNORE
+case "${HISTFILE:-}" in
+  ""|/dev/null|/dev/zero|/var/log/bash_history/*) export HISTFILE="$HOME/.bash_history" ;;
+esac
+shopt -s histappend
+# ORANGEBOX UNLIMITED HISTORY END
+ORANGEBOX_UNLIMITED_HISTORY
+  chmod --reference="$file" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference="$file" "$tmp" 2>/dev/null || chown root:root "$tmp"
+  if mv "$tmp" "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    FIXED=$((FIXED+1))
+  else
+    rm -f "$tmp"
+    warn "No se pudo instalar configuración de historial en $file"
+    return 1
+  fi
+}
+
+bash_profile_check() {
+  local file="$1" label="$2" needle="$3" detail="${4:-}"
+  if [ ! -f "$file" ]; then
+    warn "$label: no verificable; falta $file"
+    return 0
+  fi
+  if grep -Fq -- "$needle" "$file" && { [ -z "$detail" ] || grep -Fq -- "$detail" "$file"; }; then
+    ok "$label"
+  else
+    warn "$label: falta o difiere en $file"
+  fi
+}
+
+bash_audit_profile_controls() {
+  local file="$1" mode owner group
+  bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
+  bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
+  bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
+  bash_profile_check "$file" "Bash: HISTSIZE=-1 (sin límite de líneas en memoria)" 'export HISTSIZE=-1'
+  bash_profile_check "$file" "Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)" 'export HISTFILESIZE=-1'
+  bash_profile_check "$file" "Bash: no omite comandos del historial" 'export HISTCONTROL=' 'unset HISTIGNORE'
+  bash_profile_check "$file" "Bash: historial acumulativo entre sesiones" 'shopt -s histappend'
+  bash_profile_check "$file" "Bash: historial con fecha y hora" "export HISTTIMEFORMAT='%F %T '"
+  bash_profile_check "$file" "Bash: bloquea history -c/-d/-w desde el wrapper" 'history() {' '*c*|*d*|*w*)'
+  bash_profile_check "$file" "Bash: redirige HISTFILE no persistente a ~/.bash_history" 'HISTFILE="${HOME}/.bash_history"'
+  bash_profile_check "$file" "Bash: protege el archivo de historial con modo 0600" 'chmod 600 "$HISTFILE"'
+  bash_profile_check "$file" "Bash: modo de edición Emacs" 'set -o emacs'
+  bash_profile_check "$file" "Readline: Ctrl+A va al inicio de línea" 'beginning-of-line' '\C-a'
+  bash_profile_check "$file" "Readline: Ctrl+E va al final de línea" 'end-of-line' '\C-e'
+  bash_profile_check "$file" "Bash: obtiene FQDN mediante hostname -f" 'hostname -f'
+  bash_profile_check "$file" "Bash: prompt por rol root/no-root y color diferenciado" 'orangebox_set_prompt() {' '\e[1;31m'
+  bash_profile_check "$file" "Bash: prompt de usuario no-root usa color diferenciado" 'orangebox_set_prompt() {' '\e[1;32m'
+  bash_profile_check "$file" "Bash: reaplica prompt e historial en cada prompt" 'orangebox_pre_prompt() {' 'history -a'
+  bash_profile_check "$file" "Bash: registra orangebox_pre_prompt en PROMPT_COMMAND" 'orangebox_pre_prompt' 'PROMPT_COMMAND='
+  bash_profile_check "$file" "Bash: el resto del perfil solo afecta shells interactivas" '# El resto de esta configuracion solo aplica a shells interactivos.'
+  if [ -f "$file" ]; then
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+    owner="$(stat -c '%U' "$file" 2>/dev/null || true)"
+    group="$(stat -c '%G' "$file" 2>/dev/null || true)"
+    if [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "Perfil Bash OrangeBox: propietario root:root y permisos 0644"
+    else
+      warn "Perfil Bash OrangeBox: propietario/permisos actuales ${owner:-?}:${group:-?} ${mode:-?}; objetivo root:root 0644"
+    fi
+  fi
+}
+
+bash_audit_system_bashrc_include() {
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  else
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  fi
+}
+
+bash_audit_external_history_overrides() {
+  local f checked=0 found=0
+  local disable_pattern='(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)'
+  for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc /etc/skel/.bashrc; do
+    [ -f "$f" ] || continue
+    checked=$((checked+1))
+    if grep -Eiq "$disable_pattern" "$f"; then
+      found=$((found+1))
+      warn "Posible override de hardening del historial en $f; revisar las directivas HISTSIZE/HISTFILESIZE/HISTFILE/history."
+    fi
+  done
+  if [ "$checked" -eq 0 ]; then
+    warn "No se pudieron inspeccionar archivos de perfiles Bash para detectar overrides del historial."
+  elif [ "$found" -eq 0 ]; then
+    ok "No se detectaron overrides conocidos que deshabiliten Bash History en los perfiles inspeccionados"
+  fi
+}
+
+bash_module() {
+  section "BASH / HISTORIAL / PROMPT"
+  local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
+  if [ ! -d /etc/profile.d ]; then
+    if $AUTO_FIX; then
+      if ! install -d -o root -g root -m 755 /etc/profile.d; then
+        warn "/etc/profile.d no existe y no se pudo crear"
+        return
+      fi
+      ok "/etc/profile.d creado con root:root 0755"
+      FIXED=$((FIXED+1))
+    else
+      warn "/etc/profile.d no existe; se requiere crearlo para instalar el perfil Bash OrangeBox"
+    fi
+  fi
+
+  # The compact baseline audit must not depend on temporary-file creation.
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+    normalize_history_dotfile /root/.bashrc
+    normalize_history_dotfile /etc/skel/.bashrc
+    bash_audit_system_bashrc_include
+    bash_audit_external_history_overrides
+    return
+  fi
+
+  # La configuración externa ajena al baseline se revisa en el modo detallado.
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc; do
+      [ -f "$f" ] || continue
+      if grep -Eiq '(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)' "$f"; then
+        warn "Posible deshabilitación de Bash History detectada en $f; se revisará la configuración efectiva"
+      fi
+    done
+  fi
+
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
+  cat > "$tmp" <<'ORANGEBOX_BASH'
+# OrangeBox Linux Hardening - historial ilimitado, prompt por rol y timeout
+# Timeout por inactividad: 120 segundos en shells interactivos de usuarios no-root.
+# Limpiar TMOUT heredado evita que una shell root reciba el timeout del usuario.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  unset TMOUT 2>/dev/null || true
+else
+  case $- in
+    *i*)
+      if [ "${TMOUT:-}" != 120 ]; then
+        TMOUT=120 2>/dev/null || true
+      fi
+      if [ "${TMOUT:-}" = 120 ]; then
+        export TMOUT
+        readonly TMOUT 2>/dev/null || true
+      else
+        printf '%s\n' 'OrangeBox: no fue posible fijar TMOUT=120; revise si ya estaba definido como readonly.' >&2
+      fi
+      ;;
+  esac
+fi
+
+# El resto de esta configuracion solo aplica a shells interactivos.
+case $- in
+  *i*) ;;
+  *) return 0 ;;
+esac
+
+# Protección de mejor esfuerzo: impedir borrado/sobrescritura accidental por
+# los comandos comunes "history -c", "history -d" y "history -w".
+# No es una frontera de seguridad: "builtin history", edición del archivo o
+# modificación de la shell pueden eludir este wrapper.
+history() {
+  local arg opts
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -?*)
+        opts="${arg#-}"
+        case "$opts" in
+          *c*|*d*|*w*)
+            printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+            return 2
+            ;;
+        esac
+        case "$opts" in
+          *p*|*s*) break ;;
+        esac
+        ;;
+      *) break ;;
+    esac
+  done
+  builtin history "$@"
+}
+
+orangebox_history_guard() {
+  set -o history 2>/dev/null || true
+  HISTSIZE=-1
+  HISTFILESIZE=-1
+  case "${HISTFILE:-}" in
+    ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="${HOME}/.bash_history" ;;
+  esac
+  export HISTSIZE HISTFILESIZE HISTFILE
+  HISTCONTROL=
+  export HISTCONTROL
+  unset HISTIGNORE
+  shopt -s histappend
+}
+
+export HISTTIMEFORMAT='%F %T '
+orangebox_history_guard
+
+orangebox_secure_history_file() {
+  [ -n "${HOME:-}" ] && [ -d "$HOME" ] || return 0
+  [ "$HISTFILE" = "$HOME/.bash_history" ] || return 0
+  if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+  if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+}
+orangebox_secure_history_file
+
+# Normalizar la edición de línea en Bash para administración.
+# Ctrl+A = inicio de línea; Ctrl+E = final de línea.
+# No depender de un ~/.inputrc o /etc/inputrc personalizado.
+set -o emacs 2>/dev/null || true
+bind '"\C-a": beginning-of-line' 2>/dev/null || true
+bind '"\C-e": end-of-line' 2>/dev/null || true
+
+# Resolver hostname FQDN una vez por shell; evitar consultas en cada prompt.
+ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
+case "$ORANGEBOX_PROMPT_HOST" in
+  ""|localhost|localhost.localdomain) ORANGEBOX_PROMPT_HOST="$(hostname 2>/dev/null || true)" ;;
+esac
+[ -n "$ORANGEBOX_PROMPT_HOST" ] || ORANGEBOX_PROMPT_HOST=unknown
+
+# Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
+orangebox_set_prompt() {
+  if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w #\[\e[0m\] '
+  else
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w $\[\e[0m\] '
+  fi
+}
+
+orangebox_pre_prompt() {
+  # /root/.bashrc puede activar "set -o vi" después de cargar este perfil.
+  # Reafirmar el modo Emacs y las teclas antes de presentar cada prompt.
+  set -o emacs 2>/dev/null || true
+  bind '"\C-a": beginning-of-line' 2>/dev/null || true
+  bind '"\C-e": end-of-line' 2>/dev/null || true
+  orangebox_history_guard
+  history -a
+  orangebox_set_prompt
+}
+case ";${PROMPT_COMMAND:-};" in
+  *";orangebox_pre_prompt;"*|*"; orangebox_pre_prompt;"*) ;;
+  *)
+    if [ -n "${PROMPT_COMMAND:-}" ]; then
+      PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_pre_prompt"
+    else
+      PROMPT_COMMAND="orangebox_pre_prompt"
+    fi
+    ;;
+esac
+export PROMPT_COMMAND
+orangebox_set_prompt
+ORANGEBOX_BASH
+
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+  elif [ -f "$target" ] && cmp -s "$tmp" "$target" &&
+     [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
+     [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
+     [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+    ok "Bash History habilitado e ilimitado; prompt OrangeBox ya configurado"
+  elif $AUTO_FIX; then
+    [ ! -e "$target" ] || backup_once "$target"
+    if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
+      ok "Bash History habilitado sin límite y prompt por rol aplicado en $target"
+      FIXED=$((FIXED+1))
+    else
+      warn "No se pudo instalar/verificar $target"
+    fi
+  else
+    warn "$target requiere habilitar Bash History y establecer HISTSIZE/HISTFILESIZE=-1"
+  fi
+  rm -f "$tmp"
+
+  # Normalizar también los dotfiles administrados más sensibles sin tocar
+  # aliases, umask, timeout ni el resto de las preferencias existentes.
+  normalize_history_dotfile /root/.bashrc
+  normalize_history_dotfile /etc/skel/.bashrc
+
+  # CentOS/RHEL inicia shells interactivos no-login desde /etc/bashrc.
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  local bashrc_changed=false
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar ni añadir el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  elif ! $AUTO_FIX; then
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  else
+    backup_once "$system_bashrc"
+    if ! grep -Fq "$marker" "$system_bashrc"; then printf '\n%s\n' "$marker" >> "$system_bashrc" && bashrc_changed=true; fi
+    if ! grep -Fq "$include" "$system_bashrc"; then printf '%s\n' "$include" >> "$system_bashrc" && bashrc_changed=true; fi
+    if grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+      ok "Include idempotente verificado en /etc/bashrc para shells interactivos no-login"
+      [ "$bashrc_changed" = true ] && FIXED=$((FIXED+1))
+    else
+      warn "No se pudo añadir/verificar el include en /etc/bashrc"
+    fi
+  fi
+}
+
+usage() {
+  cat <<EOF
+OrangeBox Linux Hardening $SCRIPT_VERSION
+
+Uso:
+  $0                                Auditoría del baseline interno
+  $0 --audit                        Auditoría explícita del baseline completo
+  $0 --fix                          Modo interactivo: explica los riesgos y pregunta
+  $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
+  ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
+  $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
+  $0 --fix --module bash            Historial con fecha/hora y prompt por rol
+  $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
+  $0 --fix --module network-full --allow-shorewall
+                                    Autoriza explícitamente cambios de red con Shorewall
+  $0 --module <modulo> [--fix] [--auto] [--allow-risky]
+
+Baseline interno (auditoría de pendientes corregibles):
+  ssh sudo kernel synflood rsyslog banners bash all
+
+Módulos adicionales:
+  aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
+  packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
+  network-full password-full gui-remove xinetd-remove rsyslog-full
+  selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
+
+Evaluaciones independientes:
+  ./audit-firewall-listeners.sh Auditoría de firewall/listeners (solo lectura).
+  ./audit-listening-services.sh Inventario independiente de sockets.
+  ./linux-hardening-audit.sh    Audita módulos sin calcular cumplimiento CIS.
+  ./cis-benchmark-check.sh       Evalúa exclusivamente el benchmark CIS.
+
+Seguridad:
+  --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
+  --fix --auto no hace preguntas: aplica únicamente banners/MOTD y Bash. Kernel, SYN flood y los demás módulos delicados quedan en auditoría sin aplicar cambios.
+  --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
+  --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
+  --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
+  aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
+  post-install se omite: no tiene una ruta de auditoría de solo lectura.
+  El benchmark CIS no se ejecuta como módulo; utiliza el comando independiente indicado arriba.
+EOF
+}
+
+internal_module_requires_risk() {
+  case "$1" in
+    ssh|sudo|kernel|synflood|rsyslog) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+risk_description() {
+  case "$1" in
+    ssh) echo "aplica solo controles SSH pendientes (intentos, tiempos de sesión y autenticación por host); se valida la sintaxis, pero revisa clientes e integraciones." ;;
+    sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
+    kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
+    synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
+    rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
+    network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
+    firewall) echo "identifica el gestor/backend, inventaría listeners y contrasta su acceso con reglas INPUT; es estrictamente de solo lectura incluso con --fix." ;;
+    firewall-rules) echo "el generador de iptables vacía reglas y establece INPUT DROP; está bloqueado para evitar cortar accesos o interferir con Shorewall." ;;
+    ssh-cis|ssh-complete) echo "modifica parámetros de SSH y/o algoritmos criptográficos. Puede dejar fuera clientes antiguos, automatizaciones o el acceso administrativo." ;;
+    password|password-full) echo "cambia política de contraseñas o valores por defecto. No se editará PAM a ciegas, pero podría afectar autenticación o futuras contraseñas." ;;
+    filesystem|filesystem-full) echo "puede restringir montajes, ocultar procesos con hidepid, bloquear módulos o deshabilitar autofs; podría afectar monitoreo y aplicaciones." ;;
+    cron|cron-full) echo "puede cambiar permisos de cron/at y crear listas allow limitadas a root, impidiendo tareas de usuarios o de hosting/cPanel." ;;
+    selinux|selinux-setup) echo "solo informa el estado actual; SELinux no se modifica desde este repositorio." ;;
+    grub|grub-full) echo "cambia parámetros del arranque y regenera grub.cfg; el efecto pleno requiere reinicio y un error puede impedir arrancar." ;;
+    kernel-full|lpe-2026) echo "cambia mitigaciones de kernel/sysctl o bloquea módulos/namespaces; puede afectar contenedores, VPN y requiere reinicio para algunos efectos." ;;
+    auditd|auditd-full) echo "modifica reglas y servicio de auditoría; puede incrementar volumen de eventos y afectar configuración de auditd existente." ;;
+    time|time-sync) echo "puede cambiar el servicio de sincronización o dar un salto de hora; puede afectar certificados, autenticación y correlación de logs." ;;
+    usb|usb-storage) echo "bloquea almacenamiento USB mediante modprobe; puede afectar dispositivos o flujos de recuperación que dependan de USB." ;;
+    services|services-remove|packages-remove|xinetd-remove|gui-remove) echo "puede detener/deshabilitar servicios o eliminar paquetes y dependencias; podría afectar aplicaciones instaladas." ;;
+    aide) echo "instala AIDE y crea una base de integridad; puede solaparse con Wazuh FIM y consumir espacio/CPU. El instalador explicará ese solapamiento y pedirá consentimiento explícito." ;;
+    bash-full) echo "instala auditoría amplia de comandos mediante trap DEBUG/syslog; puede aumentar volumen y registrar argumentos sensibles." ;;
+    post-install) echo "script de preparación inicial que puede cambiar GRUB, instalar paquetes y habilitar servicios; SELinux solo se audita." ;;
+    *) echo "este módulo puede modificar configuración o servicios; revisa el alcance y conserva una vía de recuperación." ;;
+  esac
+}
+
+confirm_risky_change() {
+  local name="$1" answer description
+  description="$(risk_description "$name")"
+  echo
+  echo -e "$YELLOW[ATENCIÓN] Control con riesgo operacional: $name$NC"
+  echo "Qué hará: $description"
+  if [ "$AUTO_MODE" = true ]; then
+    warn "Modo --auto: cambio omitido; no se aplican controles críticos."
+    return 1
+  fi
+  if [ "$ALLOW_RISKY" = true ]; then
+    ok "--allow-risky autoriza aplicar este control sin confirmación adicional."
+    return 0
+  fi
+  if [ ! -r /dev/tty ]; then
+    warn "No hay terminal disponible para confirmar; el cambio se omitirá por seguridad."
+    return 1
+  fi
+  read -r -p "¿Quieres aplicar '$name'? [s/N]: " answer </dev/tty
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) warn "Control '$name' rechazado por el usuario; se mantiene en auditoría."; return 1 ;;
+  esac
+}
+
+run_internal_module_with_confirmation() {
+  local name="$1" previous_fix="$AUTO_FIX" ssh_status=0 journal_status=0
+  if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
+    case "$name" in
+      ssh)
+        ssh_state_status preflight
+        ssh_status=$?
+        if [ "$ssh_status" -eq 0 ]; then
+          info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+        elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          reason="$(ssh_module_apply_block_reason || true)"
+          if [ "$ssh_status" -eq 1 ]; then
+            info "Hay controles SSH pendientes, pero no se aplicarán automáticamente: ${reason:-no se encontró una vía segura}; se conserva la configuración actual y se muestra la remediación manual."
+          else
+            info "No se pudo verificar el estado efectivo de SSH: ${reason:-sshd -T no entregó valores}. No se modificará."
+          fi
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      sudo)
+        # sudo_module owns its parameter-specific confirmation and intentionally
+        # skips use_pty on cPanel hosts. A generic prompt here is redundant.
+        info "Sudo se comprueba primero; solo su control específico puede solicitar confirmación."
+        ;;
+      kernel)
+        # sysctl_safe_apply verifies each live and persistent value before it
+        # asks. A module-wide prompt is redundant and must never precede checks.
+        info "Se comprobarán los parámetros del kernel uno por uno; solo los que falten o difieran solicitarán confirmación."
+        ;;
+      synflood)
+        # The same rule applies to SYN cookies/backlog: ask per setting only.
+        if synflood_state_compliant; then
+          info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
+        else
+          info "SYN cookies/backlog: se revisará cada parámetro; solo los que falten o difieran solicitarán confirmación."
+        fi
+        ;;
+      rsyslog)
+        rsyslog_state_status
+        journal_status=$?
+        if [ "$journal_status" -eq 0 ]; then
+          info "Journald ya tiene Storage=persistent y /var/log/journal; no se solicitará confirmación ni se reiniciará."
+        elif [ "$journal_status" -eq 1 ]; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          info "No se puede verificar journald con seguridad; se omite aplicación automática."
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      *)
+        if ! confirm_risky_change "$name"; then
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  run_module "$name"
+}
+
+run_companion_module() {
+  local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  if [ "$name" = "cis" ]; then
+    die "El benchmark CIS es independiente de los módulos de hardening. Ejecuta: ./cis-benchmark-check.sh"
+  fi
+  case "$name" in
+    aide) script="aide-install.sh"; risky=true ;;
+    audit-listeners) script="audit-listening-services.sh"; audit_only=true; fix_arg="" ;;
+    auditd-full) script="auditd-hardening.sh"; risky=true ;;
+    bash-full) script="bash-hardening.sh"; risky=true ;;
+    time-sync) script="configure-time-sync.sh"; risky=true ;;
+    cpu-full) script="cpu-hardening.sh"; risky=true ;;
+    cron-full) script="cron-hardening.sh"; risky=true ;;
+    packages-remove) script="desintalar-paquetes-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    services-remove) script="desintalar-servicios-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    usb-storage) script="disable-usb-storage.sh"; risky=true ;;
+    firewall-rules)
+      die "Módulo bloqueado: generate-iptables-rules.sh vacía reglas, establece INPUT DROP y podría cortar SSH. En este host se usa Shorewall; no se aplicará un segundo firewall destructivo."
+      ;;
+    grub-full) script="grub-hardening.sh"; risky=true ;;
+    kernel-full) script="kernel-hardening.sh"; risky=true ;;
+    lpe-2026) script="kernel-lpe-2026-mitigation.sh"; risky=true; audit_arg="--check" ;;
+    network-full) script="network-hardening.sh"; risky=true ;;
+    password-full) script="password-hardening.sh"; risky=true ;;
+    post-install)
+      if [ "$AUTO_FIX" = true ]; then
+        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host; SELinux solo se audita."
+      fi
+      warn "Se omite post-install: puede instalar paquetes, cambiar GRUB y habilitar servicios incluso sin --fix; SELinux solo se audita."
+      return 0
+      ;;
+    gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
+    xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
+    rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
+    selinux-setup)
+      info "selinux-setup bloqueado por política OrangeBox: SELinux solo se audita; nunca se cambian su modo, configuración, contextos ni se solicita reinicio."
+      if command -v getenforce >/dev/null 2>&1; then
+        info "Estado SELinux actual: $(getenforce 2>/dev/null || echo desconocido)"
+      else
+        warn "getenforce no disponible; no se puede determinar el estado actual de SELinux"
+      fi
+      return 0
+      ;;
+    ssh-cis) script="ssh-hardening.sh"; risky=true ;;
+    ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
+    sudo-full) script="sudo-hardening.sh"; risky=true ;;
+    filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
+
+    *) die "Módulo desconocido: $name" ;;
+  esac
+
+  local apply_fix="$AUTO_FIX" skip_without_audit=false
+  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ] && [ "$AUTO_MODE" != true ]; then
+    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar GRUB, instalar paquetes y habilitar servicios. SELinux solo se audita."
+  fi
+
+  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ]; then
+    if [ "$AUTO_MODE" = true ]; then
+      echo
+      echo -e "$YELLOW[--auto] Se omitirá la aplicación de '$name'.$NC"
+      echo "Qué haría: $(risk_description "$name")"
+      apply_fix=false
+    elif [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; then
+      info "AIDE no está instalado; aide-install.sh explicará sus efectos y solicitará consentimiento explícito."
+    elif ! confirm_risky_change "$name"; then
+      apply_fix=false
+    fi
+    if [ "$apply_fix" != true ] && [ -z "$audit_arg" ] && [ "$audit_only" != true ]; then
+      warn "No se ejecutó '$name': no tiene una ruta de auditoría segura declarada en el orquestador."
+      return 0
+    fi
+  fi
+
+  if [ ! -f "$SCRIPT_DIR/$script" ]; then
+    die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
+  fi
+  if [ "$apply_fix" != true ] && [ "$interactive" = true ]; then
+    warn "$name no ofrece auditoría no interactiva; se omite."
+    return 0
+  fi
+
+  local -a args=()
+  if [ "$apply_fix" = true ]; then
+    if [ "$audit_only" = true ]; then
+      warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
+    elif [ "$name" = "network-full" ]; then
+      args=(--fix)
+      if [ "$ALLOW_SHOREWALL" = true ]; then
+        args+=(--allow-shorewall)
+      fi
+    elif [ -n "$fix_arg" ]; then
+      args=("$fix_arg")
+    fi
+  elif [ -n "$audit_arg" ]; then
+    args=("$audit_arg")
+  fi
+  echo
+  echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
+  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+    ok "Módulo $name finalizado"
+  else
+    warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
+  fi
+}
+
+run_module() {
+  case "$1" in
+    ssh) ssh_module ;;
+    sudo) sudo_module ;;
+    password) password_module ;;
+    kernel) kernel_module ;;
+    synflood) synflood_module ;;
+    filesystem) filesystem_module ;;
+    auditd) auditd_module ;;
+    rsyslog) rsyslog_module ;;
+    selinux) selinux_module ;;
+    cron) cron_module ;;
+    usb) usb_module ;;
+    services) services_module ;;
+    banners) banners_module ;;
+    time) time_module ;;
+    grub) grub_module ;;
+    firewall) die "La auditoría de firewall es independiente: ejecuta ./audit-firewall-listeners.sh." ;;
+    fapolicyd) fapolicyd_module ;;
+    listening) die "El inventario de sockets es independiente: ejecuta ./audit-listening-services.sh." ;;
+    bash) bash_module ;;
+    *) run_companion_module "$1" ;;
+  esac
+}
+
+main() {
+  require_root
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --audit) AUDIT_MODE=true ;;
+      --fix|-f) AUTO_FIX=true ;;
+      --auto) AUTO_MODE=true ;;
+      --allow-risky) ALLOW_RISKY=true ;;
+      --allow-shorewall) ALLOW_SHOREWALL=true ;;
+      --module|-m) shift; [ $# -gt 0 ] || die "--module requiere nombre"; MODULE="$1" ;;
+      --help|-h) usage; exit 0 ;;
+      --list-modules) usage; exit 0 ;;
+      *) die "Argumento desconocido: $1" ;;
+    esac
+    shift
+  done
+
+  if [ "$AUDIT_MODE" = true ] && [ "$AUTO_FIX" = true ]; then
+    die "--audit y --fix son modos excluyentes."
+  fi
+  if [ "$AUDIT_MODE" = true ] && [ "$MODULE" != "all" ]; then
+    die "--audit ejecuta el informe completo del baseline; no se combina con --module."
+  fi
+  if [ "$AUTO_MODE" = true ] && [ "$AUTO_FIX" != true ]; then
+    die "--auto requiere --fix. Usa --fix --auto para aplicar únicamente controles seguros."
+  fi
+  if [ "$AUTO_MODE" = true ] && [ "$ALLOW_RISKY" = true ]; then
+    die "--auto y --allow-risky son incompatibles: --auto siempre omite controles críticos."
+  fi
+  if [ "$ALLOW_SHOREWALL" = true ] && [ "$MODULE" != "network-full" ]; then
+    warn "--allow-shorewall solo se utiliza con --module network-full."
+  fi
+
+  if [ "$MODULE" = "repo-audit" ]; then
+    die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
+  fi
+
+  if [ "$AUDIT_MODE" = true ] || { [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; }; then PENDING_ONLY_AUDIT=true; fi
+  detect_os
+  if $PENDING_ONLY_AUDIT; then
+    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría completa del baseline ($OS_ID $OS_VERSION)"
+  fi
+  if [ "$AUTO_FIX" = true ]; then
+    prepare_backup
+  fi
+
+  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
+    warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
+    run_module banners
+    run_module bash
+
+    local previous_fix="$AUTO_FIX" m
+    AUTO_FIX=false
+    for m in ssh sudo kernel synflood rsyslog; do
+      run_module "$m"
+    done
+    AUTO_FIX="$previous_fix"
+    echo
+    echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
+  elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; los módulos verifican primero el estado y preguntan solo por cambios pendientes."
+    echo -e "$BLUE[INFO]$NC Los controles sysctl preguntan por parámetro; si ya cumplen, solo muestran [OK] y no se modifican."
+    run_module banners
+    run_module bash
+
+    local m
+    for m in ssh sudo kernel synflood rsyslog; do
+      run_internal_module_with_confirmation "$m"
+    done
+
+    # AIDE is optional because Wazuh FIM may already cover the same files.
+    # Its installer owns the consent prompt and must explain that tradeoff.
+    run_module aide
+  elif [ "$MODULE" = "all" ]; then
+    info "MODO AUDITORÍA: sin cambios"
+    local m
+    for m in ssh sudo kernel synflood rsyslog banners bash; do
+      run_module "$m"
+    done
+    aide_audit_module
+  else
+    if [ "$AUTO_FIX" = true ]; then
+      echo -e "$BLUE[INFO]$NC MODO FIX: módulo seleccionado=$MODULE"
+    else
+      ok "MODO AUDITORÍA: módulo seleccionado=$MODULE"
+    fi
+    if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$MODULE"; then
+      if [ "$AUTO_MODE" = true ]; then
+        echo
+        echo -e "$YELLOW[--auto] Se omitirá la aplicación del módulo '$MODULE'.$NC"
+        echo "Qué haría: $(risk_description "$MODULE")"
+        local previous_fix="$AUTO_FIX"
+        AUTO_FIX=false
+        run_module "$MODULE"
+        AUTO_FIX="$previous_fix"
+      else
+        run_internal_module_with_confirmation "$MODULE"
+      fi
+    else
+      run_module "$MODULE"
+    fi
+  fi
+
+  echo -e "\n$GREEN============================================================$NC"
+  echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
+  if $PENDING_ONLY_AUDIT; then
+    echo "Controles correctos: $OK_COUNT"
+    echo "No aplicables: $NOT_APPLICABLE_COUNT"
+    echo "Pendientes: $WARNINGS"
+    echo "Errores: $ERRORS"
+    if [ "$WARNINGS" -eq 0 ]; then
+      echo "No se detectaron correcciones pendientes."
+    else
+      echo "Ejecuta ./linux-hardening.sh --fix para revisar y confirmar los cambios."
+    fi
+  else
+    echo "Correcciones: $FIXED"
+    echo "Advertencias: $WARNINGS"
+    echo "Errores: $ERRORS"
+    if [ "$AUTO_FIX" = true ]; then echo "Backup: $BACKUP_DIR"; else echo "Backup: no creado (modo auditoría)"; fi
+  fi
+  echo -e "$GREEN============================================================$NC"
+}
+main "$@"
+ "$file"; then
       ok "$file: HISTFILESIZE=-1"
     else
       warn "$file: HISTFILESIZE no está fijado a -1"
+    fi
+    if grep -Eq '^[[:space:]]*set[[:space:]]+-o[[:space:]]+history([[:space:]]|$)' "$file"; then
+      ok "$file: historial interactivo habilitado"
+    else
+      warn "$file: falta set -o history"
+    fi
+    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTCONTROL=[[:space:]]*
+      warn "$file: HISTFILE está readonly y puede impedir la política de historial; --fix lo normalizará"
+    else
+      ok "$file: HISTFILE no está bloqueado como readonly"
+    fi
+    if grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
+      warn "$file: PROMPT_COMMAND contiene una regla que limpia/recarga el historial en cada prompt"
+    else
+      ok "$file: no se detectó el patrón de limpieza de historial en PROMPT_COMMAND"
+    fi
+    return 0
+  fi
+
+  if [ -f "$file" ] &&
+     grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&
+     grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file" &&
+     ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file" &&
+     ! grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    return 0
+  fi
+  if [ ! -f "$file" ]; then
+    if ! $AUTO_FIX; then warn "$file no existe; --fix puede crearlo con historial ilimitado."; return 0; fi
+  elif ! $AUTO_FIX; then
+    warn "$file: historial no cumple la política; --fix lo normalizará a ilimitado"
+    return 0
+  fi
+  [ ! -e "$file" ] || backup_once "$file"
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para $file"; return 1; }
+  if [ -f "$file" ]; then
+    awk '
+      $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
+      $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
+      skip { next }
+      /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
+      /^PROMPT_COMMAND="orangebox_history_guard; / { next }
+      /^orangebox_history_guard\(\) \{$/ { skip_guard=1; next }
+      skip_guard && /^\}$/ { skip_guard=0; next }
+      skip_guard { next }
+      /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
+      { print }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
+  else
+    : > "$tmp"
+  fi
+  cat >> "$tmp" <<'ORANGEBOX_UNLIMITED_HISTORY'
+# ORANGEBOX UNLIMITED HISTORY BEGIN
+# El historial interactivo se conserva completo, sin límite de líneas.
+set -o history
+export HISTSIZE=-1
+export HISTFILESIZE=-1
+export HISTCONTROL=
+unset HISTIGNORE
+case "${HISTFILE:-}" in
+  ""|/dev/null|/dev/zero|/var/log/bash_history/*) export HISTFILE="$HOME/.bash_history" ;;
+esac
+shopt -s histappend
+# ORANGEBOX UNLIMITED HISTORY END
+ORANGEBOX_UNLIMITED_HISTORY
+  chmod --reference="$file" "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference="$file" "$tmp" 2>/dev/null || chown root:root "$tmp"
+  if mv "$tmp" "$file"; then
+    ok "$file: historial habilitado y sin límite"
+    FIXED=$((FIXED+1))
+  else
+    rm -f "$tmp"
+    warn "No se pudo instalar configuración de historial en $file"
+    return 1
+  fi
+}
+
+bash_profile_check() {
+  local file="$1" label="$2" needle="$3" detail="${4:-}"
+  if [ ! -f "$file" ]; then
+    warn "$label: no verificable; falta $file"
+    return 0
+  fi
+  if grep -Fq -- "$needle" "$file" && { [ -z "$detail" ] || grep -Fq -- "$detail" "$file"; }; then
+    ok "$label"
+  else
+    warn "$label: falta o difiere en $file"
+  fi
+}
+
+bash_audit_profile_controls() {
+  local file="$1" mode owner group
+  bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
+  bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
+  bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
+  bash_profile_check "$file" "Bash: HISTSIZE=-1 (sin límite de líneas en memoria)" 'export HISTSIZE=-1'
+  bash_profile_check "$file" "Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)" 'export HISTFILESIZE=-1'
+  bash_profile_check "$file" "Bash: no omite comandos del historial" 'export HISTCONTROL=' 'unset HISTIGNORE'
+  bash_profile_check "$file" "Bash: historial acumulativo entre sesiones" 'shopt -s histappend'
+  bash_profile_check "$file" "Bash: historial con fecha y hora" "export HISTTIMEFORMAT='%F %T '"
+  bash_profile_check "$file" "Bash: bloquea history -c/-d/-w desde el wrapper" 'history() {' '*c*|*d*|*w*)'
+  bash_profile_check "$file" "Bash: redirige HISTFILE no persistente a ~/.bash_history" 'HISTFILE="${HOME}/.bash_history"'
+  bash_profile_check "$file" "Bash: protege el archivo de historial con modo 0600" 'chmod 600 "$HISTFILE"'
+  bash_profile_check "$file" "Bash: modo de edición Emacs" 'set -o emacs'
+  bash_profile_check "$file" "Readline: Ctrl+A va al inicio de línea" 'beginning-of-line' '\C-a'
+  bash_profile_check "$file" "Readline: Ctrl+E va al final de línea" 'end-of-line' '\C-e'
+  bash_profile_check "$file" "Bash: obtiene FQDN mediante hostname -f" 'hostname -f'
+  bash_profile_check "$file" "Bash: prompt por rol root/no-root y color diferenciado" 'orangebox_set_prompt() {' '\e[1;31m'
+  bash_profile_check "$file" "Bash: prompt de usuario no-root usa color diferenciado" 'orangebox_set_prompt() {' '\e[1;32m'
+  bash_profile_check "$file" "Bash: reaplica prompt e historial en cada prompt" 'orangebox_pre_prompt() {' 'history -a'
+  bash_profile_check "$file" "Bash: registra orangebox_pre_prompt en PROMPT_COMMAND" 'orangebox_pre_prompt' 'PROMPT_COMMAND='
+  bash_profile_check "$file" "Bash: el resto del perfil solo afecta shells interactivas" '# El resto de esta configuracion solo aplica a shells interactivos.'
+  if [ -f "$file" ]; then
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+    owner="$(stat -c '%U' "$file" 2>/dev/null || true)"
+    group="$(stat -c '%G' "$file" 2>/dev/null || true)"
+    if [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "Perfil Bash OrangeBox: propietario root:root y permisos 0644"
+    else
+      warn "Perfil Bash OrangeBox: propietario/permisos actuales ${owner:-?}:${group:-?} ${mode:-?}; objetivo root:root 0644"
+    fi
+  fi
+}
+
+bash_audit_system_bashrc_include() {
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  else
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  fi
+}
+
+bash_module() {
+  section "BASH / HISTORIAL / PROMPT"
+  local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
+  if [ ! -d /etc/profile.d ]; then
+    if $AUTO_FIX; then
+      if ! install -d -o root -g root -m 755 /etc/profile.d; then
+        warn "/etc/profile.d no existe y no se pudo crear"
+        return
+      fi
+      ok "/etc/profile.d creado con root:root 0755"
+      FIXED=$((FIXED+1))
+    else
+      warn "/etc/profile.d no existe; se requiere crearlo para instalar el perfil Bash OrangeBox"
+    fi
+  fi
+
+  # The compact baseline audit must not depend on temporary-file creation.
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+    normalize_history_dotfile /root/.bashrc
+    normalize_history_dotfile /etc/skel/.bashrc
+    bash_audit_system_bashrc_include
+    return
+  fi
+
+  # La configuración externa ajena al baseline se revisa en el modo detallado.
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc; do
+      [ -f "$f" ] || continue
+      if grep -Eiq '(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)' "$f"; then
+        warn "Posible deshabilitación de Bash History detectada en $f; se revisará la configuración efectiva"
+      fi
+    done
+  fi
+
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
+  cat > "$tmp" <<'ORANGEBOX_BASH'
+# OrangeBox Linux Hardening - historial ilimitado, prompt por rol y timeout
+# Timeout por inactividad: 120 segundos en shells interactivos de usuarios no-root.
+# Limpiar TMOUT heredado evita que una shell root reciba el timeout del usuario.
+if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+  unset TMOUT 2>/dev/null || true
+else
+  case $- in
+    *i*)
+      if [ "${TMOUT:-}" != 120 ]; then
+        TMOUT=120 2>/dev/null || true
+      fi
+      if [ "${TMOUT:-}" = 120 ]; then
+        export TMOUT
+        readonly TMOUT 2>/dev/null || true
+      else
+        printf '%s\n' 'OrangeBox: no fue posible fijar TMOUT=120; revise si ya estaba definido como readonly.' >&2
+      fi
+      ;;
+  esac
+fi
+
+# El resto de esta configuracion solo aplica a shells interactivos.
+case $- in
+  *i*) ;;
+  *) return 0 ;;
+esac
+
+# Protección de mejor esfuerzo: impedir borrado/sobrescritura accidental por
+# los comandos comunes "history -c", "history -d" y "history -w".
+# No es una frontera de seguridad: "builtin history", edición del archivo o
+# modificación de la shell pueden eludir este wrapper.
+history() {
+  local arg opts
+  for arg in "$@"; do
+    case "$arg" in
+      --) break ;;
+      -?*)
+        opts="${arg#-}"
+        case "$opts" in
+          *c*|*d*|*w*)
+            printf '%s\n' 'OrangeBox: bloqueado history -c/-d/-w para proteger el historial de esta sesión.' >&2
+            return 2
+            ;;
+        esac
+        case "$opts" in
+          *p*|*s*) break ;;
+        esac
+        ;;
+      *) break ;;
+    esac
+  done
+  builtin history "$@"
+}
+
+orangebox_history_guard() {
+  set -o history 2>/dev/null || true
+  HISTSIZE=-1
+  HISTFILESIZE=-1
+  case "${HISTFILE:-}" in
+    ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="${HOME}/.bash_history" ;;
+  esac
+  export HISTSIZE HISTFILESIZE HISTFILE
+  HISTCONTROL=
+  export HISTCONTROL
+  unset HISTIGNORE
+  shopt -s histappend
+}
+
+export HISTTIMEFORMAT='%F %T '
+orangebox_history_guard
+
+orangebox_secure_history_file() {
+  [ -n "${HOME:-}" ] && [ -d "$HOME" ] || return 0
+  [ "$HISTFILE" = "$HOME/.bash_history" ] || return 0
+  if [ ! -e "$HISTFILE" ]; then (umask 077; : > "$HISTFILE") 2>/dev/null || true; fi
+  if [ -f "$HISTFILE" ] && [ -O "$HISTFILE" ]; then chmod 600 "$HISTFILE" 2>/dev/null || true; fi
+}
+orangebox_secure_history_file
+
+# Normalizar la edición de línea en Bash para administración.
+# Ctrl+A = inicio de línea; Ctrl+E = final de línea.
+# No depender de un ~/.inputrc o /etc/inputrc personalizado.
+set -o emacs 2>/dev/null || true
+bind '"\C-a": beginning-of-line' 2>/dev/null || true
+bind '"\C-e": end-of-line' 2>/dev/null || true
+
+# Resolver hostname FQDN una vez por shell; evitar consultas en cada prompt.
+ORANGEBOX_PROMPT_HOST="$(hostname -f 2>/dev/null || true)"
+case "$ORANGEBOX_PROMPT_HOST" in
+  ""|localhost|localhost.localdomain) ORANGEBOX_PROMPT_HOST="$(hostname 2>/dev/null || true)" ;;
+esac
+[ -n "$ORANGEBOX_PROMPT_HOST" ] || ORANGEBOX_PROMPT_HOST=unknown
+
+# Fijar el prompt antes de cada indicador; otros perfiles pueden redefinir PS1.
+orangebox_set_prompt() {
+  if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;31m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w #\[\e[0m\] '
+  else
+    PS1='\[\e[2m\]\D{%H:%M:%S}\[\e[0m\] \[\e[1;32m\]\u@'"$ORANGEBOX_PROMPT_HOST"' \w $\[\e[0m\] '
+  fi
+}
+
+orangebox_pre_prompt() {
+  # /root/.bashrc puede activar "set -o vi" después de cargar este perfil.
+  # Reafirmar el modo Emacs y las teclas antes de presentar cada prompt.
+  set -o emacs 2>/dev/null || true
+  bind '"\C-a": beginning-of-line' 2>/dev/null || true
+  bind '"\C-e": end-of-line' 2>/dev/null || true
+  orangebox_history_guard
+  history -a
+  orangebox_set_prompt
+}
+case ";${PROMPT_COMMAND:-};" in
+  *";orangebox_pre_prompt;"*|*"; orangebox_pre_prompt;"*) ;;
+  *)
+    if [ -n "${PROMPT_COMMAND:-}" ]; then
+      PROMPT_COMMAND="${PROMPT_COMMAND}; orangebox_pre_prompt"
+    else
+      PROMPT_COMMAND="orangebox_pre_prompt"
+    fi
+    ;;
+esac
+export PROMPT_COMMAND
+orangebox_set_prompt
+ORANGEBOX_BASH
+
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+  elif [ -f "$target" ] && cmp -s "$tmp" "$target" &&
+     [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
+     [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
+     [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
+    ok "Bash History habilitado e ilimitado; prompt OrangeBox ya configurado"
+  elif $AUTO_FIX; then
+    [ ! -e "$target" ] || backup_once "$target"
+    if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
+      ok "Bash History habilitado sin límite y prompt por rol aplicado en $target"
+      FIXED=$((FIXED+1))
+    else
+      warn "No se pudo instalar/verificar $target"
+    fi
+  else
+    warn "$target requiere habilitar Bash History y establecer HISTSIZE/HISTFILESIZE=-1"
+  fi
+  rm -f "$tmp"
+
+  # Normalizar también los dotfiles administrados más sensibles sin tocar
+  # aliases, umask, timeout ni el resto de las preferencias existentes.
+  normalize_history_dotfile /root/.bashrc
+  normalize_history_dotfile /etc/skel/.bashrc
+
+  # CentOS/RHEL inicia shells interactivos no-login desde /etc/bashrc.
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  local bashrc_changed=false
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar ni añadir el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  elif ! $AUTO_FIX; then
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  else
+    backup_once "$system_bashrc"
+    if ! grep -Fq "$marker" "$system_bashrc"; then printf '\n%s\n' "$marker" >> "$system_bashrc" && bashrc_changed=true; fi
+    if ! grep -Fq "$include" "$system_bashrc"; then printf '%s\n' "$include" >> "$system_bashrc" && bashrc_changed=true; fi
+    if grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+      ok "Include idempotente verificado en /etc/bashrc para shells interactivos no-login"
+      [ "$bashrc_changed" = true ] && FIXED=$((FIXED+1))
+    else
+      warn "No se pudo añadir/verificar el include en /etc/bashrc"
+    fi
+  fi
+}
+
+usage() {
+  cat <<EOF
+OrangeBox Linux Hardening $SCRIPT_VERSION
+
+Uso:
+  $0                                Auditoría del baseline interno
+  $0 --audit                        Auditoría explícita del baseline completo
+  $0 --fix                          Modo interactivo: explica los riesgos y pregunta
+  $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
+  ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
+  $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
+  $0 --fix --module bash            Historial con fecha/hora y prompt por rol
+  $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
+  $0 --fix --module network-full --allow-shorewall
+                                    Autoriza explícitamente cambios de red con Shorewall
+  $0 --module <modulo> [--fix] [--auto] [--allow-risky]
+
+Baseline interno (auditoría de pendientes corregibles):
+  ssh sudo kernel synflood rsyslog banners bash all
+
+Módulos adicionales:
+  aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
+  packages-remove services-remove usb-storage grub-full kernel-full lpe-2026
+  network-full password-full gui-remove xinetd-remove rsyslog-full
+  selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
+
+Evaluaciones independientes:
+  ./audit-firewall-listeners.sh Auditoría de firewall/listeners (solo lectura).
+  ./audit-listening-services.sh Inventario independiente de sockets.
+  ./linux-hardening-audit.sh    Audita módulos sin calcular cumplimiento CIS.
+  ./cis-benchmark-check.sh       Evalúa exclusivamente el benchmark CIS.
+
+Seguridad:
+  --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
+  --fix --auto no hace preguntas: aplica únicamente banners/MOTD y Bash. Kernel, SYN flood y los demás módulos delicados quedan en auditoría sin aplicar cambios.
+  --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
+  --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
+  --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
+  aplica INPUT DROP, incompatible con la administración actual mediante Shorewall.
+  post-install se omite: no tiene una ruta de auditoría de solo lectura.
+  El benchmark CIS no se ejecuta como módulo; utiliza el comando independiente indicado arriba.
+EOF
+}
+
+internal_module_requires_risk() {
+  case "$1" in
+    ssh|sudo|kernel|synflood|rsyslog) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+risk_description() {
+  case "$1" in
+    ssh) echo "aplica solo controles SSH pendientes (intentos, tiempos de sesión y autenticación por host); se valida la sintaxis, pero revisa clientes e integraciones." ;;
+    sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
+    kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
+    synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
+    rsyslog|rsyslog-full) echo "activa almacenamiento persistente de journald y reinicia journald; revisa espacio, retención y logging existente." ;;
+    network-full) echo "cambia sysctl de red y bloquea módulos de kernel (por ejemplo SCTP/RDS/DCCP/TIPC); puede afectar VPN, routing o aplicaciones que usen esos protocolos." ;;
+    firewall) echo "identifica el gestor/backend, inventaría listeners y contrasta su acceso con reglas INPUT; es estrictamente de solo lectura incluso con --fix." ;;
+    firewall-rules) echo "el generador de iptables vacía reglas y establece INPUT DROP; está bloqueado para evitar cortar accesos o interferir con Shorewall." ;;
+    ssh-cis|ssh-complete) echo "modifica parámetros de SSH y/o algoritmos criptográficos. Puede dejar fuera clientes antiguos, automatizaciones o el acceso administrativo." ;;
+    password|password-full) echo "cambia política de contraseñas o valores por defecto. No se editará PAM a ciegas, pero podría afectar autenticación o futuras contraseñas." ;;
+    filesystem|filesystem-full) echo "puede restringir montajes, ocultar procesos con hidepid, bloquear módulos o deshabilitar autofs; podría afectar monitoreo y aplicaciones." ;;
+    cron|cron-full) echo "puede cambiar permisos de cron/at y crear listas allow limitadas a root, impidiendo tareas de usuarios o de hosting/cPanel." ;;
+    selinux|selinux-setup) echo "solo informa el estado actual; SELinux no se modifica desde este repositorio." ;;
+    grub|grub-full) echo "cambia parámetros del arranque y regenera grub.cfg; el efecto pleno requiere reinicio y un error puede impedir arrancar." ;;
+    kernel-full|lpe-2026) echo "cambia mitigaciones de kernel/sysctl o bloquea módulos/namespaces; puede afectar contenedores, VPN y requiere reinicio para algunos efectos." ;;
+    auditd|auditd-full) echo "modifica reglas y servicio de auditoría; puede incrementar volumen de eventos y afectar configuración de auditd existente." ;;
+    time|time-sync) echo "puede cambiar el servicio de sincronización o dar un salto de hora; puede afectar certificados, autenticación y correlación de logs." ;;
+    usb|usb-storage) echo "bloquea almacenamiento USB mediante modprobe; puede afectar dispositivos o flujos de recuperación que dependan de USB." ;;
+    services|services-remove|packages-remove|xinetd-remove|gui-remove) echo "puede detener/deshabilitar servicios o eliminar paquetes y dependencias; podría afectar aplicaciones instaladas." ;;
+    aide) echo "instala AIDE y crea una base de integridad; puede solaparse con Wazuh FIM y consumir espacio/CPU. El instalador explicará ese solapamiento y pedirá consentimiento explícito." ;;
+    bash-full) echo "instala auditoría amplia de comandos mediante trap DEBUG/syslog; puede aumentar volumen y registrar argumentos sensibles." ;;
+    post-install) echo "script de preparación inicial que puede cambiar GRUB, instalar paquetes y habilitar servicios; SELinux solo se audita." ;;
+    *) echo "este módulo puede modificar configuración o servicios; revisa el alcance y conserva una vía de recuperación." ;;
+  esac
+}
+
+confirm_risky_change() {
+  local name="$1" answer description
+  description="$(risk_description "$name")"
+  echo
+  echo -e "$YELLOW[ATENCIÓN] Control con riesgo operacional: $name$NC"
+  echo "Qué hará: $description"
+  if [ "$AUTO_MODE" = true ]; then
+    warn "Modo --auto: cambio omitido; no se aplican controles críticos."
+    return 1
+  fi
+  if [ "$ALLOW_RISKY" = true ]; then
+    ok "--allow-risky autoriza aplicar este control sin confirmación adicional."
+    return 0
+  fi
+  if [ ! -r /dev/tty ]; then
+    warn "No hay terminal disponible para confirmar; el cambio se omitirá por seguridad."
+    return 1
+  fi
+  read -r -p "¿Quieres aplicar '$name'? [s/N]: " answer </dev/tty
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) warn "Control '$name' rechazado por el usuario; se mantiene en auditoría."; return 1 ;;
+  esac
+}
+
+run_internal_module_with_confirmation() {
+  local name="$1" previous_fix="$AUTO_FIX" ssh_status=0 journal_status=0
+  if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
+    case "$name" in
+      ssh)
+        ssh_state_status preflight
+        ssh_status=$?
+        if [ "$ssh_status" -eq 0 ]; then
+          info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+        elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          reason="$(ssh_module_apply_block_reason || true)"
+          if [ "$ssh_status" -eq 1 ]; then
+            info "Hay controles SSH pendientes, pero no se aplicarán automáticamente: ${reason:-no se encontró una vía segura}; se conserva la configuración actual y se muestra la remediación manual."
+          else
+            info "No se pudo verificar el estado efectivo de SSH: ${reason:-sshd -T no entregó valores}. No se modificará."
+          fi
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      sudo)
+        # sudo_module owns its parameter-specific confirmation and intentionally
+        # skips use_pty on cPanel hosts. A generic prompt here is redundant.
+        info "Sudo se comprueba primero; solo su control específico puede solicitar confirmación."
+        ;;
+      kernel)
+        # sysctl_safe_apply verifies each live and persistent value before it
+        # asks. A module-wide prompt is redundant and must never precede checks.
+        info "Se comprobarán los parámetros del kernel uno por uno; solo los que falten o difieran solicitarán confirmación."
+        ;;
+      synflood)
+        # The same rule applies to SYN cookies/backlog: ask per setting only.
+        if synflood_state_compliant; then
+          info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
+        else
+          info "SYN cookies/backlog: se revisará cada parámetro; solo los que falten o difieran solicitarán confirmación."
+        fi
+        ;;
+      rsyslog)
+        rsyslog_state_status
+        journal_status=$?
+        if [ "$journal_status" -eq 0 ]; then
+          info "Journald ya tiene Storage=persistent y /var/log/journal; no se solicitará confirmación ni se reiniciará."
+        elif [ "$journal_status" -eq 1 ]; then
+          if ! confirm_risky_change "$name"; then
+            AUTO_FIX=false
+            run_module "$name"
+            AUTO_FIX="$previous_fix"
+            return 0
+          fi
+        else
+          info "No se puede verificar journald con seguridad; se omite aplicación automática."
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+      *)
+        if ! confirm_risky_change "$name"; then
+          AUTO_FIX=false
+          run_module "$name"
+          AUTO_FIX="$previous_fix"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+  run_module "$name"
+}
+
+run_companion_module() {
+  local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  if [ "$name" = "cis" ]; then
+    die "El benchmark CIS es independiente de los módulos de hardening. Ejecuta: ./cis-benchmark-check.sh"
+  fi
+  case "$name" in
+    aide) script="aide-install.sh"; risky=true ;;
+    audit-listeners) script="audit-listening-services.sh"; audit_only=true; fix_arg="" ;;
+    auditd-full) script="auditd-hardening.sh"; risky=true ;;
+    bash-full) script="bash-hardening.sh"; risky=true ;;
+    time-sync) script="configure-time-sync.sh"; risky=true ;;
+    cpu-full) script="cpu-hardening.sh"; risky=true ;;
+    cron-full) script="cron-hardening.sh"; risky=true ;;
+    packages-remove) script="desintalar-paquetes-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    services-remove) script="desintalar-servicios-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
+    usb-storage) script="disable-usb-storage.sh"; risky=true ;;
+    firewall-rules)
+      die "Módulo bloqueado: generate-iptables-rules.sh vacía reglas, establece INPUT DROP y podría cortar SSH. En este host se usa Shorewall; no se aplicará un segundo firewall destructivo."
+      ;;
+    grub-full) script="grub-hardening.sh"; risky=true ;;
+    kernel-full) script="kernel-hardening.sh"; risky=true ;;
+    lpe-2026) script="kernel-lpe-2026-mitigation.sh"; risky=true; audit_arg="--check" ;;
+    network-full) script="network-hardening.sh"; risky=true ;;
+    password-full) script="password-hardening.sh"; risky=true ;;
+    post-install)
+      if [ "$AUTO_FIX" = true ]; then
+        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host; SELinux solo se audita."
+      fi
+      warn "Se omite post-install: puede instalar paquetes, cambiar GRUB y habilitar servicios incluso sin --fix; SELinux solo se audita."
+      return 0
+      ;;
+    gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
+    xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
+    rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
+    selinux-setup)
+      info "selinux-setup bloqueado por política OrangeBox: SELinux solo se audita; nunca se cambian su modo, configuración, contextos ni se solicita reinicio."
+      if command -v getenforce >/dev/null 2>&1; then
+        info "Estado SELinux actual: $(getenforce 2>/dev/null || echo desconocido)"
+      else
+        warn "getenforce no disponible; no se puede determinar el estado actual de SELinux"
+      fi
+      return 0
+      ;;
+    ssh-cis) script="ssh-hardening.sh"; risky=true ;;
+    ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
+    sudo-full) script="sudo-hardening.sh"; risky=true ;;
+    filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
+
+    *) die "Módulo desconocido: $name" ;;
+  esac
+
+  local apply_fix="$AUTO_FIX" skip_without_audit=false
+  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ] && [ "$AUTO_MODE" != true ]; then
+    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar GRUB, instalar paquetes y habilitar servicios. SELinux solo se audita."
+  fi
+
+  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ]; then
+    if [ "$AUTO_MODE" = true ]; then
+      echo
+      echo -e "$YELLOW[--auto] Se omitirá la aplicación de '$name'.$NC"
+      echo "Qué haría: $(risk_description "$name")"
+      apply_fix=false
+    elif [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; then
+      info "AIDE no está instalado; aide-install.sh explicará sus efectos y solicitará consentimiento explícito."
+    elif ! confirm_risky_change "$name"; then
+      apply_fix=false
+    fi
+    if [ "$apply_fix" != true ] && [ -z "$audit_arg" ] && [ "$audit_only" != true ]; then
+      warn "No se ejecutó '$name': no tiene una ruta de auditoría segura declarada en el orquestador."
+      return 0
+    fi
+  fi
+
+  if [ ! -f "$SCRIPT_DIR/$script" ]; then
+    die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
+  fi
+  if [ "$apply_fix" != true ] && [ "$interactive" = true ]; then
+    warn "$name no ofrece auditoría no interactiva; se omite."
+    return 0
+  fi
+
+  local -a args=()
+  if [ "$apply_fix" = true ]; then
+    if [ "$audit_only" = true ]; then
+      warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
+    elif [ "$name" = "network-full" ]; then
+      args=(--fix)
+      if [ "$ALLOW_SHOREWALL" = true ]; then
+        args+=(--allow-shorewall)
+      fi
+    elif [ -n "$fix_arg" ]; then
+      args=("$fix_arg")
+    fi
+  elif [ -n "$audit_arg" ]; then
+    args=("$audit_arg")
+  fi
+  echo
+  echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
+  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
+    ok "Módulo $name finalizado"
+  else
+    warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
+  fi
+}
+
+run_module() {
+  case "$1" in
+    ssh) ssh_module ;;
+    sudo) sudo_module ;;
+    password) password_module ;;
+    kernel) kernel_module ;;
+    synflood) synflood_module ;;
+    filesystem) filesystem_module ;;
+    auditd) auditd_module ;;
+    rsyslog) rsyslog_module ;;
+    selinux) selinux_module ;;
+    cron) cron_module ;;
+    usb) usb_module ;;
+    services) services_module ;;
+    banners) banners_module ;;
+    time) time_module ;;
+    grub) grub_module ;;
+    firewall) die "La auditoría de firewall es independiente: ejecuta ./audit-firewall-listeners.sh." ;;
+    fapolicyd) fapolicyd_module ;;
+    listening) die "El inventario de sockets es independiente: ejecuta ./audit-listening-services.sh." ;;
+    bash) bash_module ;;
+    *) run_companion_module "$1" ;;
+  esac
+}
+
+main() {
+  require_root
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --audit) AUDIT_MODE=true ;;
+      --fix|-f) AUTO_FIX=true ;;
+      --auto) AUTO_MODE=true ;;
+      --allow-risky) ALLOW_RISKY=true ;;
+      --allow-shorewall) ALLOW_SHOREWALL=true ;;
+      --module|-m) shift; [ $# -gt 0 ] || die "--module requiere nombre"; MODULE="$1" ;;
+      --help|-h) usage; exit 0 ;;
+      --list-modules) usage; exit 0 ;;
+      *) die "Argumento desconocido: $1" ;;
+    esac
+    shift
+  done
+
+  if [ "$AUDIT_MODE" = true ] && [ "$AUTO_FIX" = true ]; then
+    die "--audit y --fix son modos excluyentes."
+  fi
+  if [ "$AUDIT_MODE" = true ] && [ "$MODULE" != "all" ]; then
+    die "--audit ejecuta el informe completo del baseline; no se combina con --module."
+  fi
+  if [ "$AUTO_MODE" = true ] && [ "$AUTO_FIX" != true ]; then
+    die "--auto requiere --fix. Usa --fix --auto para aplicar únicamente controles seguros."
+  fi
+  if [ "$AUTO_MODE" = true ] && [ "$ALLOW_RISKY" = true ]; then
+    die "--auto y --allow-risky son incompatibles: --auto siempre omite controles críticos."
+  fi
+  if [ "$ALLOW_SHOREWALL" = true ] && [ "$MODULE" != "network-full" ]; then
+    warn "--allow-shorewall solo se utiliza con --module network-full."
+  fi
+
+  if [ "$MODULE" = "repo-audit" ]; then
+    die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
+  fi
+
+  if [ "$AUDIT_MODE" = true ] || { [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; }; then PENDING_ONLY_AUDIT=true; fi
+  detect_os
+  if $PENDING_ONLY_AUDIT; then
+    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría completa del baseline ($OS_ID $OS_VERSION)"
+  fi
+  if [ "$AUTO_FIX" = true ]; then
+    prepare_backup
+  fi
+
+  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
+    warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
+    run_module banners
+    run_module bash
+
+    local previous_fix="$AUTO_FIX" m
+    AUTO_FIX=false
+    for m in ssh sudo kernel synflood rsyslog; do
+      run_module "$m"
+    done
+    AUTO_FIX="$previous_fix"
+    echo
+    echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
+  elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; los módulos verifican primero el estado y preguntan solo por cambios pendientes."
+    echo -e "$BLUE[INFO]$NC Los controles sysctl preguntan por parámetro; si ya cumplen, solo muestran [OK] y no se modifican."
+    run_module banners
+    run_module bash
+
+    local m
+    for m in ssh sudo kernel synflood rsyslog; do
+      run_internal_module_with_confirmation "$m"
+    done
+
+    # AIDE is optional because Wazuh FIM may already cover the same files.
+    # Its installer owns the consent prompt and must explain that tradeoff.
+    run_module aide
+  elif [ "$MODULE" = "all" ]; then
+    info "MODO AUDITORÍA: sin cambios"
+    local m
+    for m in ssh sudo kernel synflood rsyslog banners bash; do
+      run_module "$m"
+    done
+    aide_audit_module
+  else
+    if [ "$AUTO_FIX" = true ]; then
+      echo -e "$BLUE[INFO]$NC MODO FIX: módulo seleccionado=$MODULE"
+    else
+      ok "MODO AUDITORÍA: módulo seleccionado=$MODULE"
+    fi
+    if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$MODULE"; then
+      if [ "$AUTO_MODE" = true ]; then
+        echo
+        echo -e "$YELLOW[--auto] Se omitirá la aplicación del módulo '$MODULE'.$NC"
+        echo "Qué haría: $(risk_description "$MODULE")"
+        local previous_fix="$AUTO_FIX"
+        AUTO_FIX=false
+        run_module "$MODULE"
+        AUTO_FIX="$previous_fix"
+      else
+        run_internal_module_with_confirmation "$MODULE"
+      fi
+    else
+      run_module "$MODULE"
+    fi
+  fi
+
+  echo -e "\n$GREEN============================================================$NC"
+  echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
+  if $PENDING_ONLY_AUDIT; then
+    echo "Controles correctos: $OK_COUNT"
+    echo "No aplicables: $NOT_APPLICABLE_COUNT"
+    echo "Pendientes: $WARNINGS"
+    echo "Errores: $ERRORS"
+    if [ "$WARNINGS" -eq 0 ]; then
+      echo "No se detectaron correcciones pendientes."
+    else
+      echo "Ejecuta ./linux-hardening.sh --fix para revisar y confirmar los cambios."
+    fi
+  else
+    echo "Correcciones: $FIXED"
+    echo "Advertencias: $WARNINGS"
+    echo "Errores: $ERRORS"
+    if [ "$AUTO_FIX" = true ]; then echo "Backup: $BACKUP_DIR"; else echo "Backup: no creado (modo auditoría)"; fi
+  fi
+  echo -e "$GREEN============================================================$NC"
+}
+main "$@"
+ "$file"; then
+      ok "$file: HISTCONTROL vacío (no se omiten comandos)"
+    else
+      warn "$file: HISTCONTROL no está vacío"
+    fi
+    if grep -Eq '^[[:space:]]*unset[[:space:]]+HISTIGNORE([[:space:]]|$)' "$file"; then
+      ok "$file: HISTIGNORE eliminado"
+    else
+      warn "$file: HISTIGNORE puede omitir comandos del historial"
+    fi
+    if grep -Fq 'shopt -s histappend' "$file"; then
+      ok "$file: histappend habilitado"
+    else
+      warn "$file: falta shopt -s histappend"
+    fi
+    if grep -Fq '""|/dev/null|/dev/zero|/var/log/bash_history/*)' "$file" &&
+       grep -Fq 'export HISTFILE="$HOME/.bash_history"' "$file"; then
+      ok "$file: HISTFILE no persistente se redirige a ~/.bash_history"
+    else
+      warn "$file: falta protección para HISTFILE vacío/no persistente"
     fi
     if grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file"; then
       warn "$file: HISTFILE está readonly y puede impedir la política de historial; --fix lo normalizará"
@@ -1441,6 +3045,7 @@ OrangeBox Linux Hardening $SCRIPT_VERSION
 
 Uso:
   $0                                Auditoría del baseline interno
+  $0 --audit                        Auditoría explícita del baseline completo
   $0 --fix                          Modo interactivo: explica los riesgos y pregunta
   $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
   ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
@@ -1752,6 +3357,7 @@ main() {
   require_root
   while [ $# -gt 0 ]; do
     case "$1" in
+      --audit) AUDIT_MODE=true ;;
       --fix|-f) AUTO_FIX=true ;;
       --auto) AUTO_MODE=true ;;
       --allow-risky) ALLOW_RISKY=true ;;
@@ -1764,6 +3370,12 @@ main() {
     shift
   done
 
+  if [ "$AUDIT_MODE" = true ] && [ "$AUTO_FIX" = true ]; then
+    die "--audit y --fix son modos excluyentes."
+  fi
+  if [ "$AUDIT_MODE" = true ] && [ "$MODULE" != "all" ]; then
+    die "--audit ejecuta el informe completo del baseline; no se combina con --module."
+  fi
   if [ "$AUTO_MODE" = true ] && [ "$AUTO_FIX" != true ]; then
     die "--auto requiere --fix. Usa --fix --auto para aplicar únicamente controles seguros."
   fi
@@ -1778,7 +3390,7 @@ main() {
     die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
   fi
 
-  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; then PENDING_ONLY_AUDIT=true; fi
+  if [ "$AUDIT_MODE" = true ] || { [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; }; then PENDING_ONLY_AUDIT=true; fi
   detect_os
   if $PENDING_ONLY_AUDIT; then
     echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría completa del baseline ($OS_ID $OS_VERSION)"

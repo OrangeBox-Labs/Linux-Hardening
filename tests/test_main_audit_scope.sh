@@ -58,6 +58,8 @@ grep -Fq 'control de kernel no aplicable' "$OUT" || fail "sysctl_safe_log oculta
 
 # The default report covers every baseline family that interactive --fix can change.
 grep -Fq 'NOT_APPLICABLE_COUNT=0' "$MAIN" || fail "falta contador de controles no aplicables"
+grep -Fq '      --audit) AUDIT_MODE=true ;;' "$MAIN" || fail "falta el modo explícito --audit"
+grep -Fq 'die "--audit y --fix son modos excluyentes."' "$MAIN" || fail "--audit debe rechazar la combinación ambigua con --fix"
 grep -Fq 'echo "No aplicables: $NOT_APPLICABLE_COUNT"' "$MAIN" || fail "falta resumen de controles no aplicables"
 grep -Fq 'aide_audit_module' "$MAIN" || fail "la auditoría predeterminada omite el hardening opcional AIDE"
 grep -Fq 'Base de referencia AIDE inicializada' "$MAIN" || fail "AIDE no informa el estado de su base"
@@ -72,6 +74,12 @@ grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" |
 grep -Fq 'no existe; no hay historial ilimitado configurado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
 grep -Fq 'HISTSIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTSIZE de dotfiles por separado"
 grep -Fq 'HISTFILESIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTFILESIZE de dotfiles por separado"
+grep -Fq 'HISTCONTROL vacío (no se omiten comandos)' "$MAIN" || fail "Bash no audita HISTCONTROL en dotfiles"
+grep -Fq 'HISTIGNORE eliminado' "$MAIN" || fail "Bash no audita HISTIGNORE en dotfiles"
+grep -Fq 'histappend habilitado' "$MAIN" || fail "Bash no audita histappend en dotfiles"
+grep -Fq 'bash_audit_external_history_overrides' "$MAIN" || fail "Bash no detecta perfiles externos que deshabiliten historial"
+grep -Fq 'No se detectaron overrides conocidos que deshabiliten Bash History' "$MAIN" || fail "Bash no informa el estado conforme de perfiles externos"
+grep -Fq 'IP forwarding=1: se usa rp_filter=2' "$MAIN" || fail "la política de rp_filter cuando hay forwarding no se muestra en audit"
 
 # Every managed Bash hardening control must be surfaced separately in audit.
 grep -Fq 'bash_audit_profile_controls "$target"' "$MAIN" || fail "Bash no informa cada control del perfil en audit"
