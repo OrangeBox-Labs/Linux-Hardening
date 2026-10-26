@@ -39,6 +39,13 @@ if [ -n "$legacy_prompts" ]; then
 fi
 pass "confirmaciones estandarizadas en español y estados SYSCTL coloreados"
 
+# Process limits must be audited through the per-parameter consent helper, never direct-written.
+grep -Fq 'check_limits_param "* hard nproc 4096"' "$KERNEL" || fail "nproc debe utilizar el chequeo/confirmación por parámetro"
+if sed -n '/^limit_nproc() {/,/^}/p' "$KERNEL" | grep -Eq 'echo.*hard nproc|cat >.*nproc'; then
+  fail "nproc todavía se escribe sin backup/confirmación"
+fi
+pass "nproc usa auditoría y consentimiento por parámetro"
+
 # Password aging must be observed but never rewritten by either baseline.
 grep -Fq 'PASS_MAX_DAYS=' "$CORE" || fail "baseline no informa PASS_MAX_DAYS"
 grep -Fq 'PASS_MAX_DAYS=' "$PASSWORD" || fail "password-hardening no documenta/conserva PASS_MAX_DAYS"

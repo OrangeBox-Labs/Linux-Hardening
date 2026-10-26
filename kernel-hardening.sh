@@ -141,6 +141,10 @@ check_limits_param() {
       effect="limita sesiones simultáneas por usuario; puede impedir sesiones administrativas o automatizaciones si resulta demasiado restrictivo."
       if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -le "$expected" ]; then compliant=true; fi
       ;;
+    nproc)
+      effect="limita el número máximo de procesos por usuario. Un tope muy bajo puede impedir iniciar servicios, workers PHP, procesos de hosting, sesiones SSH o tareas cron; un tope excesivo reduce la protección ante agotamiento de procesos."
+      if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -ge 1024 ] && [ "$current" -le "$expected" ]; then compliant=true; fi
+      ;;
     *) effect="ajusta un límite de recursos; un valor restrictivo puede afectar aplicaciones." ;;
   esac
 
@@ -209,25 +213,10 @@ restrict_core_dumps() {
 # 2. LIMITAR NUMERO DE PROCESOS (nproc)
 # ==============================================
 limit_nproc() {
-  echo -e "\n${BLUE}[*] Limitando numero de procesos...${NC}"
-
-  if [ "$AUTO_FIX" = true ]; then
-    local LIMITS_FILE="/etc/security/limits.d/90-nproc.conf"
-    if [ ! -f "$LIMITS_FILE" ] || ! grep -q "hard nproc" "$LIMITS_FILE" 2>/dev/null; then
-      echo "* hard nproc 1024" >"$LIMITS_FILE"
-      echo -e "${GREEN}[✓] Limite de procesos configurado (1024)${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${GREEN}[✓] Limite de procesos ya configurado${NC}"
-    fi
-  else
-    if [ -f /etc/security/limits.d/90-nproc.conf ] && grep -q "hard nproc" /etc/security/limits.d/90-nproc.conf 2>/dev/null; then
-      echo -e "${GREEN}[✓] Limite de procesos configurado${NC}"
-    else
-      echo -e "${RED}[!] Limite de procesos NO CONFIGURADO${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
-  fi
+  echo -e "\n${BLUE}[*] Limitando numero de procesos... ${NC}"
+  # A hard nproc cap can prevent daemons/SSH/hosting workers from creating
+  # child processes. The shared helper audits and asks before changing it.
+  check_limits_param "* hard nproc 4096" "Límite máximo de procesos por usuario"
 }
 
 # ==============================================
@@ -275,7 +264,8 @@ hide_kernel_addresses() {
 # ==============================================
 protect_filesystem() {
   echo -e "\n${BLUE}[*] Protegiendo filesystem...${NC}"
-  check_sysctl_param "fs.protected_fifos" "1" "fs.protected_fifos"
+  check_sysctl_param "fs.protected_fifos" "2" "fs.protected_fifos"
+  check_sysctl_param "fs.protected_regular" "2" "fs.protected_regular"
   check_sysctl_param "fs.protected_hardlinks" "1" "fs.protected_hardlinks"
   check_sysctl_param "fs.protected_symlinks" "1" "fs.protected_symlinks"
 }

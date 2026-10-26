@@ -656,7 +656,8 @@ kernel_module(){
   set_sysctl kernel.dmesg_restrict 1
   set_kptr_restrict_policy
   set_sysctl kernel.randomize_va_space 2
-  set_sysctl fs.protected_fifos 1
+  set_sysctl fs.protected_fifos 2
+  set_sysctl fs.protected_regular 2
   set_sysctl fs.protected_hardlinks 1
   set_sysctl fs.protected_symlinks 1
   set_sysctl net.ipv4.conf.all.accept_redirects 0

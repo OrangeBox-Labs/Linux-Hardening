@@ -35,7 +35,8 @@ sysctl_safe_description() {
     kernel.randomize_va_space) echo "Controla ASLR; el valor 2 aleatoriza ampliamente el espacio de direcciones de los procesos." ;;
     kernel.yama.ptrace_scope) echo "Restringe qué procesos pueden inspeccionar otros mediante ptrace; puede afectar gdb, strace y herramientas de monitoreo." ;;
     kernel.user_ptrace|kernel.user_ptrace_self) echo "Restringe el uso de ptrace; verifique compatibilidad con depuración y herramientas de diagnóstico." ;;
-    fs.protected_fifos) echo "Protege FIFO en directorios compartidos y escribibles; reduce ataques locales entre usuarios." ;;
+    fs.protected_fifos) echo "Protege FIFO en directorios sticky compartidos; el valor 2 también cubre directorios group-writable. Puede afectar flujos IPC que dependan de abrir FIFO de otro usuario." ;;
+    fs.protected_regular) echo "Impide ciertos accesos/creaciones de archivos regulares en directorios sticky compartidos cuando el archivo pertenece a otro usuario/grupo. Reduce ataques locales en /tmp, pero puede romper aplicaciones que dependen de esas operaciones compartidas." ;;
     fs.protected_hardlinks) echo "Restringe hard links a archivos que el usuario no controla, protegiendo archivos sensibles." ;;
     fs.protected_symlinks) echo "Mitiga ataques con enlaces simbólicos en directorios compartidos y escribibles." ;;
     net.ipv4.conf.all.accept_redirects|net.ipv4.conf.default.accept_redirects) echo "Ignora redirecciones ICMP recibidas; reduce cambios de ruta inducidos por terceros. Revise si la red depende de ellas." ;;
