@@ -70,6 +70,8 @@ jobs:
         run: bash tests/test_companion_consent_routing.sh
       - name: Test sudo consent and syntax validation
         run: bash tests/test_sudo_consent.sh
+      - name: Test USB storage hardening safety
+        run: bash tests/test_usb_storage_safety.sh
       - name: Test SELinux guarded transition
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
@@ -136,4 +138,5 @@ jobs:
               /bin/bash tests/test_selinux_fix_guard.sh
               /bin/bash tests/test_companion_consent_routing.sh
               /bin/bash tests/test_sudo_consent.sh
+              /bin/bash tests/test_usb_storage_safety.sh
             '

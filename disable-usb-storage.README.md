@@ -3,7 +3,7 @@
 ```
 git clone https://github.com/OrangeBox-Labs/Linux-Hardening.git
 cd Linux-Hardening
-chmod +x disable-usb-storage.README.md.sh
+chmod +x disable-usb-storage.sh
 ```
 
 # Script: disable-usb-storage.sh
@@ -18,7 +18,7 @@ Script para deshabilitar USB Storage en sistemas Linux basado en el control CIS 
 
 ## Que hace este script
 
-Deshabilita el modulo `usb-storage` del kernel para prevenir el uso de dispositivos de almacenamiento USB, reduciendo la superficie de ataque fisica y posibles inyecciones de malware a nuestro servidor de manera física.
+Audita y, solo con `--fix` y confirmación explícita, bloquea cargas futuras del módulo `usb-storage`. No descarga el módulo en caliente: si ya está cargado, seguirá activo hasta una intervención autorizada en ventana de mantenimiento.
 
 ## Controles CIS
 
@@ -37,7 +37,7 @@ Deshabilita el modulo `usb-storage` del kernel para prevenir el uso de dispositi
 ```
 chmod +x disable-usb-storage.sh
 ./disable-usb-storage.sh
-./disable-usb-storage.sh --fix
+./disable-usb-storage.sh --fix # solicita confirmación antes de modificar
 ```
 
 
