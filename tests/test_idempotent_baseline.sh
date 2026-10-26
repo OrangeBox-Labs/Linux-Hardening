@@ -53,7 +53,7 @@ grep -Fq 'Todas las conexiones y los comandos ejecutados quedan' "$login_banner_
 grep -Fq 'reportado a las autoridades competentes.' "$login_banner_tmp" || fail "falta el aviso sobre actividades no autorizadas"
 grep -Fq "| | | | '__/ _|" "$login_banner_tmp" || fail "falta el logo ASCII de fallback en el banner pre-login"
 awk '
-  length($0) == 79 && $0 ~ /^\\*+$/ { dividers++ }
+  length($0) == 79 && $0 ~ /^\*+$/ { dividers++ }
   /SISTEMA DE ACCESO RESTRINGIDO/ {
     expected = int((79 - length("SISTEMA DE ACCESO RESTRINGIDO")) / 2) + 1
     if (index($0, "SISTEMA DE ACCESO RESTRINGIDO") != expected) exit 1
