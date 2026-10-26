@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.15 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.16 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -15,22 +15,6 @@ else
   echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-if [ -r "$SCRIPT_DIR/lib/listener-firewall-audit.sh" ]; then
-  # Auditoría INPUT vs listeners: estrictamente de solo lectura.
-  # shellcheck source=lib/listener-firewall-audit.sh
-  source "$SCRIPT_DIR/lib/listener-firewall-audit.sh"
-else
-  echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
-  exit 1
-fi
-if [ -r "$SCRIPT_DIR/lib/firewall-detect.sh" ]; then
-  # Identificación de gestores y backends del firewall, exclusivamente de lectura.
-  # shellcheck source=lib/firewall-detect.sh
-  source "$SCRIPT_DIR/lib/firewall-detect.sh"
-else
-  echo "[ERROR] Falta lib/firewall-detect.sh; actualice el repositorio completo." >&2
-  exit 1
-fi
 if [ -r "$SCRIPT_DIR/lib/orangebox-motd.sh" ]; then
   # Generador portable del MOTD dinámico y lógica opcional de FIGlet.
   # shellcheck source=lib/orangebox-motd.sh
@@ -39,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.15
+SCRIPT_VERSION=1.4.16
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -50,8 +34,11 @@ BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
 FIXED=0
 WARNINGS=0
 ERRORS=0
+PENDING_ONLY_AUDIT=false
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
-ok(){ echo -e "$GREEN[OK]$NC $*"; }; info(){ echo -e "$BLUE[INFO]$NC $*"; }; warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
+section(){ [ "${PENDING_ONLY_AUDIT:-false}" = true ] && return 0; echo -e "\n$BLUE### $1 ###$NC"; }
+ok(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$GREEN[OK]$NC $*"; }
+info(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$BLUE[INFO]$NC $*"; } warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
 detect_os(){
   local os_release_file="${ORANGEBOX_OS_RELEASE_FILE:-/etc/os-release}"
@@ -105,11 +92,20 @@ orangebox_sysctl_persistence_target() {
     printf '%s\n' /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
   fi
 }
+sysctl_baseline_target_writable() {
+  local target
+  target="$(orangebox_sysctl_persistence_target)"
+  [ "$target" = /etc/sysctl.conf ] && return 0
+  [ ! -L "$target" ] || return 1
+  [ ! -e "$target" ] || grep -Fqx "# OrangeBox managed sysctl overrides" "$target"
+}
 
 set_sysctl(){
   local key="$1" value="$2" file
   if ! command -v sysctl >/dev/null 2>&1 || ! sysctl -n "$key" >/dev/null 2>&1; then
-    info "SYSCTL $key no disponible en este kernel; no aplica y no se modifica."
+    if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+      info "SYSCTL $key no disponible en este kernel; no aplica y no se modifica."
+    fi
     return 0
   fi
   file="$(orangebox_sysctl_persistence_target)"
@@ -137,8 +133,9 @@ synflood_select_persistence_target() {
   SYNFLOOD_FILE="$(orangebox_sysctl_persistence_target)"
 }
 synflood_module(){
-  echo -e "\n$BLUE### SYN FLOOD / TCP BACKLOG ###$NC"
+  section "SYN FLOOD / TCP BACKLOG"
   synflood_select_persistence_target
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi
   if [ "$SYNFLOOD_FILE" = /etc/sysctl.conf ]; then
     info "CentOS/RHEL 6: se usa /etc/sysctl.conf; no se crea /etc/sysctl.d."
   fi
@@ -146,6 +143,10 @@ synflood_module(){
   local idx=0 key desired
   for key in $SYNFLOOD_KEYS; do
     desired="${SYNFLOOD_VALUES[$idx]}"
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl -n "$key" >/dev/null 2>&1; then
+      idx=$((idx+1))
+      continue
+    fi
     if sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
       [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
     else
@@ -244,13 +245,24 @@ ssh_state_status() {
 ssh_module_can_apply() {
   [ "${OS_VERSION:-0}" -ge 8 ] &&
     [ -d /etc/ssh/sshd_config.d ] &&
-    [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
     [ -f /etc/ssh/sshd_config ] &&
+    grep -Eiq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' /etc/ssh/sshd_config &&
+    [ ! -e "$SSH_DROPIN" ] && [ ! -L "$SSH_DROPIN" ] &&
     command -v sshd >/dev/null 2>&1
 }
 ssh_module(){
-  echo -e "\n$BLUE### SSH ###$NC"; [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }; command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
-  local perms policy ssh_status; perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true); [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
+  local perms policy ssh_status output
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    ssh_module_can_apply || return 0
+    output="$(sshd -T 2>/dev/null)" || return 0
+    [ -n "$output" ] || return 0
+  fi
+  section "SSH"
+  [ -f /etc/ssh/sshd_config ] || { warn "sshd_config no existe"; return; }
+  command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible"; return; }
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    perms=$(stat -c %a /etc/ssh/sshd_config 2>/dev/null||true)
+    [ "$perms" = 600 ] || warn "sshd_config permisos=$perms; no se cambia automáticamente"
   if command -v update-crypto-policies >/dev/null 2>&1; then
     policy="$(update-crypto-policies --show 2>/dev/null || echo unknown)"
     case "$policy" in
@@ -265,6 +277,8 @@ ssh_module(){
     esac
   fi
   [ -n "$(ssh_effective ciphers)" ] && ok "Ciphers efectivos auditados" || warn "No se pudieron leer ciphers efectivos"; [ -n "$(ssh_effective kexalgorithms)" ] && ok "KEX efectivos auditados" || warn "No se pudieron leer KEX efectivos"; [ -n "$(ssh_effective macs)" ] && ok "MACs efectivos auditados" || warn "No se pudieron leer MACs efectivos"
+  fi
+
   # Safe SSH controls only. Existing crypto/auth/forwarding choices are preserved.
   if $AUTO_FIX; then
     ssh_state_status apply
@@ -316,7 +330,14 @@ cpanel_host_detected() {
 }
 
 sudo_module() {
-  echo -e "\n$BLUE### SUDO ###$NC"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    cpanel_host_detected && return 0
+    command -v visudo >/dev/null 2>&1 || return 0
+    visudo -cf /etc/sudoers >/dev/null 2>&1 || return 0
+    [ -d /etc/sudoers.d ] || return 0
+    [ ! -e /etc/sudoers.d/99-orangebox-hardening ] || return 0
+  fi
+  section "SUDO"
   command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }
   visudo -cf /etc/sudoers >/dev/null 2>&1 && ok "sudoers válido" || bad "sudoers inválido"
 
@@ -388,7 +409,8 @@ password_module() {
   getent group wheel >/dev/null 2>&1 && ok "wheel existe" || warn "wheel no existe"
 }
 kernel_module(){
-  echo -e "\n$BLUE### KERNEL / SYSCTL ###$NC"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi
+  section "KERNEL / SYSCTL"
   local forwarding rp_filter ipv6_forward
   forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
   rp_filter=1
@@ -428,7 +450,9 @@ kernel_module(){
     set_sysctl net.ipv6.conf.default.accept_source_route 0
     ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
     if [ "$ipv6_forward" = 1 ]; then
-      warn "IPv6 forwarding está activo: se preserva accept_ra para no cortar el descubrimiento de rutas del uplink"
+      if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+        warn "IPv6 forwarding está activo: se preserva accept_ra para no cortar el descubrimiento de rutas del uplink"
+      fi
     else
       set_sysctl net.ipv6.conf.all.accept_ra 0
       set_sysctl net.ipv6.conf.default.accept_ra 0
@@ -496,8 +520,12 @@ rsyslog_legacy_is_active() {
 }
 
 rsyslog_module(){
-  echo -e "\\n$BLUE### JOURNAL / SYSLOG ###$NC"
   local conf=/etc/systemd/journald.conf
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    [ "${OS_VERSION:-}" != 6 ] || return 0
+    [ -f "$conf" ] || return 0
+  fi
+  section "JOURNAL / SYSLOG"
 
   if [ "${OS_VERSION:-}" = 6 ]; then
     if rsyslog_legacy_is_active; then
@@ -582,11 +610,16 @@ usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_s
 services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; info "No se eliminan servicios automáticamente; revisar los servicios legacy detectados si los hubiera"; }
 configure_ssh_banner() {
   local main=/etc/ssh/sshd_config current tmp backup reload_ok=0
-  echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    [ -f "$main" ] && command -v sshd >/dev/null 2>&1 || return 0
+    sshd -t -f "$main" >/dev/null 2>&1 || return 0
+  fi
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"; fi
   [ -f "$main" ] || { warn "$main no existe; no se configura el banner SSH"; return; }
   command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible; no se puede validar el banner SSH"; return; }
 
   current="$(sshd -T -f "$main" 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && [ -z "$current" ]; then return 0; fi
   if [ "$current" = "/etc/issue.net" ]; then
     ok "Banner SSH efectivo apunta a /etc/issue.net"
     return
@@ -645,7 +678,7 @@ configure_ssh_banner() {
 }
 
 banners_module() {
-  echo -e "\n$BLUE### BANNERS / MOTD ###$NC"
+  section "BANNERS / MOTD"
   local login_tmp motd_tmp session_motd_tmp target content_tmp mode owner group
 
   login_tmp="$(mktemp)" || { warn "No se pudo crear el banner previo al login"; return; }
@@ -653,7 +686,11 @@ banners_module() {
   session_motd_tmp="$(mktemp)" || { rm -f "$login_tmp" "$motd_tmp"; warn "No se pudo crear el MOTD dinámico"; return; }
 
   # FIGlet sólo se necesita en el banner previo a la autenticación.
-  orangebox_motd_ensure_figlet "$AUTO_FIX" || true
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    orangebox_motd_ensure_figlet false >/dev/null 2>&1 || true
+  else
+    orangebox_motd_ensure_figlet "$AUTO_FIX" || true
+  fi
   if ! orangebox_motd_write_login_banner "$login_tmp"; then
     rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
     warn "No se pudo generar el banner previo al login"
@@ -748,13 +785,6 @@ grub_module(){
   fi
   info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"
 }
-firewall_module() {
-  echo -e "\n$BLUE### FIREWALL / INPUT VS LISTENERS ###$NC"
-  # Inventario del gestor y correlación de sockets/reglas: siempre solo lectura.
-  firewall_report_detected
-  lfa_audit_listener_firewall
-  WARNINGS=$((WARNINGS + LFA_WARNINGS + FIREWALL_WARNINGS))
-}
 fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
   local installed=false active=false
@@ -773,7 +803,6 @@ fapolicyd_module() {
     info "fapolicyd no está instalado; por política no se instala ni se activa desde Linux-Hardening."
   fi
 }
-listening_module(){ echo -e "\n$BLUE### LISTENING SERVICES ###$NC"; command -v ss >/dev/null 2>&1&&ss -lntup 2>/dev/null||true; }
 normalize_history_dotfile() {
   local file="$1" tmp
   [ -f "$file" ] || return 0
@@ -832,17 +861,22 @@ ORANGEBOX_UNLIMITED_HISTORY
 }
 
 bash_module() {
-  echo -e "\n$BLUE### BASH / HISTORIAL / PROMPT ###$NC"
+  section "BASH / HISTORIAL / PROMPT"
   local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
-  [ -d /etc/profile.d ] || { warn "/etc/profile.d no existe"; return; }
+  if [ ! -d /etc/profile.d ]; then
+    [ "${PENDING_ONLY_AUDIT:-false}" != true ] && warn "/etc/profile.d no existe"
+    return
+  fi
 
-  # Detectar directivas que suelen deshabilitar el historial.
-  for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc; do
-    [ -f "$f" ] || continue
-    if grep -Eiq '(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)' "$f"; then
-      warn "Posible deshabilitación de Bash History detectada en $f; se revisará la configuración efectiva"
-    fi
-  done
+  # La configuración externa ajena al baseline se revisa en el modo detallado.
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+    for f in /etc/profile /etc/bashrc /etc/profile.d/*.sh /root/.bash_profile /root/.bashrc; do
+      [ -f "$f" ] || continue
+      if grep -Eiq '(^|[[:space:]])(export[[:space:]]+)?(HISTSIZE|HISTFILESIZE)[[:space:]]*=[[:space:]]*0([[:space:]]|$)|(^|[[:space:]])(export[[:space:]]+)?HISTFILE[[:space:]]*=[[:space:]]*"?(/dev/null|/dev/zero)"?([[:space:]]|$)|^[[:space:]]*unset[[:space:]]+HISTFILE([[:space:]]|$)|^[[:space:]]*set[[:space:]]+\+[[:space:]]*o[[:space:]]+history([[:space:]]|$)' "$f"; then
+        warn "Posible deshabilitación de Bash History detectada en $f; se revisará la configuración efectiva"
+      fi
+    done
+  fi
 
   tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
   cat > "$tmp" <<'ORANGEBOX_BASH'
@@ -1031,9 +1065,8 @@ Uso:
                                     Autoriza explícitamente cambios de red con Shorewall
   $0 --module <modulo> [--fix] [--auto] [--allow-risky]
 
-Baseline interno:
-  ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron
-  usb services banners time grub firewall fapolicyd listening bash all
+Baseline interno (auditoría de pendientes corregibles):
+  ssh sudo kernel synflood rsyslog banners bash all
 
 Módulos adicionales:
   aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
@@ -1042,8 +1075,10 @@ Módulos adicionales:
   selinux-setup ssh-cis ssh-complete sudo-full filesystem-full
 
 Evaluaciones independientes:
+  ./audit-firewall-listeners.sh Auditoría de firewall/listeners (solo lectura).
+  ./audit-listening-services.sh Inventario independiente de sockets.
+  ./linux-hardening-audit.sh    Audita módulos sin calcular cumplimiento CIS.
   ./cis-benchmark-check.sh       Evalúa exclusivamente el benchmark CIS.
-  ./linux-hardening-audit.sh    Audita los módulos, sin calcular cumplimiento CIS.
 
 Seguridad:
   --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
@@ -1318,9 +1353,9 @@ run_module() {
     banners) banners_module ;;
     time) time_module ;;
     grub) grub_module ;;
-    firewall) firewall_module ;;
+    firewall) die "La auditoría de firewall es independiente: ejecuta ./audit-firewall-listeners.sh." ;;
     fapolicyd) fapolicyd_module ;;
-    listening) listening_module ;;
+    listening) die "El inventario de sockets es independiente: ejecuta ./audit-listening-services.sh." ;;
     bash) bash_module ;;
     *) run_companion_module "$1" ;;
   esac
@@ -1356,7 +1391,11 @@ main() {
     die "La auditoría agregada se separó del orquestador de hardening. Ejecuta: ./linux-hardening-audit.sh"
   fi
 
+  if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; then PENDING_ONLY_AUDIT=true; fi
   detect_os
+  if $PENDING_ONLY_AUDIT; then
+    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — pendientes corregibles ($OS_ID $OS_VERSION)"
+  fi
   if [ "$AUTO_FIX" = true ]; then
     prepare_backup
   fi
@@ -1368,7 +1407,7 @@ main() {
 
     local previous_fix="$AUTO_FIX" m
     AUTO_FIX=false
-    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
+    for m in ssh sudo kernel synflood rsyslog; do
       run_module "$m"
     done
     AUTO_FIX="$previous_fix"
@@ -1381,7 +1420,7 @@ main() {
     run_module bash
 
     local m
-    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services time grub firewall fapolicyd listening; do
+    for m in ssh sudo kernel synflood rsyslog; do
       run_internal_module_with_confirmation "$m"
     done
 
@@ -1391,7 +1430,7 @@ main() {
   elif [ "$MODULE" = "all" ]; then
     ok "MODO AUDITORÍA: sin cambios"
     local m
-    for m in ssh sudo password kernel synflood filesystem auditd rsyslog selinux cron usb services banners time grub firewall fapolicyd listening bash; do
+    for m in ssh sudo kernel synflood rsyslog banners bash; do
       run_module "$m"
     done
   else
@@ -1419,13 +1458,19 @@ main() {
 
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
-  echo "Correcciones: $FIXED"
-  echo "Advertencias: $WARNINGS"
-  echo "Errores: $ERRORS"
-  if [ "$AUTO_FIX" = true ]; then
-    echo "Backup: $BACKUP_DIR"
+  if $PENDING_ONLY_AUDIT; then
+    if [ "$WARNINGS" -eq 0 ]; then
+      echo "No se detectaron correcciones pendientes."
+    else
+      echo "Pendientes corregibles: $WARNINGS"
+      echo "Ejecuta ./linux-hardening.sh --fix para revisar y confirmar los cambios."
+    fi
+    echo "Errores: $ERRORS"
   else
-    echo "Backup: no creado (modo auditoría)"
+    echo "Correcciones: $FIXED"
+    echo "Advertencias: $WARNINGS"
+    echo "Errores: $ERRORS"
+    if [ "$AUTO_FIX" = true ]; then echo "Backup: $BACKUP_DIR"; else echo "Backup: no creado (modo auditoría)"; fi
   fi
   echo -e "$GREEN============================================================$NC"
 }
