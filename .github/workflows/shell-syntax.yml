@@ -28,6 +28,10 @@ jobs:
           test -x ./audit-firewall-listeners.sh
           test -x ./kernel-lpe-2026-mitigation.sh
           test -x ./configure-login-banners.sh
+          test -x ./linux-hardening-audit.sh
+          test -x ./audit-listening-services.sh
+          test -x ./remove-gui-hardening.sh
+          test -x ./ssh-hardening.sh
       - name: Test legacy OS release detection
         run: bash tests/test_os_detection_legacy.sh
       - name: Test Bash history deletion guard
