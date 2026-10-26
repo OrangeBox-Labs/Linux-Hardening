@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.18: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
+| `linux-hardening.sh` | Baseline 1.4.19: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -202,7 +202,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.18; reporte de todos los controles corregibles, con estado y resumen. |
+| `linux-hardening.sh` | Baseline 1.4.19; reporte de todos los controles corregibles, con estado y resumen. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de firewall y listeners, estrictamente de solo lectura. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
@@ -277,7 +277,7 @@ No son exactamente lo mismo.
 ./linux-hardening.sh
 ```
 
-Muestra solo hallazgos pendientes que el baseline puede corregir mediante `--fix`. Oculta controles correctos y comprobaciones sin una ruta de corrección segura. Firewall y listeners se revisan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
+Recorre todos los controles que forman parte del `--fix` del baseline interactivo y muestra el estado de cada uno: `[OK]` si cumple, `[WARN]` si requiere corrección/revisión y `[N/A]` cuando está excluido por política o no existe en esa plataforma. Incluye los nueve parámetros SSH, el banner SSH, `use_pty`, cada sysctl del baseline y SYN flood, `Storage=persistent` y el directorio de journald, los cuatro archivos de banner/MOTD, el perfil Bash, los archivos de historial, el include de `/etc/bashrc` y el estado opcional de AIDE (paquete, base y cron). El resumen separa controles correctos, no aplicables, pendientes y errores. La auditoría no modifica el sistema. Firewall y listeners siguen siendo auditorías separadas con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
 
 ### Aplicar de forma interactiva
 

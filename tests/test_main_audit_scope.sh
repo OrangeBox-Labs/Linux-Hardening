@@ -49,5 +49,25 @@ grep -Fq 'control de prueba conforme' "$OUT" || fail "sysctl_safe_log no muestra
 sysctl_safe_log "INFO" "mensaje informativo oculto" > "$OUT"
 [ ! -s "$OUT" ] || fail "el reporte predeterminado aún muestra mensajes informativos no accionables"
 [ "$OK_COUNT" -eq 1 ] || fail "un mensaje informativo alteró el contador OK"
+: > "$OUT"
+NOT_APPLICABLE_COUNT=0
+sysctl_safe_log "N/A" "control de kernel no aplicable" > "$OUT"
+grep -Fq '[SYSCTL][N/A]' "$OUT" || fail "sysctl_safe_log no muestra estados N/A"
+grep -Fq 'control de kernel no aplicable' "$OUT" || fail "sysctl_safe_log oculta el motivo N/A"
+[ "$NOT_APPLICABLE_COUNT" -eq 1 ] || fail "el estado N/A no incrementa el contador"
+
+# The default report covers every baseline family that interactive --fix can change.
+grep -Fq 'NOT_APPLICABLE_COUNT=0' "$MAIN" || fail "falta contador de controles no aplicables"
+grep -Fq 'echo "No aplicables: $NOT_APPLICABLE_COUNT"' "$MAIN" || fail "falta resumen de controles no aplicables"
+grep -Fq 'aide_audit_module' "$MAIN" || fail "la auditoría predeterminada omite el hardening opcional AIDE"
+grep -Fq 'Base de referencia AIDE inicializada' "$MAIN" || fail "AIDE no informa el estado de su base"
+grep -Fq 'Verificación periódica de AIDE configurada' "$MAIN" || fail "AIDE no informa el estado del cron"
+if grep -Fq 'if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi' "$MAIN"; then
+  fail "kernel/SYN flood siguen ocultando controles si el destino sysctl no es gestionable"
+fi
+grep -Fq 'sysctl_safe_log "N/A"' "$MAIN" || fail "los sysctl no aplicables no muestran un estado explícito"
+grep -Fq 'No se puede confirmar Storage=persistent' "$MAIN" || fail "journald no informa config ausente"
+grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" || fail "Bash no comprueba el include de /etc/bashrc en audit"
+grep -Fq 'no existe; --fix puede crearlo con historial ilimitado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
 
 pass "auditoría presenta estados OK y pendientes, con resumen y firewall independiente"

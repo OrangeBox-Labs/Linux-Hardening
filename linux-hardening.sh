@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.18 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.19 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.18
+SCRIPT_VERSION=1.4.19
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -33,6 +33,7 @@ RUN_ID=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
 FIXED=0
 OK_COUNT=0
+NOT_APPLICABLE_COUNT=0
 WARNINGS=0
 ERRORS=0
 PENDING_ONLY_AUDIT=false
@@ -46,6 +47,7 @@ ok(){
 }
 info(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi; echo -e "$BLUE[INFO]$NC $*"; }
 warn(){ WARNINGS=$((WARNINGS+1)); echo -e "$YELLOW[WARN]$NC $*"; }; bad(){ WARNINGS=$((WARNINGS+1)); echo -e "$RED[FAIL]$NC $*"; }; die(){ ERRORS=$((ERRORS+1)); echo -e "$RED[ERROR]$NC $*"; exit 1; }
+na(){ if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then NOT_APPLICABLE_COUNT=$((${NOT_APPLICABLE_COUNT:-0}+1)); fi; echo -e "$BLUE[N/A]$NC $*"; }
 require_root(){ [ "$EUID" -eq 0 ] || die "Debe ejecutarse como root."; }
 detect_os(){
   local os_release_file="${ORANGEBOX_OS_RELEASE_FILE:-/etc/os-release}"
@@ -88,7 +90,11 @@ detect_os(){
 
   case "$OS_ID" in rhel|centos|rocky|almalinux|ol|oracle) ;; *) [[ "$ID_LIKE" == *rhel* ]] || die "Distribución no soportada: $OS_ID";; esac
   case "$OS_VERSION" in 6|7|8|9|10) ;; *) die "Versión no soportada: $OS_VERSION";; esac
-  ok "Detectado: $OS_ID $OS_VERSION"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    echo -e "$BLUE[INFO]$NC Detectado: $OS_ID $OS_VERSION"
+  else
+    ok "Detectado: $OS_ID $OS_VERSION"
+  fi
 }
 prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
@@ -109,8 +115,18 @@ sysctl_baseline_target_writable() {
 
 set_sysctl(){
   local key="$1" value="$2" file
-  if ! command -v sysctl >/dev/null 2>&1 || ! sysctl -n "$key" >/dev/null 2>&1; then
-    if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+  if ! command -v sysctl >/dev/null 2>&1; then
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+      sysctl_safe_log "N/A" "sysctl no está disponible; no se puede consultar $key."
+    else
+      info "SYSCTL $key no disponible (falta el comando sysctl); no se modifica."
+    fi
+    return 0
+  fi
+  if ! sysctl -n "$key" >/dev/null 2>&1; then
+    if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+      sysctl_safe_log "N/A" "$key no está expuesto por este kernel; el control no aplica."
+    else
       info "SYSCTL $key no disponible en este kernel; no aplica y no se modifica."
     fi
     return 0
@@ -142,31 +158,18 @@ synflood_select_persistence_target() {
 synflood_module(){
   section "SYN FLOOD / TCP BACKLOG"
   synflood_select_persistence_target
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi
   if [ "$SYNFLOOD_FILE" = /etc/sysctl.conf ]; then
     info "CentOS/RHEL 6: se usa /etc/sysctl.conf; no se crea /etc/sysctl.d."
   fi
-
   local idx=0 key desired
   for key in $SYNFLOOD_KEYS; do
     desired="${SYNFLOOD_VALUES[$idx]}"
-    if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl -n "$key" >/dev/null 2>&1; then
-      idx=$((idx+1))
-      continue
-    fi
-    if sysctl_safe_apply "$key" "$desired" "$(sysctl_safe_description "$key")" "$SYNFLOOD_FILE" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
-      [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
-    else
-      WARNINGS=$((WARNINGS+1))
-    fi
+    set_sysctl "$key" "$desired"
     idx=$((idx+1))
   done
   info "Los valores externos de sysctl se conservan. Los valores distintos solo se imponen con confirmación individual."
 }
 
-# Returns success only when every SYN flood setting already passes the same
-# read-only active/persistent checks used by the real module.
-# Output is captured so the preflight does not duplicate the module's report.
 synflood_state_compliant() {
   synflood_select_persistence_target
   local idx=0 key desired check_output
@@ -512,37 +515,42 @@ cpanel_host_detected() {
 }
 
 sudo_module() {
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    cpanel_host_detected && return 0
-    command -v visudo >/dev/null 2>&1 || return 0
-    visudo -cf /etc/sudoers >/dev/null 2>&1 || return 0
-    [ -d /etc/sudoers.d ] || return 0
-    [ ! -e /etc/sudoers.d/99-orangebox-hardening ] || return 0
-  fi
   section "SUDO"
-  command -v visudo >/dev/null 2>&1 || { warn "visudo no disponible"; return; }
-  visudo -cf /etc/sudoers >/dev/null 2>&1 && ok "sudoers válido" || bad "sudoers inválido"
-
+  local sudoers_valid=false answer f=/etc/sudoers.d/99-orangebox-hardening
+  if command -v visudo >/dev/null 2>&1; then
+    if visudo -cf /etc/sudoers >/dev/null 2>&1; then
+      ok "sudoers válido"
+      sudoers_valid=true
+    else
+      bad "sudoers inválido; no se aplicarán cambios hasta corregir su sintaxis"
+    fi
+  else
+    warn "visudo no disponible; no se puede validar sudoers ni aplicar use_pty con seguridad"
+  fi
   if cpanel_host_detected; then
     if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
       warn "cPanel detectado y use_pty ya está configurado; puede afectar funcionalidades/automatizaciones. No se modifica automáticamente."
     else
-      info "cPanel detectado: por política OrangeBox no se activa use_pty, ya que puede romper funcionalidades o automatizaciones del hosting."
+      na "cPanel detectado: por política OrangeBox no se activa use_pty; este control está excluido del baseline por compatibilidad."
     fi
     return
   fi
-
   if grep -RqsE '^[[:space:]]*Defaults[[:space:]]+use_pty([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null; then
     ok "use_pty habilitado"
     return
   fi
-
-  warn "use_pty no configurado"
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    warn "use_pty no configurado; $f ya existe y no se sobrescribe. Revisa el archivo manualmente antes de aplicar."
+    return
+  fi
+  if [ ! -d /etc/sudoers.d ] || [ ! -w /etc/sudoers.d ]; then
+    warn "use_pty no configurado y /etc/sudoers.d no existe/no es escribible; el baseline no puede crear el override de forma segura."
+    return
+  fi
+  warn "use_pty no configurado; el cambio requiere confirmación y validación de sudoers"
   $AUTO_FIX || return
-
-  local answer f=/etc/sudoers.d/99-orangebox-hardening
-  if [ -e "$f" ]; then
-    warn "$f ya existe; no se sobrescribe para conservar la configuración existente"
+  if [ "$sudoers_valid" != true ]; then
+    warn "No se aplicará use_pty mientras sudoers no pueda validarse."
     return
   fi
   if [ ! -r /dev/tty ]; then
@@ -555,7 +563,6 @@ sudo_module() {
     s|S|si|SI|Si|sí|Sí|SÍ) ;;
     *) info "use_pty rechazado/no confirmado; se conserva la configuración actual"; return ;;
   esac
-
   printf '%s\n' 'Defaults use_pty' > "$f" || { warn "No se pudo preparar $f"; return; }
   chmod 440 "$f" && chown root:root "$f" || { rm -f "$f"; warn "No se pudieron fijar los permisos de $f"; return; }
   if visudo -cf /etc/sudoers >/dev/null 2>&1; then
@@ -566,6 +573,7 @@ sudo_module() {
     bad "sudoers no validó; se retiró el drop-in recién creado"
   fi
 }
+
 password_module() {
   echo -e "\n$BLUE### PASSWORD / PAM ###$NC"
   [ -f /etc/login.defs ] || return
@@ -591,17 +599,19 @@ password_module() {
   getent group wheel >/dev/null 2>&1 && ok "wheel existe" || warn "wheel no existe"
 }
 kernel_module(){
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then return 0; fi
   section "KERNEL / SYSCTL"
   local forwarding rp_filter ipv6_forward
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && ! sysctl_baseline_target_writable; then
+    echo -e "$BLUE[INFO]$NC El destino persistente sysctl está enlazado/no gestionado por OrangeBox; se auditan igualmente todos los valores y no se sobrescribe ese archivo."
+  fi
   forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
   rp_filter=1
   if [ "$forwarding" = 1 ]; then
-    # Strict reverse-path filtering can drop legitimate asymmetric routed traffic.
     rp_filter=2
-    ok "IP forwarding=1: se usa rp_filter=2 (modo loose) para preservar el enrutamiento"
+    if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+      ok "IP forwarding=1: se usa rp_filter=2 (modo loose) para preservar el enrutamiento"
+    fi
   fi
-
   set_sysctl fs.suid_dumpable 0
   set_sysctl kernel.dmesg_restrict 1
   set_kptr_restrict_policy
@@ -609,9 +619,6 @@ kernel_module(){
   set_sysctl fs.protected_fifos 1
   set_sysctl fs.protected_hardlinks 1
   set_sysctl fs.protected_symlinks 1
-
-  # Baseline de red compartido con network-hardening.sh.
-  # No se cambia net.ipv4.ip_forward ni otros parámetros de routing no acordados.
   set_sysctl net.ipv4.conf.all.accept_redirects 0
   set_sysctl net.ipv4.conf.default.accept_redirects 0
   set_sysctl net.ipv4.conf.all.send_redirects 0
@@ -632,15 +639,21 @@ kernel_module(){
     set_sysctl net.ipv6.conf.default.accept_source_route 0
     ipv6_forward=$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)
     if [ "$ipv6_forward" = 1 ]; then
-      if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then
+      if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+        sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_ra se conserva porque IPv6 forwarding está activo; cambiarlo puede afectar rutas del uplink."
+        sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_ra se conserva porque IPv6 forwarding está activo; cambiarlo puede afectar rutas del uplink."
+      else
         warn "IPv6 forwarding está activo: se preserva accept_ra para no cortar el descubrimiento de rutas del uplink"
       fi
     else
       set_sysctl net.ipv6.conf.all.accept_ra 0
       set_sysctl net.ipv6.conf.default.accept_ra 0
     fi
+  elif [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    sysctl_safe_log "N/A" "Controles IPv6 (accept_source_route y accept_ra): este kernel no expone /proc/sys/net/ipv6."
   fi
 }
+
 filesystem_module(){
   echo -e "\n$BLUE### FILESYSTEM ###$NC"
   local f p
@@ -703,40 +716,41 @@ rsyslog_legacy_is_active() {
 
 rsyslog_module(){
   local conf=/etc/systemd/journald.conf
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    [ "${OS_VERSION:-}" != 6 ] || return 0
-    [ -f "$conf" ] || return 0
-  fi
   section "JOURNAL / SYSLOG"
-
   if [ "${OS_VERSION:-}" = 6 ]; then
+    na "journald Storage=persistent no aplica a CentOS/RHEL 6; se usa el stack legacy."
+    na "/var/log/journal como persistencia de journald no aplica a CentOS/RHEL 6."
     if rsyslog_legacy_is_active; then
-      ok "rsyslog activo; journald no aplica a CentOS/RHEL 6"
+      ok "rsyslog activo en el stack legacy"
     else
-      warn "rsyslog ausente/inactivo; journald no aplica a CentOS/RHEL 6"
+      warn "rsyslog ausente/inactivo en CentOS/RHEL 6; este baseline no instala ni habilita servicios legacy"
     fi
     return
   fi
-
   if [ "$AUTO_FIX" != true ]; then
-    if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf" 2>/dev/null; then
-      ok "journal persistente (Storage=persistent y /var/log/journal existe)"
+    if [ ! -f "$conf" ]; then
+      warn "$conf no existe; no se puede confirmar Storage=persistent y el baseline no crea ese archivo automáticamente."
+    elif grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then
+      ok "journald Storage=persistent configurado explícitamente"
     else
-      warn "journal no persistente o Storage=persistent no configurado explícitamente"
+      warn "journald Storage no está configurado explícitamente como persistent en $conf"
+    fi
+    if [ -d /var/log/journal ]; then
+      ok "/var/log/journal existe para persistencia de logs"
+    else
+      warn "/var/log/journal no existe; debe crearse para conservar logs entre reinicios"
     fi
     return
   fi
-
   if [ ! -f "$conf" ]; then
     warn "$conf no existe; no se modifica journald automáticamente"
     return
   fi
-
   if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then
-    ok "journal persistente (configuración y directorio verificados)"
+    ok "journald Storage=persistent configurado explícitamente"
+    ok "/var/log/journal existe para persistencia de logs"
     return
   fi
-
   backup_once "$conf"
   if grep -Eq '^[[:space:]]*Storage[[:space:]]*=' "$conf"; then
     if ! sed -ri 's/^[[:space:]]*Storage[[:space:]]*=.*/Storage=persistent/' "$conf"; then
@@ -744,16 +758,9 @@ rsyslog_module(){
       return
     fi
   else
-    printf '\nStorage=persistent\n' >> "$conf" || {
-      warn "No se pudo añadir Storage=persistent a $conf"
-      return
-    }
+    printf '\nStorage=persistent\n' >> "$conf" || { warn "No se pudo añadir Storage=persistent a $conf"; return; }
   fi
-
-  if ! mkdir -p /var/log/journal; then
-    warn "No se pudo crear /var/log/journal"
-    return
-  fi
+  if ! mkdir -p /var/log/journal; then warn "No se pudo crear /var/log/journal"; return; fi
   if command -v systemd-tmpfiles >/dev/null 2>&1; then
     systemd-tmpfiles --create --prefix=/var/log/journal >/dev/null 2>&1 || warn "systemd-tmpfiles no pudo normalizar /var/log/journal"
   fi
@@ -761,17 +768,15 @@ rsyslog_module(){
     warn "journald no reinició; revisar $conf y el estado del servicio"
     return
   fi
-
   if [ -d /var/log/journal ] && grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf" && systemctl is-active --quiet systemd-journald; then
-    ok "journal configurado como persistente y verificado tras reiniciar journald"
+    ok "journald Storage=persistent configurado y verificado"
+    ok "/var/log/journal existe para persistencia de logs"
     FIXED=$((FIXED+1))
   else
     warn "No se pudo verificar la persistencia de journald después del cambio"
   fi
 }
 
-# Read-only preflight matching the early-return condition in rsyslog_module.
-# 0 = already compliant; 1 = configuration/directory requires a change; 2 = unsafe/unavailable.
 rsyslog_state_status() {
   local conf=/etc/systemd/journald.conf
   if [ "${OS_VERSION:-}" = 6 ]; then
@@ -792,16 +797,18 @@ usb_module(){ echo -e "\n$BLUE### USB ###$NC"; lsmod 2>/dev/null|grep -q '^usb_s
 services_module(){ echo -e "\n$BLUE### LEGACY SERVICES ###$NC"; for s in telnet.socket xinetd tftp.socket rsh.socket rlogin.socket rexec.socket; do systemctl list-unit-files "$s" 2>/dev/null|grep -q "$s"&&warn "Servicio legacy presente: $s"; done; for p in telnet-server xinetd rsh-server tftp-server; do rpm -q "$p" >/dev/null 2>&1&&warn "Paquete legacy instalado: $p"; done; info "No se eliminan servicios automáticamente; revisar los servicios legacy detectados si los hubiera"; }
 configure_ssh_banner() {
   local main=/etc/ssh/sshd_config current tmp backup reload_ok=0
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    [ -f "$main" ] && command -v sshd >/dev/null 2>&1 || return 0
-    sshd -t -f "$main" >/dev/null 2>&1 || return 0
+  section "SSH LOGIN BANNER"
+  [ -f "$main" ] || { warn "$main no existe; no se puede auditar ni configurar el banner SSH"; return; }
+  command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible; no se puede validar ni configurar el banner SSH"; return; }
+  if ! sshd -t -f "$main" >/dev/null 2>&1; then
+    warn "sshd -t falla para $main; no se puede verificar ni cambiar el banner hasta corregir la sintaxis."
+    return
   fi
-  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then echo -e "\n$BLUE### SSH LOGIN BANNER ###$NC"; fi
-  [ -f "$main" ] || { warn "$main no existe; no se configura el banner SSH"; return; }
-  command -v sshd >/dev/null 2>&1 || { warn "sshd no disponible; no se puede validar el banner SSH"; return; }
-
   current="$(sshd -T -f "$main" 2>/dev/null | awk '$1=="banner"{print $2; exit}')"
-  if [ "${PENDING_ONLY_AUDIT:-false}" = true ] && [ -z "$current" ]; then return 0; fi
+  if [ -z "$current" ]; then
+    warn "sshd -T no devolvió el valor efectivo de Banner; no se puede confirmar /etc/issue.net."
+    return
+  fi
   if [ "$current" = "/etc/issue.net" ]; then
     ok "Banner SSH efectivo apunta a /etc/issue.net"
     return
@@ -967,6 +974,36 @@ grub_module(){
   fi
   info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"
 }
+aide_audit_module() {
+  section "AIDE / INTEGRIDAD (OPCIONAL)"
+  if ! command -v rpm >/dev/null 2>&1; then
+    warn "rpm no está disponible; no se puede comprobar si AIDE está instalado"
+    na "La base de AIDE y su tarea periódica no se verifican hasta poder consultar el paquete."
+    return
+  fi
+  if ! rpm -q aide >/dev/null 2>&1; then
+    warn "AIDE no está instalado; es opcional y --fix interactivo solicitará autorización antes de instalarlo"
+    na "Base de referencia AIDE: no aplica mientras el paquete no esté instalado."
+    na "Verificación periódica AIDE: no aplica mientras el paquete no esté instalado."
+    return
+  fi
+  ok "AIDE instalado: $(rpm -q aide 2>/dev/null)"
+  if [ -f /var/lib/aide/aide.db.gz ]; then
+    ok "Base de referencia AIDE inicializada (/var/lib/aide/aide.db.gz)"
+  elif [ -f /var/lib/aide/aide.db.new.gz ]; then
+    warn "Existe aide.db.new.gz, pero no la base activa aide.db.gz; revisar la finalización de la inicialización"
+  else
+    warn "AIDE instalado pero falta /var/lib/aide/aide.db.gz; inicializar y promover la base requiere --fix con consentimiento"
+  fi
+  if ! command -v crontab >/dev/null 2>&1; then
+    warn "crontab no está disponible; no se puede verificar la comprobación periódica de AIDE"
+  elif crontab -u root -l 2>/dev/null | grep -q "aide --check"; then
+    ok "Verificación periódica de AIDE configurada en el crontab de root"
+  else
+    warn "No hay comprobación periódica de AIDE en el crontab de root; --fix puede configurarla tras consentimiento"
+  fi
+}
+
 fapolicyd_module() {
   echo -e "\n$BLUE### FAPOLICYD ###$NC"
   local installed=false active=false
@@ -987,8 +1024,12 @@ fapolicyd_module() {
 }
 normalize_history_dotfile() {
   local file="$1" tmp
-  [ -f "$file" ] || return 0
-  if grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
+  if [ -L "$file" ]; then
+    warn "$file es un enlace simbólico; no se reemplaza automáticamente."
+    return 1
+  fi
+  if [ -f "$file" ] &&
+     grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
      grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=-1[[:space:]]*$' "$file" &&
      grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=-1[[:space:]]*$' "$file" &&
      ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file" &&
@@ -996,26 +1037,30 @@ normalize_history_dotfile() {
     ok "$file: historial habilitado y sin límite"
     return 0
   fi
-  if ! $AUTO_FIX; then
-    warn "$file: se normalizará el historial a ilimitado al aplicar --fix"
+  if [ ! -f "$file" ]; then
+    if ! $AUTO_FIX; then warn "$file no existe; --fix puede crearlo con historial ilimitado."; return 0; fi
+  elif ! $AUTO_FIX; then
+    warn "$file: historial no cumple la política; --fix lo normalizará a ilimitado"
     return 0
   fi
-
-  backup_once "$file"
-  tmp=$(mktemp) || { warn "No se pudo crear temporal para $file"; return 1; }
-  awk '
-    $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
-    $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
-    skip { next }
-    # Remove legacy code that clears/reloads all history on every prompt.
-    /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
-    /^PROMPT_COMMAND="orangebox_history_guard; / { next }
-    /^orangebox_history_guard\(\) \{$/ { skip_guard=1; next }
-    skip_guard && /^\}$/ { skip_guard=0; next }
-    skip_guard { next }
-    /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
-    { print }
-  ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
+  [ ! -e "$file" ] || backup_once "$file"
+  tmp="$(mktemp)" || { warn "No se pudo crear temporal para $file"; return 1; }
+  if [ -f "$file" ]; then
+    awk '
+      $0 == "# ORANGEBOX UNLIMITED HISTORY BEGIN" { skip=1; next }
+      $0 == "# ORANGEBOX UNLIMITED HISTORY END" { skip=0; next }
+      skip { next }
+      /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
+      /^PROMPT_COMMAND="orangebox_history_guard; / { next }
+      /^orangebox_history_guard\(\) \{$/ { skip_guard=1; next }
+      skip_guard && /^\}$/ { skip_guard=0; next }
+      skip_guard { next }
+      /^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)/ { next }
+      { print }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; warn "No se pudo leer $file"; return 1; }
+  else
+    : > "$tmp"
+  fi
   cat >> "$tmp" <<'ORANGEBOX_UNLIMITED_HISTORY'
 # ORANGEBOX UNLIMITED HISTORY BEGIN
 # El historial interactivo se conserva completo, sin límite de líneas.
@@ -1046,8 +1091,17 @@ bash_module() {
   section "BASH / HISTORIAL / PROMPT"
   local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
   if [ ! -d /etc/profile.d ]; then
-    [ "${PENDING_ONLY_AUDIT:-false}" != true ] && warn "/etc/profile.d no existe"
-    return
+    if $AUTO_FIX; then
+      if ! install -d -o root -g root -m 755 /etc/profile.d; then
+        warn "/etc/profile.d no existe y no se pudo crear"
+        return
+      fi
+      ok "/etc/profile.d creado con root:root 0755"
+      FIXED=$((FIXED+1))
+    else
+      warn "/etc/profile.d no existe; se requiere crearlo para instalar el perfil Bash OrangeBox"
+      return
+    fi
   fi
 
   # La configuración externa ajena al baseline se revisa en el modo detallado.
@@ -1212,21 +1266,24 @@ ORANGEBOX_BASH
   normalize_history_dotfile /etc/skel/.bashrc
 
   # CentOS/RHEL inicia shells interactivos no-login desde /etc/bashrc.
-  local system_bashrc=/etc/bashrc
-  if [ -f "$system_bashrc" ] && ! grep -Fq '# OrangeBox Linux Hardening managed shell config' "$system_bashrc"; then
-    if $AUTO_FIX; then
-      backup_once "$system_bashrc"
-      if printf '\n%s\n%s\n' \
-        '# OrangeBox Linux Hardening managed shell config' \
-        '[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh' \
-        >> "$system_bashrc"; then
-        ok "Include idempotente agregado a /etc/bashrc para shells interactivos no-login"
-        FIXED=$((FIXED+1))
-      else
-        warn "No se pudo añadir el include a /etc/bashrc"
-      fi
+  local system_bashrc=/etc/bashrc marker='# OrangeBox Linux Hardening managed shell config'
+  local include='[ -r /etc/profile.d/99-orangebox-linux-hardening.sh ] && . /etc/profile.d/99-orangebox-linux-hardening.sh'
+  local bashrc_changed=false
+  if [ ! -f "$system_bashrc" ]; then
+    warn "$system_bashrc no existe; no se puede validar ni añadir el include del perfil OrangeBox."
+  elif grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+    ok "$system_bashrc carga el perfil OrangeBox para shells interactivos no-login"
+  elif ! $AUTO_FIX; then
+    warn "$system_bashrc no incluye completamente el perfil OrangeBox para shells no-login; falta o está incompleto el marcador/include administrado"
+  else
+    backup_once "$system_bashrc"
+    if ! grep -Fq "$marker" "$system_bashrc"; then printf '\n%s\n' "$marker" >> "$system_bashrc" && bashrc_changed=true; fi
+    if ! grep -Fq "$include" "$system_bashrc"; then printf '%s\n' "$include" >> "$system_bashrc" && bashrc_changed=true; fi
+    if grep -Fq "$marker" "$system_bashrc" && grep -Fq "$include" "$system_bashrc"; then
+      ok "Include idempotente verificado en /etc/bashrc para shells interactivos no-login"
+      [ "$bashrc_changed" = true ] && FIXED=$((FIXED+1))
     else
-      warn "/etc/bashrc no incluye el perfil OrangeBox para shells no-login"
+      warn "No se pudo añadir/verificar el include en /etc/bashrc"
     fi
   fi
 }
@@ -1577,7 +1634,7 @@ main() {
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; then PENDING_ONLY_AUDIT=true; fi
   detect_os
   if $PENDING_ONLY_AUDIT; then
-    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — pendientes corregibles ($OS_ID $OS_VERSION)"
+    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría completa del baseline ($OS_ID $OS_VERSION)"
   fi
   if [ "$AUTO_FIX" = true ]; then
     prepare_backup
@@ -1616,6 +1673,7 @@ main() {
     for m in ssh sudo kernel synflood rsyslog banners bash; do
       run_module "$m"
     done
+    aide_audit_module
   else
     if [ "$AUTO_FIX" = true ]; then
       echo -e "$BLUE[INFO]$NC MODO FIX: módulo seleccionado=$MODULE"
@@ -1643,6 +1701,7 @@ main() {
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
   if $PENDING_ONLY_AUDIT; then
     echo "Controles correctos: $OK_COUNT"
+    echo "No aplicables: $NOT_APPLICABLE_COUNT"
     echo "Pendientes: $WARNINGS"
     echo "Errores: $ERRORS"
     if [ "$WARNINGS" -eq 0 ]; then

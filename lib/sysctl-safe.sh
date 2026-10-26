@@ -11,16 +11,17 @@ sysctl_safe_log() {
   local level="$1"
   shift
   if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    if [ "$level" = "OK" ]; then
-      OK_COUNT=$((${OK_COUNT:-0}+1))
-    fi
+    case "$level" in
+      OK) OK_COUNT=$(($\{OK_COUNT:-0}+1)) ;;
+      N/A) NOT_APPLICABLE_COUNT=$(($\{NOT_APPLICABLE_COUNT:-0}+1)) ;;
+    esac
     case "$level" in INFO|CAMBIO\ PROPUESTO) return 0 ;; esac
   fi
   local color reset="${NC:-$'\033[0m'}"
   case "$level" in
     OK) color="${GREEN:-$'\033[0;32m'}" ;;
     ERROR) color="${RED:-$'\033[0;31m'}" ;;
-    INFO|CAMBIO\ PROPUESTO) color="${BLUE:-$'\033[0;34m'}" ;;
+    INFO|CAMBIO\ PROPUESTO|N/A) color="${BLUE:-$'\033[0;34m'}" ;;
     *) color="${YELLOW:-$'\033[0;33m'}" ;;
   esac
   printf '%b[SYSCTL][%s]%b %s\n' "$color" "$level" "$reset" "$*"
@@ -407,14 +408,13 @@ sysctl_safe_apply_kptr_restrict_policy() {
       return $?
       ;;
     "")
-      if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi
-      sysctl_safe_log "WARN" "kernel.kptr_restrict no está disponible en este kernel; no se modifica."
-      return 1
+      sysctl_safe_log "N/A" "kernel.kptr_restrict no está disponible en este kernel; el control no aplica."
+      return 0
       ;;
     *)
-      if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then return 0; fi
-      sysctl_safe_log "WARN" "kernel.kptr_restrict=$current no es un valor contemplado por la política; solo se cambia cuando el valor activo es 0. Se conserva sin cambios."
+      sysctl_safe_log "WARN" "kernel.kptr_restrict=$current no es un valor contemplado por la política; solo se cambia cuando el valor activo es 0. Se conserva sin cambios y requiere revisión."
       return 1
       ;;
   esac
 }
+
