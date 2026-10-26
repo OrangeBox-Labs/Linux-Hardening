@@ -264,7 +264,7 @@ configure_session_motd() {
      grep -Fq 'Fecha/hora:' "$PROFILE_MOTD" &&
      [ "$(grep -Fc 'Fecha/hora:' "$PROFILE_MOTD")" -eq 1 ] &&
      grep -Fq 'OB_CYAN=$(printf' "$PROFILE_MOTD" &&
-     ! grep -Fq 'tput' "$PROFILE_MOTD"; then
+     ! grep -Eq 'tput[[:space:]]+(setaf|sgr0|colors)' "$PROFILE_MOTD"; then
     echo -e "${GREEN}[✓] Bienvenida de shell ya configurada${NC}"
     return 0
   fi
