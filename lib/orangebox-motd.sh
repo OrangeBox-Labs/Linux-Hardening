@@ -107,28 +107,46 @@ case $- in
 esac
 [ -t 1 ] || return 0 2>/dev/null || exit 0
 
+# Una paleta ANSI común para todos los usuarios; no depende de tput ni de
+# si la cuenta que inicia Bash es root o un usuario normal.
 OB_RESET=
 OB_CYAN=
-OB_YELLOW=
-OB_MAGENTA=
-OB_COLORS=0
-if command -v tput >/dev/null 2>&1 && [ -n "$TERM" ] && [ "$TERM" != dumb ]; then
-  OB_RESET=$(tput sgr0 2>/dev/null || true)
-  OB_COLORS=$(tput colors 2>/dev/null || printf '0')
-  case "$OB_COLORS" in ''|*[!0-9]*) OB_COLORS=0 ;; esac
-  if [ "$OB_COLORS" -ge 256 ] 2>/dev/null; then
-    OB_CYAN=$(tput setaf 39 2>/dev/null || tput setaf 6 2>/dev/null || true)
-    OB_YELLOW=$(tput setaf 226 2>/dev/null || tput setaf 3 2>/dev/null || true)
-    OB_MAGENTA=$(tput setaf 205 2>/dev/null || tput setaf 5 2>/dev/null || true)
-  elif [ "$OB_COLORS" -ge 8 ] 2>/dev/null; then
-    OB_CYAN=$(tput setaf 6 2>/dev/null || true)
-    OB_YELLOW=$(tput setaf 3 2>/dev/null || true)
-    OB_MAGENTA=$(tput setaf 5 2>/dev/null || true)
-  fi
+if [ -t 1 ] && [ "${TERM:-}" != dumb ]; then
+  OB_RESET=$(printf '\033[0m')
+  OB_CYAN=$(printf '\033[1;36m')
 fi
 
+# FIGlet se usa en la sesión interactiva cuando está disponible. Si no,
+# se muestra un logo ASCII integrado sin instalar paquetes en el login.
+OB_LOGO=
+if command -v figlet >/dev/null 2>&1; then
+  OB_LOGO=$(figlet -f small OrangeBox 2>/dev/null || true)
+fi
+if [ -z "$OB_LOGO" ]; then
+  OB_LOGO=$(cat <<'ORANGEBOX_ASCII'
+   ___                        ____
+  / _ \ _ __ __ _ _ __   __ _ | __ )
+ | | | | '__/ _| | '_ \ / _| ||  _ \
+ | |_| | | | (_| | | | | (_| || |_) |
+  \___/|_|  \__,_|_| |_| \__,_||____/
+ORANGEBOX_ASCII
+)
+fi
+
+# Centrar el logo sin depender de herramientas externas.
+OB_TERM_WIDTH=${COLUMNS:-80}
+case "$OB_TERM_WIDTH" in
+  ''|*[!0-9]*) OB_TERM_WIDTH=80 ;;
+esac
+[ "$OB_TERM_WIDTH" -ge 40 ] 2>/dev/null || OB_TERM_WIDTH=80
+printf '%s\n' "$OB_LOGO" | while IFS= read -r OB_LOGO_LINE; do
+  OB_PAD=$(( (OB_TERM_WIDTH - ${#OB_LOGO_LINE}) / 2 ))
+  [ "$OB_PAD" -ge 0 ] || OB_PAD=0
+  printf '%*s%s%s%s\n' "$OB_PAD" '' "$OB_CYAN" "$OB_LOGO_LINE" "$OB_RESET"
+done
+
 OB_SERVER_IP=
-if [ -n "$SSH_CONNECTION" ]; then
+if [ -n "${SSH_CONNECTION:-}" ]; then
   OB_SERVER_IP=$(printf '%s\n' "$SSH_CONNECTION" | awk 'NF {print $3; exit}')
 fi
 if [ -z "$OB_SERVER_IP" ] && command -v ip >/dev/null 2>&1; then
@@ -143,6 +161,17 @@ if [ -z "$OB_SERVER_IP" ] && command -v ifconfig >/dev/null 2>&1; then
 fi
 [ -n "$OB_SERVER_IP" ] || OB_SERVER_IP="No detectada"
 
+OB_CLIENT_IP=
+if [ -n "${SSH_CONNECTION:-}" ]; then
+  OB_CLIENT_IP=$(printf '%s\n' "$SSH_CONNECTION" | awk 'NF {print $1; exit}')
+elif [ -n "${SSH_CLIENT:-}" ]; then
+  OB_CLIENT_IP=$(printf '%s\n' "$SSH_CLIENT" | awk 'NF {print $1; exit}')
+else
+  OB_CLIENT_IP=$(who am i 2>/dev/null | awk 'NF {value=$NF; gsub(/[()]/,"",value); print value; exit}')
+fi
+[ -n "$OB_CLIENT_IP" ] || OB_CLIENT_IP="Local"
+
+OB_USERNAME=$(id -un 2>/dev/null || printf '%s' "${USER:-unknown}")
 OB_UPTIME=$(awk 'NR == 1 {s=int($1); printf "up %d days, %d hours, %d minutes", int(s/86400), int((s%86400)/3600), int((s%3600)/60)}' /proc/uptime 2>/dev/null)
 [ -n "$OB_UPTIME" ] || OB_UPTIME="No disponible"
 OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)
@@ -150,10 +179,12 @@ OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/n
 OB_DATETIME=$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null)
 [ -n "$OB_DATETIME" ] || OB_DATETIME="No disponible"
 
-printf '  %sIP interna:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_SERVER_IP"
-printf '  %sUptime:%s        %s\n' "$OB_YELLOW" "$OB_RESET" "$OB_UPTIME"
-printf '  %sLoad (1/5/15m):%s %s\n' "$OB_MAGENTA" "$OB_RESET" "$OB_LOAD"
-printf '  %sFecha/hora:%s    %s\n' "$OB_CYAN" "$OB_RESET" "$OB_DATETIME"
+printf '\n'
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP interna:" "$OB_RESET" "$OB_SERVER_IP"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Uptime:" "$OB_RESET" "$OB_UPTIME"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP del cliente:" "$OB_RESET" "$OB_CLIENT_IP"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Usuario:" "$OB_RESET" "$OB_USERNAME"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Fecha/hora:" "$OB_RESET" "$OB_DATETIME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
-}
