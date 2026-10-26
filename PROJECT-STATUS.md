@@ -1,9 +1,9 @@
 # Estado del proyecto — OrangeBox Linux-Hardening
 
 **Fecha de revisión:** 2026-10-26  
-**Rama base observada:** `main` — commit `707daa5f6c587acfb97d98d4d709362c9949d160`  
-**Rama de trabajo para este análisis:** `cis-mount-audit-and-status`  
-**Estado global:** **EN DESARROLLO** — controles operacionales amplios ya existen; la cobertura CIS completa y la validación final siguen pendientes.
+**Integración:** cambios de esta revisión fusionados en `main` mediante PR #20, squash commit `0b90e3bebf8cee1f2917eef66242e45ced3fad27`.  
+**Rama de trabajo original:** `cis-mount-audit-and-status` (PR cerrado y fusionado).  
+**Estado global:** **EN DESARROLLO** — CI de la revisión pasó; sigue pendiente completar la trazabilidad CIS recomendación por recomendación y ampliar la cobertura directa del verificador.
 
 Este documento es el tablero operativo del repositorio. No confundir “módulo implementado” con “cumplimiento completo de CIS”: el verificador local es un subconjunto y no certifica cumplimiento.
 
