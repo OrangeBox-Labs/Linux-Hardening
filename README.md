@@ -26,7 +26,7 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 | Script / componente | Cambios y mejoras documentadas |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.5, ejecución idempotente, preflight antes de pedir confirmaciones, confirmaciones por parámetro, nuevo MOTD y timeout de 120 s para usuarios no-root. |
+| `linux-hardening.sh` | Baseline 1.4.6, ejecución idempotente, preflight efectivo y MOTD dinámico con IP remota SSH, uptime normalizado, load average y fallback ASCII. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
 | `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
@@ -161,7 +161,7 @@ El proyecto diferencia claramente:
 
 ### Después del login
 
-`/etc/motd` utiliza una tarjeta ASCII compacta de OrangeBox.
+`/etc/motd` queda vacío para evitar duplicados. El banner dinámico se imprime desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas, con la IP remota SSH, la IP del servidor, uptime normalizado, load average y kernel. FIGlet se utiliza si está disponible; en modo `--fix` se intenta instalar desde repositorios ya configurados, y si falla se usa un logo ASCII integrado.
 
 El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
 
@@ -383,3 +383,10 @@ Y si una mejora evita que alguien pierda acceso SSH en producción, probablement
 **MIT License**
 
 Copyright (c) 2025 Felipe Roman - OrangeBox Labs
+
+
+## MOTD dinámico por sesión
+
+El banner se genera al abrir una shell interactiva desde /etc/profile.d/99-orangebox-motd.sh. Así puede mostrar la IP remota de la sesión SSH mediante SSH_CONNECTION, además de la IP del servidor, uptime calculado desde /proc/uptime, load average desde /proc/loadavg y kernel activo. Un archivo /etc/motd estático no puede conocer qué cliente lo está leyendo, por lo que se mantiene vacío para evitar duplicados. Las sesiones SFTP y las conexiones SSH no interactivas no ejecutan /etc/profile.d; el aviso previo al login en /etc/issue.net permanece separado.
+
+FIGlet es una mejora opcional. Durante --fix, si FIGlet o la fuente small no están disponibles, el instalador intenta instalar el paquete desde los repositorios ya configurados. No habilita EPEL ni otros repositorios automáticamente y no ejecuta una actualización completa del sistema. Si no puede instalarse, el perfil utiliza un logo ASCII embebido. El uptime y la carga se obtienen de /proc, por lo que no dependen de que uptime -p exista en sistemas antiguos como CentOS 6.
