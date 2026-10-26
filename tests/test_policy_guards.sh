@@ -25,6 +25,14 @@ grep -Fq 'check_kptr_restrict_policy' "$KERNEL" || fail "kernel-hardening no uti
 if grep -Eq 'set_sysctl kernel\.kptr_restrict 2|check_sysctl_param "kernel\.kptr_restrict" "2"' "$CORE" "$KERNEL"; then
   fail "un módulo sigue imponiendo kernel.kptr_restrict=2"
 fi
+
+CRON="$ROOT_DIR/cron-hardening.sh"
+grep -Fq 'confirm_cron_change()' "$CRON" || fail "cron/at hardening must confirm each impactful change"
+grep -Fq 'crear $allow_file con root como único usuario permitido' "$CRON" || fail "cron allow-list change does not explain impact on application/hosting accounts"
+grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$CRON" || fail "cron fix must skip changes without a TTY"
+grep -Fq 'No se reinicia crond' "$CRON" || fail "cron fix should not unconditionally restart the daemon after permission changes"
+if grep -Fq 'ob_service_restart crond' "$CRON"; then fail "cron hardening should not unconditionally restart crond"; fi
+
 pass "sysctl: suid_dumpable=0, dmesg_restrict=1 y kptr_restrict conserva 1/2 o propone 0->1"
 
 # All interactive confirmations use the Spanish [s/N] convention, with No as default.
