@@ -10,6 +10,7 @@ grep -Fq 'confirm_aide_change "inicializar base de datos AIDE"' "$AIDE" || fail 
 grep -Fq 'confirm_aide_change "programar comprobación diaria de AIDE"' "$AIDE" || fail "el crontab no requiere consentimiento"
 grep -Fq 'root.crontab.before' "$AIDE" || fail "no se respalda el crontab root antes de modificarlo"
 grep -Fq 'No se programa aide --check hasta disponer de una base de referencia válida' "$AIDE" || fail "AIDE puede programarse sin base de datos"
+! grep -Fq '[ "$WARNINGS" -eq 0 ]' "$AIDE" || fail "los hallazgos operacionales se devuelven como error de ejecución al orquestador"
 grep -Fq 'selinux-setup|usb-storage|aide)' "$CORE" || fail "el orquestador no delega consentimiento al módulo AIDE"
 init_body="$(awk '/^check_aide_database\(\) \{/{p=1} p{print} p && /^}/{exit}' "$AIDE")"
 confirm_line="$(printf '%s\n' "$init_body" | grep -n 'confirm_aide_change' | head -n1 | cut -d: -f1)"

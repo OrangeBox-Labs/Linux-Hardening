@@ -236,7 +236,7 @@ main() {
     echo -e "${YELLOW}[N/A] Sin AIDE instalado, no se inicializa base ni se programa cron.${NC}"
   fi
   show_summary
-  [ "$WARNINGS" -eq 0 ]
+  return 0
 }
 
 main "$@"
