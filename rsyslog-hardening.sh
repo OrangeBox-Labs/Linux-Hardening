@@ -1,5 +1,14 @@
 #!/bin/bash
 
+OB_COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$OB_COMPAT_DIR/lib/service-compat.sh" ]; then
+  # shellcheck source=lib/service-compat.sh
+  . "$OB_COMPAT_DIR/lib/service-compat.sh"
+else
+  echo "[ERROR] Falta lib/service-compat.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: rsyslog-hardening.sh
 # Autor: Felipe Roman
@@ -156,7 +165,7 @@ configure_remote_logging() {
   echo -e "${GREEN}[✓] Configurado envio de logs a: $remote_host:$remote_port ($proto_display)${NC}"
 
   # Reiniciar rsyslog
-  systemctl restart rsyslog 2>/dev/null
+  ob_service_restart rsyslog 2>/dev/null
   echo -e "${GREEN}[✓] Rsyslog reiniciado${NC}"
 
   echo -e "\n${YELLOW}PARA VERIFICAR:${NC}"
@@ -195,12 +204,12 @@ check_rsyslog_installed() {
 check_rsyslog_enabled() {
   echo -e "\n${BLUE}[*] CIS 4.2.1.2 - Verificando rsyslog habilitado...${NC}"
 
-  if systemctl is-enabled rsyslog &>/dev/null; then
+  if ob_service_is_enabled rsyslog; then
     echo -e "${GREEN}[✓] rsyslog habilitado${NC}"
   else
     echo -e "${RED}[!] rsyslog no habilitado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl enable rsyslog
+      ob_service_enable rsyslog
       echo -e "${GREEN}[✓] rsyslog habilitado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -208,12 +217,12 @@ check_rsyslog_enabled() {
     fi
   fi
 
-  if systemctl is-active rsyslog &>/dev/null; then
+  if ob_service_is_active rsyslog; then
     echo -e "${GREEN}[✓] rsyslog corriendo${NC}"
   else
     echo -e "${RED}[!] rsyslog no corriendo${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl start rsyslog
+      ob_service_start rsyslog
       echo -e "${GREEN}[✓] rsyslog iniciado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -331,12 +340,14 @@ check_remote_accept() {
 # ==============================================
 configure_journald() {
   echo -e "\n${BLUE}[*] Configurando journald...${NC}"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo -e "${YELLOW}[N/A] systemd-journald no está disponible en esta plataforma; se omiten controles específicos de journald.${NC}"
+    return 0
+  fi
   echo -e "\n${YELLOW}[*] 4.2.2.1 - Verificando envio de journald a rsyslog...${NC}"
   configure_journald_param "ForwardToSyslog" "yes" "ForwardToSyslog"
-
   echo -e "\n${YELLOW}[*] 4.2.2.2 - Verificando compresion de archivos grandes...${NC}"
   configure_journald_param "Compress" "yes" "Compress"
-
   echo -e "\n${YELLOW}[*] 4.2.2.3 - Verificando almacenamiento persistente...${NC}"
   configure_journald_param "Storage" "persistent" "Storage"
 
@@ -347,7 +358,6 @@ configure_journald() {
     FIXED=$((FIXED + 1))
   fi
 }
-
 # ==============================================
 # VERIFICAR PERMISOS DE LOGS (4.2.3)
 # ==============================================
@@ -385,12 +395,17 @@ check_log_permissions() {
 restart_services() {
   if [ "$AUTO_FIX" = true ]; then
     echo -e "\n${BLUE}[*] Reiniciando servicios...${NC}"
-    systemctl restart rsyslog
-    systemctl restart systemd-journald
-    echo -e "${GREEN}[✓] Servicios reiniciados${NC}"
+    if ob_service_restart rsyslog; then
+      echo -e "${GREEN}[✓] Rsyslog reiniciado${NC}"
+    else
+      echo -e "${RED}[!] No se pudo reiniciar rsyslog${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    if command -v systemctl >/dev/null 2>&1 && systemctl restart systemd-journald; then
+      echo -e "${GREEN}[✓] systemd-journald reiniciado${NC}"
+    fi
   fi
 }
-
 # ==============================================
 # MOSTRAR RESUMEN
 # ==============================================

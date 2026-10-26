@@ -1,5 +1,14 @@
 #!/bin/bash
 
+OB_COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$OB_COMPAT_DIR/lib/service-compat.sh" ]; then
+  # shellcheck source=lib/service-compat.sh
+  . "$OB_COMPAT_DIR/lib/service-compat.sh"
+else
+  echo "[ERROR] Falta lib/service-compat.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: configure-time-sync.sh
 # Autor: Felipe Roman
@@ -186,9 +195,16 @@ configure_chrony() {
     needs_fix=1
   fi
 
-  # Verificar /etc/sysconfig/chronyd
-  if [ -f /etc/sysconfig/chronyd ]; then
-    if grep -q "OPTIONS.*-u chrony" /etc/sysconfig/chronyd; then
+  # EL8+ uses the vendor's systemd unit and does not require a literal -u chrony in sysconfig.
+  local os_major=""
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    os_major="${VERSION_ID%%.*}"
+  fi
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -ge 8 ]; then
+    echo -e "${GREEN}[✓] EL8+: se conserva la gestión de privilegios de la unidad chronyd del proveedor${NC}"
+  elif [ -f /etc/sysconfig/chronyd ]; then
+    if grep -Eq '^[[:space:]]*OPTIONS=.*-u[[:space:]]+chrony' /etc/sysconfig/chronyd; then
       echo -e "${GREEN}[✓] chronyd configurado para ejecutar como usuario chrony${NC}"
     else
       echo -e "${RED}[!] chronyd no tiene la opcion -u chrony${NC}"
@@ -297,57 +313,56 @@ EOF
 start_service() {
   echo -e "\n${BLUE}[*] Iniciando servicio de sincronizacion...${NC}"
 
+  local svc="" rc
   if rpm -q chrony &>/dev/null; then
-    if systemctl is-enabled chronyd &>/dev/null; then
-      echo -e "${GREEN}[✓] chronyd ya esta habilitado${NC}"
-    else
-      echo -e "${RED}[!] chronyd no esta habilitado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        systemctl enable chronyd
-        echo -e "${GREEN}[✓] chronyd habilitado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
-
-    if systemctl is-active chronyd &>/dev/null; then
-      echo -e "${GREEN}[✓] chronyd esta corriendo${NC}"
-    else
-      echo -e "${RED}[!] chronyd no esta corriendo${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        systemctl restart chronyd
-        echo -e "${GREEN}[✓] chronyd iniciado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
+    svc=chronyd
   elif rpm -q ntp &>/dev/null; then
-    if systemctl is-enabled ntpd &>/dev/null; then
-      echo -e "${GREEN}[✓] ntpd ya esta habilitado${NC}"
-    else
-      echo -e "${RED}[!] ntpd no esta habilitado${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        systemctl enable ntpd
-        echo -e "${GREEN}[✓] ntpd habilitado${NC}"
-        FIXED=$((FIXED + 1))
-      else
-        WARNINGS=$((WARNINGS + 1))
-      fi
-    fi
+    svc=ntpd
+  else
+    echo -e "${YELLOW}[!] No hay paquete chrony/ntp para comprobar servicio${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
 
-    if systemctl is-active ntpd &>/dev/null; then
-      echo -e "${GREEN}[✓] ntpd esta corriendo${NC}"
-    else
-      echo -e "${RED}[!] ntpd no esta corriendo${NC}"
-      if [ "$AUTO_FIX" = true ]; then
-        systemctl restart ntpd
-        echo -e "${GREEN}[✓] ntpd iniciado${NC}"
+  if ob_service_is_enabled "$svc"; then
+    echo -e "${GREEN}[✓] $svc habilitado${NC}"
+  else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      echo -e "${YELLOW}[!] No se pudo determinar si $svc está habilitado (sin gestor compatible)${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    elif [ "$AUTO_FIX" = true ]; then
+      if ob_service_enable "$svc"; then
+        echo -e "${GREEN}[✓] $svc habilitado${NC}"
         FIXED=$((FIXED + 1))
       else
+        echo -e "${RED}[!] No se pudo habilitar $svc${NC}"
         WARNINGS=$((WARNINGS + 1))
       fi
+    else
+      echo -e "${RED}[!] $svc no está habilitado${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+  fi
+
+  if ob_service_is_active "$svc"; then
+    echo -e "${GREEN}[✓] $svc está corriendo${NC}"
+  else
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      echo -e "${YELLOW}[!] No se pudo determinar si $svc está corriendo${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    elif [ "$AUTO_FIX" = true ]; then
+      if ob_service_start "$svc"; then
+        echo -e "${GREEN}[✓] $svc iniciado${NC}"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "${RED}[!] No se pudo iniciar $svc${NC}"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      echo -e "${RED}[!] $svc no está corriendo${NC}"
+      WARNINGS=$((WARNINGS + 1))
     fi
   fi
 }
@@ -373,8 +388,7 @@ force_sync() {
       echo -e "${GREEN}[✓] Sincronizacion forzada${NC}"
     fi
   else
-    echo -e "${YELLOW}    Recomendacion: chronyc makestep o ntpdate -u time.google.com${NC}"
-    WARNINGS=$((WARNINGS + 1))
+    echo -e "${YELLOW}[INFO] Modo auditoría: no se fuerza un ajuste inmediato del reloj; se comprueba el estado a continuación.${NC}"
   fi
 }
 

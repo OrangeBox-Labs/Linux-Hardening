@@ -1,5 +1,14 @@
 #!/bin/bash
 
+OB_COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$OB_COMPAT_DIR/lib/service-compat.sh" ]; then
+  # shellcheck source=lib/service-compat.sh
+  . "$OB_COMPAT_DIR/lib/service-compat.sh"
+else
+  echo "[ERROR] Falta lib/service-compat.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: cron-hardening.sh
 # Autor: Felipe Roman
@@ -45,22 +54,32 @@ show_usage() {
 
 check_cron_enabled() {
   echo -e "\n${BLUE}[*] CIS 5.1.1 - Verificando servicio cron...${NC}"
+  local rc
 
-  if systemctl is-enabled crond &>/dev/null; then
+  if ob_service_is_enabled crond; then
     echo -e "${GREEN}[✓] crond habilitado${NC}"
   else
-    echo -e "${RED}[!] crond no habilitado${NC}"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      echo -e "${YELLOW}[!] No se pudo determinar si crond está habilitado${NC}"
+    else
+      echo -e "${RED}[!] crond no habilitado${NC}"
+    fi
     WARNINGS=$((WARNINGS + 1))
   fi
 
-  if systemctl is-active crond &>/dev/null; then
+  if ob_service_is_active crond; then
     echo -e "${GREEN}[✓] crond corriendo${NC}"
   else
-    echo -e "${RED}[!] crond no corriendo${NC}"
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+      echo -e "${YELLOW}[!] No se pudo determinar si crond está corriendo${NC}"
+    else
+      echo -e "${RED}[!] crond no corriendo${NC}"
+    fi
     WARNINGS=$((WARNINGS + 1))
   fi
 }
-
 check_permissions() {
   local file="$1"
   local perms="$2"
@@ -150,8 +169,8 @@ check_cron_log_permissions() {
   local current_owner=$(stat -c "%U" "$cron_log" 2>/dev/null)
   local current_group=$(stat -c "%G" "$cron_log" 2>/dev/null)
 
-  if [ "$current_perms" = "640" ] && [ "$current_owner" = "root" ] && [ "$current_group" = "root" ]; then
-    echo -e "${GREEN}[✓] $cron_log permisos correctos: 640 root:root${NC}"
+  if { [ "$current_perms" = "640" ] || [ "$current_perms" = "600" ]; } && [ "$current_owner" = "root" ] && [ "$current_group" = "root" ]; then
+    echo -e "${GREEN}[✓] $cron_log permisos correctos: $current_perms root:root${NC}"
   else
     echo -e "${RED}[!] $cron_log permisos: $current_perms $current_owner:$current_group (debe ser 640 root:root)${NC}"
     WARNINGS=$((WARNINGS + 1))
@@ -195,16 +214,24 @@ check_unauthorized_crons() {
 apply_cron_enabled() {
   echo -e "\n${BLUE}[*] Aplicando: Habilitar e iniciar cron...${NC}"
 
-  if ! systemctl is-enabled crond &>/dev/null; then
-    systemctl enable crond
-    echo -e "${GREEN}[✓] crond habilitado${NC}"
-    FIXED=$((FIXED + 1))
+  if ! ob_service_is_enabled crond; then
+    if ob_service_enable crond; then
+      echo -e "${GREEN}[✓] crond habilitado${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${RED}[!] No se pudo habilitar crond${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
   fi
 
-  if ! systemctl is-active crond &>/dev/null; then
-    systemctl start crond
-    echo -e "${GREEN}[✓] crond iniciado${NC}"
-    FIXED=$((FIXED + 1))
+  if ! ob_service_is_active crond; then
+    if ob_service_start crond; then
+      echo -e "${GREEN}[✓] crond iniciado${NC}"
+      FIXED=$((FIXED + 1))
+    else
+      echo -e "${RED}[!] No se pudo iniciar crond${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
   fi
 }
 
@@ -280,7 +307,7 @@ apply_cron_log_permissions() {
 
   if [ -f "$cron_log" ]; then
     local current_perms=$(stat -c "%a" "$cron_log" 2>/dev/null)
-    if [ "$current_perms" != "640" ]; then
+    if { [ "$current_perms" != "640" ] && [ "$current_perms" != "600" ]; } || [ "$(stat -c "%U:%G" "$cron_log" 2>/dev/null)" != "root:root" ]; then
       chmod 640 "$cron_log"
       chown root:root "$cron_log"
       echo -e "${GREEN}[✓] $cron_log permisos corregidos a 640${NC}"
@@ -347,7 +374,7 @@ main() {
     apply_cron_log_permissions
 
     # Reiniciar servicio
-    systemctl restart crond
+    ob_service_restart crond
     echo -e "\n${GREEN}[✓] crond reiniciado${NC}"
 
     # Resumen

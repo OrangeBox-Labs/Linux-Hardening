@@ -1,5 +1,14 @@
 #!/bin/bash
 
+OB_COMPAT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ -r "$OB_COMPAT_DIR/lib/service-compat.sh" ]; then
+  # shellcheck source=lib/service-compat.sh
+  . "$OB_COMPAT_DIR/lib/service-compat.sh"
+else
+  echo "[ERROR] Falta lib/service-compat.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: auditd-hardening.sh
 # Autor: Felipe Roman
@@ -242,12 +251,12 @@ check_auditd_installed() {
 check_auditd_enabled() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.2 - Verificando auditd habilitado...${NC}"
 
-  if systemctl is-enabled auditd &>/dev/null; then
+  if ob_service_is_enabled auditd; then
     echo -e "${GREEN}[✓] auditd habilitado${NC}"
   else
     echo -e "${RED}[!] auditd no habilitado${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl enable auditd 2>/dev/null
+      ob_service_enable auditd 2>/dev/null
       echo -e "${GREEN}[✓] auditd habilitado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -255,12 +264,12 @@ check_auditd_enabled() {
     fi
   fi
 
-  if systemctl is-active auditd &>/dev/null; then
+  if ob_service_is_active auditd; then
     echo -e "${GREEN}[✓] auditd corriendo${NC}"
   else
     echo -e "${RED}[!] auditd no corriendo${NC}"
     if [ "$AUTO_FIX" = true ]; then
-      systemctl start auditd 2>/dev/null
+      ob_service_start auditd 2>/dev/null
       echo -e "${GREEN}[✓] auditd iniciado${NC}"
       FIXED=$((FIXED + 1))
     else
@@ -480,7 +489,7 @@ restart_auditd() {
     fi
 
     # Reiniciar auditd
-    systemctl restart auditd 2>/dev/null
+    ob_service_restart auditd 2>/dev/null
     echo -e "${GREEN}[✓] Auditd reiniciado${NC}"
     echo -e "${YELLOW}[!] NOTA: La configuracion inmutable (-e 2) requiere reinicio del sistema${NC}"
   fi
