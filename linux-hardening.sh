@@ -352,7 +352,11 @@ ssh_apply_pending_settings() {
       printf '# OrangeBox Linux Hardening %s\n' "$SCRIPT_VERSION"
       for directive in "${directives[@]}"; do printf '%s\n' "$directive"; done
     } > "$tmp" || { rm -f "$tmp"; warn "No se pudo preparar el drop-in SSH"; return 1; }
-    chmod 600 "$tmp" && chown root:root "$tmp" 2>/dev/null || true
+    if ! chmod 600 "$tmp" || ! chown root:root "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      warn "No se pudieron fijar propietario/permisos del drop-in SSH; no se instaló"
+      return 1
+    fi
     if [ -e "$SSH_DROPIN" ] || [ -L "$SSH_DROPIN" ] || ! mv "$tmp" "$SSH_DROPIN"; then
       rm -f "$tmp"
       warn "El drop-in SSH apareció o no pudo instalarse; no se sobrescribió ningún archivo existente"
@@ -1347,10 +1351,11 @@ run_internal_module_with_confirmation() {
             return 0
           fi
         else
+          reason="$(ssh_module_apply_block_reason || true)"
           if [ "$ssh_status" -eq 1 ]; then
-            info "Hay controles SSH pendientes, pero no se puede aplicar sin sobrescribir configuración o fuera de las condiciones admitidas; se mantiene en auditoría."
+            info "Hay controles SSH pendientes, pero no se aplicarán automáticamente: ${reason:-no se encontró una vía segura}; se conserva la configuración actual y se muestra la remediación manual."
           else
-            info "No se pudo verificar el estado efectivo de SSH; se omite la confirmación y no se modifica."
+            info "No se pudo verificar el estado efectivo de SSH: ${reason:-sshd -T no entregó valores}. No se modificará."
           fi
           AUTO_FIX=false
           run_module "$name"
