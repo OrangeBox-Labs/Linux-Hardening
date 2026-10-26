@@ -26,7 +26,7 @@ GRUB_CONFIG="/etc/default/grub"
 GRUB_CFG="/boot/grub2/grub.cfg"
 GRUB_USER_CFG="/boot/grub2/user.cfg"
 GRUB_SCRIPT="/etc/grub.d/01_users"
-BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)-$"
+BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
