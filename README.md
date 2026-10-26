@@ -101,18 +101,18 @@ Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
 El inventario de sockets identifica protocolo, dirección, puerto, proceso y servicio cuando la información está disponible.
 
-La auditoría puede correlacionar listeners no-loopback con las políticas y reglas que se puedan verificar en:
+El informe principal identifica gestores y backends detectables —CSF, Shorewall, firewalld, nftables, iptables/iptables-nft y cadenas de integración de Imunify360— y lista los servicios que escuchan. Para cada socket no-loopback intenta contrastar protocolo y puerto con las reglas INPUT legibles.
 
-- firewalld
-- nftables
-- iptables / iptables-nft
-- CSF
-- Imunify360
-- Shorewall
+Los resultados se separan en cuatro estados:
 
-Esta auditoría es **estrictamente de solo lectura**. No elimina ni modifica reglas, servicios o configuraciones de firewall y no decide si un puerto permitido debería estar expuesto.
+- **Acceso permitido / exposición potencial:** hay una ruta de aceptación o la política efectiva deja pasar el tráfico; no significa que el servicio sea vulnerable, pero sí que debe validarse su exposición.
+- **Acceso restringido/condicional:** se detectó una regla de permiso condicionada por origen, interfaz u otro alcance reconocible.
+- **Bloqueado:** se identificó una política/regla de bloqueo que cubre el servicio.
+- **Indeterminado:** la semántica o combinación de reglas no se puede resolver con certeza; no se presenta como protegido.
 
-Si el backend no puede interpretarse con certeza, el sistema informa `INFO` en vez de asumir que el puerto está desprotegido.
+El auditor puede asociar riesgos típicos por proceso/puerto —por ejemplo, base de datos, Redis, SMB, FTP, SNMP, proxy, SSH o agentes de monitoreo— para ayudar a priorizar la revisión. Estas indicaciones son contextuales, no una afirmación automática de vulnerabilidad.
+
+Esta función es **estrictamente de solo lectura**: nunca crea, elimina, modifica, habilita, reinicia ni recarga reglas, gestores o servicios de firewall. No intenta decidir ni aplicar qué puertos deberían estar abiertos.
 
 No es:
 
@@ -193,7 +193,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 
 | Script | Área |
 |---|---|
-| `linux-hardening.sh` | Baseline 1.4.10, detección y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
+| `linux-hardening.sh` | Baseline 1.4.14, inventario de firewall de solo lectura y persistencia SYSCTL legacy, parser de listeners compatible con CentOS 6 y verificación syslog sin journald. |
 | `linux-hardening-audit.sh` | Auditoría agregada |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente |
 | `post-install.sh` | Preparación inicial |
