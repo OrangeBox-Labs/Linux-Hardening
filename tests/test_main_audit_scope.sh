@@ -75,7 +75,7 @@ grep -Fq 'No se puede confirmar Storage=persistent' "$MAIN" || fail "journald no
 grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" || fail "Bash no comprueba el include de /etc/bashrc en audit"
 grep -Fq 'no existe; no hay historial ilimitado configurado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
 grep -Fq 'if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then' "$MAIN" || fail "un symlink en audit corta los estados individuales del historial"
-grep -Fq '--fix no lo reemplaza automáticamente' "$MAIN" || fail "los symlinks de dotfiles no se preservan durante fix"
+grep -Fq -- '--fix no lo reemplaza automáticamente' "$MAIN" || fail "los symlinks de dotfiles no se preservan durante fix"
 grep -Fq 'HISTSIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTSIZE de dotfiles por separado"
 grep -Fq 'HISTFILESIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTFILESIZE de dotfiles por separado"
 grep -Fq 'HISTCONTROL vacío (no se omiten comandos)' "$MAIN" || fail "Bash no audita HISTCONTROL en dotfiles"
