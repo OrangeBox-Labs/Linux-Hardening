@@ -60,6 +60,8 @@ jobs:
         run: bash tests/test_listener_firewall_audit.sh
       - name: Test actionable baseline scope and standalone firewall audit
         run: bash tests/test_main_audit_scope.sh
+      - name: Test linux-hardening CLI entrypoint
+        run: bash tests/test_main_entrypoint.sh
       - name: Test SYN flood baseline policy
         run: bash tests/test_synflood_defaults.sh
       - name: Test SSH effective-setting preflight
@@ -145,6 +147,7 @@ jobs:
               /bin/bash tests/test_firewall_detect.sh
               /bin/bash tests/test_listener_firewall_audit.sh
               /bin/bash tests/test_main_audit_scope.sh
+              /bin/bash tests/test_main_entrypoint.sh
               /bin/bash tests/test_synflood_defaults.sh
               /bin/bash tests/test_ssh_preflight.sh
               /bin/bash tests/test_idempotent_baseline.sh

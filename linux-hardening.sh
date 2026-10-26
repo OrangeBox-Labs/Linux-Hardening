@@ -2268,3 +2268,7 @@ main() {
   echo -e "$GREEN============================================================$NC"
 }
 
+# Dispatch the CLI when executed directly; do not start an audit if sourced.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
