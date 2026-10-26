@@ -29,7 +29,7 @@ grep -Fq 'if ! confirm_risky_change "$name"; then' "$CORE" || fail "se perdió c
 grep -Fq 'falta persistencia' "$SYSCTL" || fail "sysctl no distingue runtime correcto de persistencia ausente"
 grep -Fq '¿Confirmas persistir %s=%s en %s? [s/N]' "$SYSCTL" || fail "no hay confirmación para cambios solo de persistencia"
 
-# Pre-authentication login banner owns the logo and security warning.
+# The pre-authentication banner owns the warning; the shell MOTD owns the unified session display.
 MOTD_LIB="$ROOT_DIR/lib/orangebox-motd.sh"
 [ -r "$MOTD_LIB" ] || fail "falta la librería del banner OrangeBox"
 grep -Fq 'orangebox_motd_ensure_figlet "$AUTO_FIX"' "$CORE" || fail "el módulo no verifica/instala FIGlet según el modo"
@@ -73,12 +73,21 @@ orangebox_motd_write_profile "$motd_profile_tmp" || fail "no se pudo generar el 
 sh -n "$motd_profile_tmp" || fail "el perfil dinámico no es compatible con sintaxis sh"
 grep -Fq 'IP interna:' "$motd_profile_tmp" || fail "el perfil no muestra la IP interna"
 grep -Fq 'Uptime:' "$motd_profile_tmp" || fail "el perfil no muestra uptime"
-grep -Fq 'Load (1/5/15m):' "$motd_profile_tmp" || fail "el perfil no muestra load average"
-grep -Fq 'Fecha/hora:' "$motd_profile_tmp" || fail "el perfil no muestra fecha y hora"
-grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
-if grep -Eq 'figlet|ORANGEBOX_ASCII|AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexiones y los comandos ejecutados quedan|IP remota:' "$motd_profile_tmp"; then
-  fail "el banner de shell no debe repetir logo, aviso ni IP remota"
+grep -Fq '"Load:"' "$motd_profile_tmp" || fail "el perfil no muestra Load con etiqueta limpia"
+if grep -Fq 'Load (1/5/15m):' "$motd_profile_tmp"; then
+  fail "la etiqueta Load no debe mostrar intervalos internos"
 fi
+grep -Fq 'IP del cliente:' "$motd_profile_tmp" || fail "el perfil no muestra la IP del cliente"
+grep -Fq '"Usuario:"' "$motd_profile_tmp" || fail "el perfil no muestra al usuario efectivo"
+grep -Fq 'Fecha/hora:' "$motd_profile_tmp" || fail "el perfil no muestra fecha y hora"
+[ "$(grep -Fc 'Fecha/hora:' "$motd_profile_tmp")" -eq 1 ] || fail "la fecha/hora debe aparecer una sola vez"
+grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
+grep -Fq 'figlet -f small OrangeBox' "$motd_profile_tmp" || fail "el logo FIGlet no aparece primero en el MOTD de shell"
+grep -Fq 'ORANGEBOX_ASCII' "$motd_profile_tmp" || fail "falta el fallback ASCII del logo de shell"
+if grep -Eq 'AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexiones y los comandos ejecutados quedan|tput' "$motd_profile_tmp"; then
+  fail "el MOTD de shell no debe duplicar el aviso pre-login ni depender de tput para colorear"
+fi
+grep -Fq "OB_CYAN=\$(printf" "$motd_profile_tmp" || fail "el MOTD no define la paleta ANSI común"
 # Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
 grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
 grep -Fq 'unset TMOUT 2>/dev/null || true' "$CORE" || fail "la shell root no elimina TMOUT heredado"
@@ -105,4 +114,4 @@ grep -Fq 'SSH_CONNECTION' "$motd_profile_tmp" || fail "el perfil MOTD generado n
 grep -Fq '/proc/uptime' "$motd_profile_tmp" || fail "el perfil MOTD generado no calcula uptime"
 grep -Fq '/proc/loadavg' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra load"
 
-pass "banner pre-login con logo/aviso, métricas mínimas en shell y TMOUT=120 exclusivo para sesiones interactivas no-root"
+pass "banner pre-login, logo FIGlet y ficha de sesión unificada, etiqueta Load limpia, fecha única y TMOUT no-root"
