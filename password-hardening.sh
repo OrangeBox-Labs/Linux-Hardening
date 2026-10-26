@@ -36,10 +36,12 @@ get_el_major(){
   printf '%s\n' "$major"
 }
 backup_once(){
-  local src="$1"
+  local src="$1" backup=""
   [ -e "$src" ] || return 0
   [ ! -L "$src" ] || { echo "[ERROR] $src es un enlace simbólico; no se respalda ni modifica automáticamente."; return 1; }
-  mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" && cp -a "$src" "$BACKUP_DIR/$(basename "$src").before"
+  backup="$BACKUP_DIR/$(basename "$src").before"
+  [ -e "$backup" ] && return 0
+  mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" && cp -a "$src" "$backup"
 }
 
 password_parameter_description() {
@@ -188,6 +190,7 @@ password_aging_module(){
 }
 
 pam_audit_module(){
+  # Legacy EL6 controls use pam_cracklib.so and pam_tally2.so; audit only, never edit PAM blindly.
   echo -e "\n$BLUE### PAM / AUTHSELECT ###$NC"
   local os_major
   os_major="$(get_el_major)"
