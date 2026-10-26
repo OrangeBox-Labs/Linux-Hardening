@@ -29,6 +29,13 @@ grep -Fq 'if ! confirm_risky_change "$name"; then' "$CORE" || fail "se perdió c
 grep -Fq 'falta persistencia' "$SYSCTL" || fail "sysctl no distingue runtime correcto de persistencia ausente"
 grep -Fq '¿Confirmas persistir %s=%s en %s? [s/N]' "$SYSCTL" || fail "no hay confirmación para cambios solo de persistencia"
 
+# bash-full must leave the visual output to the single MOTD generator.
+BASH_HARDENING="$ROOT_DIR/bash-hardening.sh"
+grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$BASH_HARDENING" || fail "bash-full no identifica el MOTD como único propietario de la salida inicial"
+if grep -Eq 'echo "=== INFORMACION DE CONEXION ==="|echo "IP del cliente:|echo "Fecha/Hora:' "$BASH_HARDENING"; then
+  fail "bash-full no debe repetir la ficha de conexión del MOTD"
+fi
+
 # The pre-authentication banner owns the warning; the shell MOTD owns the unified session display.
 MOTD_LIB="$ROOT_DIR/lib/orangebox-motd.sh"
 [ -r "$MOTD_LIB" ] || fail "falta la librería del banner OrangeBox"
