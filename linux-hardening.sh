@@ -37,6 +37,8 @@ OK_COUNT=0
 NOT_APPLICABLE_COUNT=0
 WARNINGS=0
 ERRORS=0
+COMPANION_MODULES_RUN=0
+COMPANION_MODULES_FAILED=0
 PENDING_ONLY_AUDIT=false
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 section(){ echo -e "\n$BLUE### $1 ###$NC"; }
@@ -193,25 +195,49 @@ SSH_EXPECTED_SETTINGS=(
   "hostbasedauthentication|no|HostbasedAuthentication"
   "permituserenvironment|no|PermitUserEnvironment"
   "permitemptypasswords|no|PermitEmptyPasswords"
+  "permitrootlogin|no|PermitRootLogin"
+  "x11forwarding|no|X11Forwarding"
+  "allowtcpforwarding|no|AllowTcpForwarding"
+  "allowagentforwarding|no|AllowAgentForwarding"
   "maxauthtries|6|MaxAuthTries"
   "logingracetime|60|LoginGraceTime"
   "clientaliveinterval|300|ClientAliveInterval"
   "clientalivecountmax|2|ClientAliveCountMax"
   "loglevel|INFO|LogLevel"
 )
+
+ssh_setting_description() {
+  case "$1" in
+    ignorerhosts) echo "Ignora archivos .rhosts, que pueden permitir autenticación insegura basada en host." ;;
+    hostbasedauthentication) echo "Desactiva autenticación SSH basada solo en la identidad del host; puede afectar integraciones antiguas." ;;
+    permituserenvironment) echo "Evita que usuarios inyecten variables de entorno al iniciar sesión; puede romper entornos SSH que dependan de ellas." ;;
+    permitemptypasswords) echo "Impide contraseñas vacías en SSH." ;;
+    permitrootlogin) echo "Bloquea el inicio SSH directo como root; confirma que exista una cuenta administrativa funcional y sudo antes de aplicarlo." ;;
+    x11forwarding) echo "Deshabilita túneles gráficos X11 por SSH; aplicaciones GUI remotas dejarán de funcionar." ;;
+    allowtcpforwarding) echo "Deshabilita túneles TCP/puertos SSH; puede romper port-forwarding, bastiones y accesos a servicios internos." ;;
+    allowagentforwarding) echo "Deshabilita reenvío de SSH agent; puede afectar saltos SSH entre servidores." ;;
+    maxauthtries) echo "Limita intentos de autenticación por conexión; valores bajos pueden afectar automatizaciones con varios métodos." ;;
+    logingracetime) echo "Limita el tiempo para completar autenticación; clientes extremadamente lentos pueden no alcanzarlo." ;;
+    clientaliveinterval) echo "Envía pruebas a sesiones inactivas; junto con ClientAliveCountMax puede cerrar conexiones desconectadas o inactivas." ;;
+    clientalivecountmax) echo "Define cuántas pruebas SSH sin respuesta se toleran; valores bajos pueden cerrar conexiones en redes inestables." ;;
+    loglevel) echo "Registra eventos de autenticación con detalle INFO; elevarlo aumenta el volumen de logs." ;;
+    *) echo "Control de configuración SSH; revisar el valor efectivo antes de modificarlo." ;;
+  esac
+}
 SSH_PENDING_DIRECTIVES=()
 
 # Return codes: 0 = compliant; 1 = settings differ; 2 = cannot verify safely.
 # Optional report mode prints pending values before the confirmation prompt or during audit.
 ssh_report_unverifiable_settings() {
-  local reason="$1" setting rest desired directive
+  local reason="$1" setting rest desired directive key
   SSH_PENDING_DIRECTIVES=()
   for setting in "${SSH_EXPECTED_SETTINGS[@]}"; do
+    key="${setting%%|*}"
     rest="${setting#*|}"
     desired="${rest%%|*}"
     directive="${rest#*|}"
     SSH_PENDING_DIRECTIVES+=("$directive $desired")
-    warn "SSH $directive: no se pudo verificar; objetivo='$desired'; motivo: $reason."
+    warn "SSH $directive: no se pudo verificar; objetivo='$desired'; motivo: $reason. Qué hace: $(ssh_setting_description "$key")."
   done
 }
 
@@ -253,12 +279,12 @@ ssh_state_status() {
       status=1
       SSH_PENDING_DIRECTIVES+=("$directive $desired")
       case "$report" in
-        preflight) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
-        audit) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
-        apply) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'." ;;
+        preflight) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'. Qué hace: $(ssh_setting_description "$key")." ;;
+        audit) warn "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'. Qué hace: $(ssh_setting_description "$key")." ;;
+        apply) info "SSH pendiente: $directive actual='${actual:-no definido}'; objetivo='$desired'. Qué hace: $(ssh_setting_description "$key")." ;;
       esac
     elif [ "$report" = "audit" ] || [ "$report" = "apply" ]; then
-      ok "SSH $directive=$actual"
+      ok "SSH $directive=$actual. Qué hace: $(ssh_setting_description "$key")."
     fi
   done
   return "$status"
@@ -1491,17 +1517,19 @@ OrangeBox Linux Hardening $SCRIPT_VERSION
 Uso:
   $0                                Auditoría del baseline interno
   $0 --fix                          Modo interactivo: explica los riesgos y pregunta
-  $0 --fix --auto                   Aplica banners/Bash; audita y omite los módulos delicados
+  $0 --fix --auto                   Aplica banners; audita el resto sin cambios
   ./linux-hardening-audit.sh         Auditoría agregada, separada y de solo lectura
   $0 --fix --module banners         Fuerza MOTD, /etc/issue, /etc/issue.net y banner SSH
-  $0 --fix --module bash            Historial con fecha/hora y prompt por rol
+  $0 --fix --module bash-full       Audita y aplica hardening de Bash con confirmación
   $0 --fix --module synflood        Aplica SYN cookies, backlog y reintentos TCP persistentes
   $0 --fix --module network-full --allow-shorewall
                                     Autoriza explícitamente cambios de red con Shorewall
   $0 --module <modulo> [--fix] [--auto] [--allow-risky]
 
-Baseline interno (auditoría de pendientes corregibles):
-  ssh sudo kernel synflood rsyslog banners bash all
+Baseline genérico incluido en all:
+  ssh banners bash-full password-full sudo-full kernel-full network-full
+  auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full
+  selinux-setup time-sync services fapolicyd aide
 
 Módulos adicionales:
   aide audit-listeners auditd-full bash-full time-sync cpu-full cron-full
@@ -1516,8 +1544,9 @@ Evaluaciones independientes:
   ./cis-benchmark-check.sh       Evalúa exclusivamente el benchmark CIS.
 
 Seguridad:
-  --fix pregunta antes de cambios de riesgo y explica brevemente su impacto.
-  --fix --auto no hace preguntas: aplica únicamente banners/MOTD y Bash. Kernel, SYN flood y los demás módulos delicados quedan en auditoría sin aplicar cambios.
+  --fix primero audita cada módulo complementario y muestra sus parámetros pendientes; después explica el riesgo y pide confirmación antes de modificar.
+  --fix --auto no hace preguntas: aplica únicamente banners/MOTD; el resto queda en auditoría.
+  El baseline global audita sincronización horaria pero no cambia ntpd/chronyd. Para ello usa explícitamente --module time-sync --fix.
   --allow-risky omite las preguntas y autoriza los módulos clasificados como riesgosos.
   --allow-shorewall es una autorización separada para ejecutar network-full con Shorewall.
   --module firewall-rules está bloqueado: el generador de iptables vacía reglas y
@@ -1529,14 +1558,27 @@ EOF
 
 internal_module_requires_risk() {
   case "$1" in
-    ssh|sudo|kernel|synflood|rsyslog) return 0 ;;
+    ssh|sudo|kernel|synflood|rsyslog|bash) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 risk_description() {
   case "$1" in
-    ssh) echo "aplica solo controles SSH pendientes (intentos, tiempos de sesión y autenticación por host); se valida la sintaxis, pero revisa clientes e integraciones." ;;
+    ssh) echo "aplica controles SSH pendientes, incluyendo PermitRootLogin=no, X11Forwarding=no y desactivación de TCP/agent forwarding. Puede impedir el acceso directo como root, cortar túneles o GUI remotas; confirma una cuenta admin/sudo funcional, conserva esta sesión abierta y prueba una segunda conexión." ;;
+    bash-full) echo "configura perfiles, timeout de shells, historial y logging de comandos; TMOUT puede cerrar shells inactivas y el logging puede registrar argumentos sensibles. Puede afectar scripts/automatizaciones." ;;
+    cpu-full) echo "comprueba mitigaciones de CPU y parámetros de memoria; algunos ajustes pueden afectar depuración o aplicaciones antiguas." ;;
+    auditd-full) echo "configura reglas y límites de auditd; puede incrementar el uso de disco/logs y las reglas inmutables pueden requerir reinicio para cambiarlas." ;;
+    cron-full) echo "restringe permisos y usuarios de cron/at; puede impedir tareas de usuarios, scripts de hosting o automatizaciones que no sean de root." ;;
+    filesystem-full) echo "aplica flags de montajes, hidepid y bloqueo de módulos; noexec/nodev/nosuid puede romper aplicaciones y hidepid puede afectar agentes que inspeccionan procesos." ;;
+    kernel-full) echo "endurece sysctl, límites de recursos y core dumps; límites bajos pueden cortar procesos/archivos abiertos y desactivar core dumps limita el análisis post-mortem." ;;
+    network-full) echo "cambia sysctl de red y bloquea módulos de kernel; puede afectar routing asimétrico, VPN, protocolos especializados y conectividad. Con Shorewall, el módulo se abstiene de aplicar sin autorización expresa." ;;
+    password-full) echo "ajusta parámetros de calidad de contraseñas y algunos defaults; puede impedir nuevas contraseñas que no cumplan la política. La pila PAM/lockout no se edita automáticamente." ;;
+    sudo-full) echo "endurece sudo; use_pty requiere confirmación específica y puede afectar automatizaciones sin terminal, mientras que cambios de timeout modifican la duración de credenciales cacheadas." ;;
+    grub-full) echo "modifica parámetros de arranque y regenera grub.cfg; un error puede impedir arrancar y varios cambios requieren reinicio. Garantiza consola de recuperación/backup antes de aceptar." ;;
+    usb-storage) echo "bloquea módulos de almacenamiento USB; puede afectar discos USB, medios de recuperación y backups conectados por USB." ;;
+    selinux-setup) echo "solo cambia SELinux a Enforcing y/o persiste ese modo tras una confirmación específica; aplicaciones sin políticas/contextos adecuados pueden quedar bloqueadas. No habilita SELinux si está Disabled." ;;
+    time-sync) echo "puede modificar ntpd/chronyd o ajustar el reloj; puede afectar Kerberos/Samba AD, certificados y correlación de logs. El baseline general lo audita, pero no cambia NTP automáticamente." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "aplica el baseline sysctl acordado sin modificar net.ipv4.ip_forward; si el forwarding está activo usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
     synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
@@ -1592,10 +1634,12 @@ run_internal_module_with_confirmation() {
   if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
     case "$name" in
       ssh)
+        # Show every SSH control and its impact before asking for authorization.
+        ssh_state_status audit
         ssh_state_status preflight
         ssh_status=$?
         if [ "$ssh_status" -eq 0 ]; then
-          info "Los nueve controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+          info "Los controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
         elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
           if ! confirm_risky_change "$name"; then
             AUTO_FIX=false
@@ -1669,6 +1713,9 @@ run_internal_module_with_confirmation() {
 
 run_companion_module() {
   local name="$1" script="" fix_arg="--fix" audit_arg="" risky=false audit_only=false block_fix=false interactive=false
+  local apply_fix="$AUTO_FIX" child_rc=0
+  local -a audit_args=() fix_args=()
+
   if [ "$name" = "cis" ]; then
     die "El benchmark CIS es independiente de los módulos de hardening. Ejecuta: ./cis-benchmark-check.sh"
   fi
@@ -1684,91 +1731,103 @@ run_companion_module() {
     services-remove) script="desintalar-servicios-sin-usar.sh"; risky=true; interactive=true; fix_arg="" ;;
     usb-storage) script="disable-usb-storage.sh"; risky=true ;;
     firewall-rules)
-      die "Módulo bloqueado: generate-iptables-rules.sh vacía reglas, establece INPUT DROP y podría cortar SSH. En este host se usa Shorewall; no se aplicará un segundo firewall destructivo."
+      die "Módulo bloqueado: generate-iptables-rules.sh vacía reglas, establece INPUT DROP y podría cortar SSH. No se aplicará un segundo firewall destructivo."
       ;;
     grub-full) script="grub-hardening.sh"; risky=true ;;
     kernel-full) script="kernel-hardening.sh"; risky=true ;;
     lpe-2026) script="kernel-lpe-2026-mitigation.sh"; risky=true; audit_arg="--check" ;;
-    network-full) script="network-hardening.sh"; risky=true ;;
+    network-full) script="network-hardening.sh"; risky=true; audit_arg="--check" ;;
     password-full) script="password-hardening.sh"; risky=true ;;
     post-install)
       if [ "$AUTO_FIX" = true ]; then
-        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta de auditoría de solo lectura y puede cambiar el host; SELinux solo se audita."
+        die "post-install no se ejecuta desde el orquestador: no dispone de una ruta segura de auditoría de solo lectura."
       fi
-      warn "Se omite post-install: puede instalar paquetes, cambiar GRUB y habilitar servicios incluso sin --fix; SELinux solo se audita."
+      warn "Se omite post-install: puede instalar paquetes, cambiar GRUB y habilitar servicios incluso sin --fix."
       return 0
       ;;
     gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
     xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
     rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
-    selinux-setup)
-      info "selinux-setup bloqueado por política OrangeBox: SELinux solo se audita; nunca se cambian su modo, configuración, contextos ni se solicita reinicio."
-      if command -v getenforce >/dev/null 2>&1; then
-        info "Estado SELinux actual: $(getenforce 2>/dev/null || echo desconocido)"
-      else
-        warn "getenforce no disponible; no se puede determinar el estado actual de SELinux"
-      fi
-      return 0
-      ;;
+    selinux-setup) script="selinux-secure-setup.sh"; fix_arg="--fix"; risky=false ;;
     ssh-cis) script="ssh-hardening.sh"; risky=true ;;
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
     sudo-full) script="sudo-hardening.sh"; risky=true ;;
     filesystem-full) script="FS-hardening.sh"; risky=true; audit_arg="--check"; fix_arg="" ;;
-
     *) die "Módulo desconocido: $name" ;;
   esac
-
-  local apply_fix="$AUTO_FIX" skip_without_audit=false
-  if [ "$AUTO_FIX" = true ] && [ "$block_fix" = true ] && [ "$AUTO_MODE" != true ]; then
-    die "Se bloquea --fix para $name: es para preparación inicial y puede modificar GRUB, instalar paquetes y habilitar servicios. SELinux solo se audita."
-  fi
-
-  if [ "$AUTO_FIX" = true ] && [ "$risky" = true ]; then
-    if [ "$AUTO_MODE" = true ]; then
-      echo
-      echo -e "$YELLOW[--auto] Se omitirá la aplicación de '$name'.$NC"
-      echo "Qué haría: $(risk_description "$name")"
-      apply_fix=false
-    elif [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; then
-      info "AIDE no está instalado; aide-install.sh explicará sus efectos y solicitará consentimiento explícito."
-    elif ! confirm_risky_change "$name"; then
-      apply_fix=false
-    fi
-    if [ "$apply_fix" != true ] && [ -z "$audit_arg" ] && [ "$audit_only" != true ]; then
-      warn "No se ejecutó '$name': no tiene una ruta de auditoría segura declarada en el orquestador."
-      return 0
-    fi
-  fi
 
   if [ ! -f "$SCRIPT_DIR/$script" ]; then
     die "No existe $SCRIPT_DIR/$script. Ejecuta este módulo desde el checkout completo del repositorio."
   fi
-  if [ "$apply_fix" != true ] && [ "$interactive" = true ]; then
-    warn "$name no ofrece auditoría no interactiva; se omite."
+  [ -n "$audit_arg" ] && audit_args=("$audit_arg")
+  [ -n "$fix_arg" ] && fix_args=("$fix_arg")
+
+  # Time sync is audit-only during global --fix. For intentional NTP changes, select
+  # --module time-sync --fix; clock changes can affect Kerberos/Samba AD and log correlation.
+  if [ "$AUTO_FIX" = true ] && [ "$MODULE" = "all" ] && [ "$name" = "time-sync" ]; then
+    echo
+    echo "[INFO] time-sync se audita en el baseline global, pero --fix no cambiará ntpd/chronyd. Para tratarlo explícitamente: --module time-sync --fix."
+    apply_fix=false
+  fi
+
+  if [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ] && [ "$risky" = true ]; then
+    echo
+    echo -e "$YELLOW[--auto] Se omite la aplicación de '$name'. Qué haría: $(risk_description "$name")$NC"
+    apply_fix=false
+  fi
+
+  # Audit first, then ask for consent. Do not mutate when audit cannot be performed safely.
+  echo
+  echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
+  if bash "$SCRIPT_DIR/$script" "${audit_args[@]}"; then
+    child_rc=0
+  else
+    child_rc=$?
+  fi
+
+  if [ "$apply_fix" != true ] || [ "$audit_only" = true ]; then
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    [ "$child_rc" -eq 0 ] || COMPANION_MODULES_FAILED=$((COMPANION_MODULES_FAILED + 1))
+    if [ "$audit_only" = true ]; then echo "[INFO] '$name' es de solo auditoría; no se aplicaron cambios."; fi
     return 0
   fi
 
-  local -a args=()
-  if [ "$apply_fix" = true ]; then
-    if [ "$audit_only" = true ]; then
-      warn "$name es de auditoría: no se aplicarán cambios desde este módulo."
-    elif [ "$name" = "network-full" ]; then
-      args=(--fix)
-      if [ "$ALLOW_SHOREWALL" = true ]; then
-        args+=(--allow-shorewall)
-      fi
-    elif [ -n "$fix_arg" ]; then
-      args=("$fix_arg")
-    fi
-  elif [ -n "$audit_arg" ]; then
-    args=("$audit_arg")
+  if [ "$interactive" = true ]; then
+    warn "$name no ofrece auditoría no interactiva; se omite."
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    return 0
   fi
+
+  # AIDE has its own explicit installation consent when package/base is missing.
+  if [ "$risky" = true ] && ! { [ "$name" = "aide" ] && ! rpm -q aide >/dev/null 2>&1; }; then
+    if ! confirm_risky_change "$name"; then
+      echo "[INFO] Se conserva la configuración actual de '$name'. La auditoría anterior muestra los pendientes."
+      COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+      return 0
+    fi
+  fi
+
+  # Shorewall has an additional explicit safety gate; global --fix won't bypass it.
+  if [ "$name" = "network-full" ] && shorewall_is_active && [ "$ALLOW_SHOREWALL" != true ]; then
+    echo "[WARN] Shorewall está activo. Se auditó la red, pero no se aplican cambios desde el baseline global; usa --module network-full --fix --allow-shorewall tras revisar el impacto."
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    return 0
+  fi
+
   echo
-  echo "========== MÓDULO DEL REPOSITORIO: $name ($script) =========="
-  if bash "$SCRIPT_DIR/$script" "${args[@]}"; then
-    ok "Módulo $name finalizado"
+  echo "[INFO] Aplicando '$name' después del preflight y la autorización."
+  if [ "$name" = "network-full" ]; then
+    fix_args=(--fix)
+    [ "$ALLOW_SHOREWALL" = true ] && fix_args+=(--allow-shorewall)
+  fi
+  if bash "$SCRIPT_DIR/$script" "${fix_args[@]}"; then
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    echo "[OK] Módulo $name finalizado."
   else
-    warn "Módulo $name terminó con código distinto de cero; revisar la salida anterior"
+    child_rc=$?
+    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+    COMPANION_MODULES_FAILED=$((COMPANION_MODULES_FAILED + 1))
+    echo "[WARN] Módulo $name finalizó con código $child_rc; revisar su salida."
   fi
 }
 
@@ -1837,43 +1896,41 @@ main() {
   if [ "$AUDIT_MODE" = true ] || { [ "$MODULE" = "all" ] && [ "$AUTO_FIX" != true ]; }; then PENDING_ONLY_AUDIT=true; fi
   detect_os
   if $PENDING_ONLY_AUDIT; then
-    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría completa del baseline ($OS_ID $OS_VERSION)"
+    echo "OrangeBox Linux Hardening $SCRIPT_VERSION — auditoría del baseline genérico ($OS_ID $OS_VERSION)"
   fi
-  if [ "$AUTO_FIX" = true ]; then
-    prepare_backup
-  fi
+  if [ "$AUTO_FIX" = true ]; then prepare_backup; fi
 
+  local m
   if [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ] && [ "$AUTO_MODE" = true ]; then
-    warn "MODO --FIX --AUTO: se aplican banners/MOTD y Bash; los módulos delicados (incluidos kernel/SYN flood) quedan en auditoría."
+    warn "MODO --FIX --AUTO: solo se aplican banners/MOTD. Bash, SSH, kernel, red, auditd, filesystem y servicios quedan en auditoría."
     run_module banners
-    run_module bash
-
-    local previous_fix="$AUTO_FIX" m
+    local previous_fix="$AUTO_FIX"
     AUTO_FIX=false
-    for m in ssh sudo kernel synflood rsyslog; do
+    for m in ssh bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
+    run_module services
+    run_module fapolicyd
     AUTO_FIX="$previous_fix"
+    aide_audit_module
     echo
-    echo "Modo automático terminado: solo se aplicaron banners/MOTD y Bash; los módulos delicados quedaron en auditoría sin cambios."
+    echo "Modo --auto terminado: se aplicaron solo banners/MOTD; los demás módulos fueron auditados sin modificaciones."
   elif [ "$MODULE" = "all" ] && [ "$AUTO_FIX" = true ]; then
-    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: banners/MOTD y Bash se aplican directamente; los módulos verifican primero el estado y preguntan solo por cambios pendientes."
-    echo -e "$BLUE[INFO]$NC Los controles sysctl preguntan por parámetro; si ya cumplen, solo muestran [OK] y no se modifican."
+    echo -e "$BLUE[INFO]$NC MODO --FIX INTERACTIVO: cada módulo complementario muestra primero su auditoría; después solicita autorización antes de cambios con riesgo."
+    echo -e "$BLUE[INFO]$NC Algunos controles kernel/red/montajes piden una confirmación por parámetro. El baseline global no modifica NTP; solo lo audita."
     run_module banners
-    run_module bash
-
-    local m
-    for m in ssh sudo kernel synflood rsyslog; do
-      run_internal_module_with_confirmation "$m"
+    run_internal_module_with_confirmation ssh
+    for m in bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup; do
+      run_module "$m"
     done
-
-    # AIDE is optional because Wazuh FIM may already cover the same files.
-    # Its installer owns the consent prompt and must explain that tradeoff.
+    # Explicitly preserve time-sync settings during a global baseline --fix.
+    run_module time-sync
+    run_module services
+    run_module fapolicyd
     run_module aide
   elif [ "$MODULE" = "all" ]; then
-    info "MODO AUDITORÍA: sin cambios"
-    local m
-    for m in ssh sudo kernel synflood rsyslog banners bash; do
+    info "MODO AUDITORÍA: solo lectura"
+    for m in ssh banners bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
       run_module "$m"
     done
     aide_audit_module
@@ -1902,22 +1959,26 @@ main() {
 
   echo -e "\n$GREEN============================================================$NC"
   echo -e "$GREEN OrangeBox Linux Hardening $SCRIPT_VERSION - FIN $NC"
-  if $PENDING_ONLY_AUDIT; then
-    echo "Controles correctos: $OK_COUNT"
-    echo "No aplicables: $NOT_APPLICABLE_COUNT"
-    echo "Pendientes: $WARNINGS"
-    echo "Errores: $ERRORS"
-    if [ "$WARNINGS" -eq 0 ]; then
-      echo "No se detectaron correcciones pendientes."
+  if [ "$PENDING_ONLY_AUDIT" = true ]; then
+    echo "Controles correctos (módulos internos): $OK_COUNT"
+    echo "No aplicables (módulos internos): $NOT_APPLICABLE_COUNT"
+    echo "Pendientes (módulos internos): $WARNINGS"
+    echo "Módulos complementarios ejecutados: $COMPANION_MODULES_RUN"
+    echo "Errores de ejecución de módulos complementarios: $COMPANION_MODULES_FAILED"
+    echo "Los módulos complementarios imprimen sus propios estados y resúmenes; sus contadores no se mezclan con los del baseline interno."
+    if [ "$WARNINGS" -eq 0 ] && [ "$COMPANION_MODULES_FAILED" -eq 0 ]; then
+      echo "No se detectaron correcciones pendientes en los módulos internos."
     else
-      echo "Ejecuta ./linux-hardening.sh --fix para revisar y confirmar los cambios."
+      echo "Ejecuta ./linux-hardening.sh --fix para revisar auditorías y confirmar los cambios deseados."
     fi
   else
     echo "Correcciones: $FIXED"
     echo "Advertencias: $WARNINGS"
     echo "Errores: $ERRORS"
+    echo "Módulos complementarios ejecutados: $COMPANION_MODULES_RUN"
+    echo "Módulos complementarios con error: $COMPANION_MODULES_FAILED"
     if [ "$AUTO_FIX" = true ]; then echo "Backup: $BACKUP_DIR"; else echo "Backup: no creado (modo auditoría)"; fi
   fi
   echo -e "$GREEN============================================================$NC"
 }
-main "$@"
+

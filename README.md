@@ -57,6 +57,12 @@ La filosofía actual de OrangeBox es bastante simple: **primero comprobar, despu
 
 ## 🧠 Hardening idempotente
 
+El baseline global de `linux-hardening.sh` audita los parámetros de SSH, Bash, contraseñas/PAM, sudo, kernel, red, auditd, cron/at, USB storage, GRUB, filesystem/montajes, rsyslog/journald y SELinux. Cada módulo complementario muestra sus propios estados y resumen; sus contadores se mantienen separados para no confundir módulos ejecutados con controles aprobados.
+
+Al ejecutar `--fix`, el orquestador ejecuta primero la auditoría de cada módulo y después presenta el alcance y pide confirmación antes de los cambios con riesgo. Los sysctl y algunas operaciones de red requieren confirmación adicional por parámetro. `--fix --auto` solo aplica los banners/MOTD; el resto queda en auditoría, sin modificaciones.
+
+La sincronización horaria se evalúa en el baseline global, pero no se reconfigura con `--fix` general, porque modificar ntpd/chronyd puede afectar autenticación Kerberos/Samba AD, certificados y correlación temporal. Solo se trata si se selecciona explícitamente `--module time-sync --fix`.
+
 Los módulos principales comprueban primero si el sistema ya cumple el objetivo.
 
 Si un parámetro ya está correcto, se muestra `[OK]` y no se vuelve a modificar ni se solicita autorización innecesaria.

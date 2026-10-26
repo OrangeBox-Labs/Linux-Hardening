@@ -11,7 +11,10 @@ if grep -Eq 'source .*lib/(listener-firewall-audit|firewall-detect)\.sh|lfa_audi
   fail "el orquestador aún incorpora la auditoría detallada de firewall"
 fi
 grep -Fq 'PENDING_ONLY_AUDIT=true' "$MAIN" || fail "falta el modo de pendientes corregibles"
-grep -Fq 'for m in ssh sudo kernel synflood rsyslog banners bash; do' "$MAIN" || fail "hay módulos no correctivos en el reporte principal"
+for module in ssh banners bash-full password-full sudo-full kernel-full network-full auditd-full cron-full usb-storage grub-full filesystem-full rsyslog-full selinux-setup time-sync services fapolicyd; do
+  grep -Fq "$module" "$MAIN" || fail "el baseline global omite el módulo $module"
+done
+grep -Fq 'COMPANION_MODULES_RUN' "$MAIN" || fail "falta resumen de módulos complementarios"
 grep -Fq 'firewall) die "La auditoría de firewall es independiente:' "$MAIN" || fail "firewall no remite al comando independiente"
 grep -Fq 'listening) die "El inventario de sockets es independiente:' "$MAIN" || fail "listeners no remite al comando independiente"
 grep -Fq 'source "$SCRIPT_DIR/lib/firewall-detect.sh"' "$FIREWALL" || fail "falta detección de backend"
@@ -29,9 +32,9 @@ grep -Fq 'firewall_report_detected' "$FIREWALL" || fail "falta inventario de fir
 grep -Fq 'lfa_audit_listener_firewall' "$FIREWALL" || fail "falta correlación de INPUT/listeners"
 # Default audit must present both success and pending counts.
 grep -Fq 'OK_COUNT=0' "$MAIN" || fail "falta el contador de controles correctos"
-grep -Fq 'echo "Controles correctos: $OK_COUNT"' "$MAIN" || fail "falta el resumen de controles correctos"
-grep -Fq 'echo "Pendientes: $WARNINGS"' "$MAIN" || fail "falta el resumen de pendientes"
-grep -Fq 'echo "Errores: $ERRORS"' "$MAIN" || fail "falta el resumen de errores"
+grep -Fq 'echo "Controles correctos (módulos internos): $OK_COUNT"' "$MAIN" || fail "falta el resumen de controles correctos"
+grep -Fq 'echo "Pendientes (módulos internos): $WARNINGS"' "$MAIN" || fail "falta el resumen de pendientes"
+grep -Fq 'echo "Errores de ejecución de módulos complementarios: $COMPANION_MODULES_FAILED"' "$MAIN" || fail "falta el resumen de errores complementarios"
 grep -Fq 'case "$level" in INFO|CAMBIO\ PROPUESTO) return 0 ;; esac' "$ROOT_DIR/lib/sysctl-safe.sh" || fail "la biblioteca sysctl sigue ocultando los estados OK"
 
 # Exercise the helper with the compact-audit flag exactly as the baseline does.
@@ -113,6 +116,10 @@ grep -Fq 'net.ipv6.conf.default.accept_ra: este kernel no expone' "$MAIN" || fai
 grep -Fq 'journald no aplica a CentOS/RHEL 6' "$MAIN" || fail "falta estado N/A de journald en EL6"
 
 grep -Fq 'ssh_report_unverifiable_settings "$reason"' "$MAIN" || fail "SSH no muestra todos los parámetros cuando no puede verificar sshd"
+grep -Fq 'permitrootlogin|no|PermitRootLogin' "$MAIN" || fail "SSH no incluye PermitRootLogin=no como control auditable"
+grep -Fq 'allowtcpforwarding|no|AllowTcpForwarding' "$MAIN" || fail "SSH no incluye AllowTcpForwarding=no como control auditable"
+grep -Fq 'ssh_setting_description "$key"' "$MAIN" || fail "SSH no explica la función/impacto de cada directiva"
+grep -Fq 'read-only preflight before --fix' "$MAIN" || fail "los módulos complementarios no muestran auditoría previa a --fix"
 grep -Fq 'bash_audit_system_bashrc_include' "$MAIN" || fail "Bash puede ocultar el include de /etc/bashrc si falla mktemp"
 grep -Fq 'banners_audit_unverifiable()' "$MAIN" || fail "los controles banner/MOTD pueden desaparecer si falla la generación temporal"
 grep -Fq 'SSH $directive: no se pudo verificar' "$MAIN" || fail "falta el estado no verificable por directiva SSH"
