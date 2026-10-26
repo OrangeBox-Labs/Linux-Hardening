@@ -33,7 +33,7 @@ Sabemos que existen herramientas como Lynis y OpenSCAP, y son excelentes. Pero e
 
 ## ¿Qué hace este script?
 
-El script ejecuta aproximadamente 150 tests basados en CIS Benchmark, organizados en las siguientes secciones:
+El script ejecuta un subconjunto de controles basado en CIS Benchmark, organizado en las siguientes secciones. La cantidad de pruebas implementadas no implica cobertura completa ni certificación de cumplimiento del benchmark oficial.
 
 | Sección | Descripción |
 |---------|-------------|
@@ -71,11 +71,22 @@ El script ejecuta aproximadamente 150 tests basados en CIS Benchmark, organizado
 
 ---
 
+## Referencias CIS versionadas
+
+El script identifica el sistema y muestra una referencia CIS conocida, pero la cobertura local sigue siendo parcial. El porcentaje impreso corresponde solo a las pruebas implementadas por OrangeBox, no al total de controles oficiales. El mapa se documenta en cis-profile-versions.md.
+
+Versiones catalogadas a 26 de octubre de 2026:
+- RHEL 8: 4.0.0; RHEL 9: 3.0.0; RHEL 10: 1.0.1.
+- AlmaLinux 8: 4.0.0; AlmaLinux 9: 3.0.0; AlmaLinux 10: 1.0.0.
+- Rocky Linux 8/9: 3.0.0; Rocky Linux 10: 1.0.0.
+- Oracle Linux 8: 4.0.0; Oracle Linux 9: 3.0.0; Oracle Linux 10: 1.0.0.
+- CentOS Linux/Stream: no se le asigna automáticamente un benchmark actual de RHEL como si fuera equivalente.
+
 ## Requisitos
 
-- Sistema operativo: RHEL 7, 8, 9, 10 o derivados (CentOS, Rocky Linux, AlmaLinux, Oracle Linux)
-- Usuario: root (o sudo con permisos completos)
-- Dependencias: Solo comandos estándar del sistema (no requiere instalación adicional)
+- Sistema operativo: RHEL, AlmaLinux, Rocky Linux, Oracle Linux o CentOS/Stream EL 7–10 (según controles disponibles; CentOS 6 usa auditorías legacy separadas).
+- Usuario: root (o sudo con permisos completos).
+- Dependencias: Solo comandos estándar del sistema (no requiere instalación adicional).
 
 ---
 

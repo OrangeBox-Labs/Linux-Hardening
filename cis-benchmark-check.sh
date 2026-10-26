@@ -21,6 +21,61 @@ TOTAL_TESTS=0
 PASSED=0
 FAILED=0
 WARN=0
+CIS_PROFILE="No determinado"
+CIS_PROFILE_STATUS="Perfil oficial no mapeado"
+CIS_PROFILE_VERSION=""
+
+# Detect the latest published CIS benchmark for the detected EL-family release.
+# The local checker remains a subset of controls and must not claim full CIS conformance.
+detect_cis_profile() {
+  local os_id="" version="" major="" pretty=""
+  if [ -r /etc/os-release ]; then
+    os_id="$(awk -F= '/^ID=/{gsub(/"/, "", $2); print tolower($2); exit}' /etc/os-release)"
+    version="$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release)"
+    pretty="$(awk -F= '/^PRETTY_NAME=/{sub(/^[^=]*=/, ""); gsub(/"/, ""); print; exit}' /etc/os-release)"
+  elif [ -r /etc/redhat-release ]; then
+    pretty="$(cat /etc/redhat-release)"
+    os_id="$(printf '%s' "$pretty" | tr '[:upper:]' '[:lower:]')"
+    version="$(printf '%s\n' "$pretty" | sed -nE 's/.*release[[:space:]]+([0-9]+(\.[0-9]+)*).*/\1/p')"
+  fi
+  major="${version%%.*}"
+
+  case "$os_id:$major" in
+    rhel:8) CIS_PROFILE="CIS Red Hat Enterprise Linux 8 Benchmark"; CIS_PROFILE_VERSION="4.0.0" ;;
+    rhel:9) CIS_PROFILE="CIS Red Hat Enterprise Linux 9 Benchmark"; CIS_PROFILE_VERSION="3.0.0" ;;
+    rhel:10) CIS_PROFILE="CIS Red Hat Enterprise Linux 10 Benchmark"; CIS_PROFILE_VERSION="1.0.1" ;;
+    almalinux:8) CIS_PROFILE="CIS AlmaLinux OS 8 Benchmark"; CIS_PROFILE_VERSION="4.0.0" ;;
+    almalinux:9) CIS_PROFILE="CIS AlmaLinux OS 9 Benchmark"; CIS_PROFILE_VERSION="3.0.0" ;;
+    almalinux:10) CIS_PROFILE="CIS AlmaLinux OS 10 Benchmark"; CIS_PROFILE_VERSION="1.0.0" ;;
+    rocky:8) CIS_PROFILE="CIS Rocky Linux 8 Benchmark"; CIS_PROFILE_VERSION="3.0.0" ;;
+    rocky:9) CIS_PROFILE="CIS Rocky Linux 9 Benchmark"; CIS_PROFILE_VERSION="3.0.0" ;;
+    rocky:10) CIS_PROFILE="CIS Rocky Linux 10 Benchmark"; CIS_PROFILE_VERSION="1.0.0" ;;
+    ol:8|oracle:8) CIS_PROFILE="CIS Oracle Linux 8 Benchmark"; CIS_PROFILE_VERSION="4.0.0" ;;
+    ol:9|oracle:9) CIS_PROFILE="CIS Oracle Linux 9 Benchmark"; CIS_PROFILE_VERSION="3.0.0" ;;
+    ol:10|oracle:10) CIS_PROFILE="CIS Oracle Linux 10 Benchmark"; CIS_PROFILE_VERSION="1.0.0" ;;
+    centos:8)
+      if printf '%s' "$pretty" | grep -qi 'stream'; then
+        CIS_PROFILE="CentOS Stream 8 (sin perfil CIS vigente exacto)"
+        CIS_PROFILE_STATUS="Sistema fuera de soporte/perfil no equivalente"
+      else
+        CIS_PROFILE="CentOS 8 legacy (perfil vigente no mapeado)"
+      fi
+      ;;
+    centos:*)
+      CIS_PROFILE="CentOS $major (perfil CIS vigente exacto no mapeado)"
+      CIS_PROFILE_STATUS="Legacy/versión no mapeada; pruebas locales únicamente"
+      ;;
+    *)
+      CIS_PROFILE="${pretty:-Distribución EL no reconocida por el mapa CIS}"
+      CIS_PROFILE_STATUS="Perfil oficial no mapeado; pruebas locales únicamente"
+      ;;
+  esac
+
+  if [ -n "$CIS_PROFILE_VERSION" ]; then
+    CIS_PROFILE="$CIS_PROFILE v$CIS_PROFILE_VERSION"
+    CIS_PROFILE_STATUS="Referencia catalogada; cobertura de este script parcial"
+  fi
+}
 
 # ==============================================
 # FUNCION PARA ESCRIBIR EN REPORTE Y PANTALLA
@@ -513,11 +568,22 @@ check_aide() {
 # 1.3.2 - ASEGURAR VERIFICACION PERIODICA DE INTEGRIDAD
 # ==============================================
 check_aide_timer() {
-  if systemctl is-enabled aidecheck.timer &>/dev/null; then
-    log_result "PASS" "1.3.2 - Asegurar verificacion periodica de integridad" "" "" "$GREEN"
+  local timer_unit=false service_unit=false
+  { [ -f /etc/systemd/system/aidecheck.timer ] || [ -f /usr/lib/systemd/system/aidecheck.timer ] || [ -f /lib/systemd/system/aidecheck.timer ]; } && timer_unit=true
+  { [ -f /etc/systemd/system/aidecheck.service ] || [ -f /usr/lib/systemd/system/aidecheck.service ] || [ -f /lib/systemd/system/aidecheck.service ]; } && service_unit=true
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "systemctl no está disponible; no se pudo verificar el timer." "Validar el mecanismo de scheduling apropiado para este sistema." "$YELLOW"
+    return 2
+  fi
+  if systemctl is-enabled --quiet aidecheck.timer 2>/dev/null &&
+     systemctl is-active --quiet aidecheck.timer 2>/dev/null &&
+     $timer_unit && $service_unit &&
+     command -v aide >/dev/null 2>&1; then
+    log_result "PASS" "1.3.2 - Asegurar verificacion periodica de integridad" "aidecheck.timer habilitado/activo; unidad de servicio presente y ejecutable aide disponible." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "aidecheck.timer no esta habilitado" "Crear servicio y timer de systemd para ejecutar aide --check diariamente. Habilitar con: systemctl enable aidecheck.timer" "$YELLOW"
+  log_result "WARN" "1.3.2 - Asegurar verificacion periodica de integridad" "No se comprobó el timer y servicio completos (enabled/active/unit files/aide)." "Revisar systemctl status aidecheck.timer, systemctl cat aidecheck.timer aidecheck.service y journalctl -u aidecheck.service." "$YELLOW"
   return 2
 }
 
@@ -765,12 +831,33 @@ check_issue_net_perms() {
 # 2.1.1 - ASEGURAR SINCRONIZACION DE TIEMPO EN USO
 # ==============================================
 check_chrony() {
-  if rpm -q chrony &>/dev/null; then
-    log_result "PASS" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "" "" "$GREEN"
-    return 0
+  local tracking="" stratum="" leap="" sources=""
+  if ! rpm -q chrony &>/dev/null; then
+    log_result "FAIL" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chrony no esta instalado" "Instalar chrony solo después de confirmar que no existe otro servicio NTP necesario." "$RED"
+    return 1
   fi
-  log_result "FAIL" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chrony no esta instalado" "Instalar chrony: dnf install chrony -y. Configurar servidores NTP en /etc/chrony.conf. Habilitar: systemctl enable --now chronyd" "$RED"
-  return 1
+  if ! command -v chronyc >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
+    log_result "WARN" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chrony está instalado, pero no se dispone de las herramientas necesarias para comprobar servicio y estado." "Verificar manualmente systemctl status chronyd, chronyc tracking y chronyc sources -n." "$YELLOW"
+    return 2
+  fi
+  if ! systemctl is-active --quiet chronyd 2>/dev/null; then
+    log_result "FAIL" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chronyd no está activo aunque el paquete está instalado." "Investigar el servicio y su configuración antes de reiniciarlo; los saltos de hora pueden afectar autenticación, certificados y logs." "$RED"
+    return 1
+  fi
+  tracking="$(chronyc tracking 2>/dev/null)" || tracking=""
+  sources="$(chronyc sources -n 2>/dev/null)" || sources=""
+  stratum="$(printf '%s\n' "$tracking" | awk -F: '/^[[:space:]]*Stratum:/{gsub(/[[:space:]]/, "", $2); print $2; exit}')"
+  leap="$(printf '%s\n' "$tracking" | awk -F: '/^[[:space:]]*Leap status:/{sub(/^[[:space:]]*/, "", $2); print $2; exit}')"
+  if [ -z "$stratum" ] || [ -z "$leap" ] || ! [[ "$stratum" =~ ^[0-9]+$ ]]; then
+    log_result "WARN" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chronyd está activo, pero chronyc tracking no permitió validar la sincronización." "Revisar chronyc tracking, chronyc sources -n y los logs de chronyd." "$YELLOW"
+    return 2
+  fi
+  if [ "$stratum" -ge 16 ] || [ "$leap" != "Normal" ] || ! printf '%s\n' "$sources" | awk '$1 ~ /^\^\*/ {found=1} END {exit(found ? 0 : 1)}'; then
+    log_result "WARN" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chronyd está activo, pero no hay fuente seleccionada válida (Stratum=$stratum; Leap status=$leap)." "Validar conectividad y fuentes NTP. No cambiar el servicio automáticamente desde esta auditoría." "$YELLOW"
+    return 2
+  fi
+  log_result "PASS" "2.1.1 - Asegurar sincronizacion de tiempo en uso" "chronyd activo; fuente seleccionada, Stratum=$stratum y Leap status=$leap." "" "$GREEN"
+  return 0
 }
 
 # ==============================================
@@ -945,11 +1032,26 @@ check_dnsmasq() {
 # 2.2.15 - ASEGURAR MTA EN MODO SOLO LOCAL
 # ==============================================
 check_mta_local() {
-  if ! ss -lntu 2>/dev/null | grep -q ":25 "; then
-    log_result "PASS" "2.2.15 - Asegurar MTA configurado en modo solo local" "" "" "$GREEN"
+  local sockets="" remote=""
+  if command -v ss >/dev/null 2>&1; then
+    sockets="$(ss -lnt 2>/dev/null)" || sockets=""
+  elif command -v netstat >/dev/null 2>&1; then
+    sockets="$(netstat -lnt 2>/dev/null)" || sockets=""
+  else
+    log_result "WARN" "2.2.15 - Asegurar MTA configurado en modo solo local" "No se dispone de ss ni netstat; no se puede validar el bind del puerto 25." "Inspeccionar manualmente los sockets TCP en el puerto 25 y confirmar sus direcciones." "$YELLOW"
+    return 2
+  fi
+  remote="$(printf '%s\n' "$sockets" | awk '
+    /:25([[:space:]]|$)/ {
+      local_addr=""
+      for (i=1;i<=NF;i++) if ($i ~ /:25$/) { local_addr=$i; break }
+      if (local_addr != "" && local_addr !~ /^(127\.|\[::1\]:|::1:|localhost:)/) print local_addr
+    }')"
+  if [ -z "$remote" ]; then
+    log_result "PASS" "2.2.15 - Asegurar MTA configurado en modo solo local" "No se detectó listener TCP/25 en interfaces no-loopback por ss/netstat." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "2.2.15 - Asegurar MTA configurado en modo solo local" "MTA escuchando en puerto 25" "Configurar Postfix: editar /etc/postfix/main.cf y establecer inet_interfaces = localhost. Reiniciar: systemctl restart postfix" "$YELLOW"
+  log_result "WARN" "2.2.15 - Asegurar MTA configurado en modo solo local" "Listeners TCP/25 en direcciones no-loopback: $(printf '%s' "$remote" | tr '\n' ' ')." "Confirmar si el servidor necesita recibir correo desde otras máquinas; no cambiar inet_interfaces sin validar el flujo de correo." "$YELLOW"
   return 2
 }
 
@@ -1643,19 +1745,36 @@ check_ssh_grace_time() {
 # 5.2.20 - TIMEOUT DE SESION SSH (CORREGIDO)
 # ==============================================
 check_ssh_idle_timeout() {
-  local interval=$(sshd -T 2>/dev/null | grep -i "clientaliveinterval" | awk '{print $2}')
-  local count=$(sshd -T 2>/dev/null | grep -i "clientalivecountmax" | awk '{print $2}')
+  local effective="" interval="" count="" os_major=""
+  effective="$(sshd -T 2>/dev/null)" || effective=""
+  interval="$(printf '%s\n' "$effective" | awk '$1=="clientaliveinterval"{print $2; exit}')"
+  count="$(printf '%s\n' "$effective" | awk '$1=="clientalivecountmax"{print $2; exit}')"
+  if [ -r /etc/os-release ]; then
+    os_major="$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); split($2,v,"."); print v[1]; exit}' /etc/os-release)"
+  elif [ -r /etc/redhat-release ]; then
+    os_major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\1/p' /etc/redhat-release | head -1)"
+  fi
 
-  if [ -z "$interval" ] || [ -z "$count" ]; then
-    log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Parametros no encontrados en configuracion activa" "Configurar /etc/ssh/sshd_config: ClientAliveInterval 300 y ClientAliveCountMax 0. Reiniciar sshd" "$YELLOW"
+  if ! [[ "$interval" =~ ^[0-9]+$ ]] || ! [[ "$count" =~ ^[0-9]+$ ]]; then
+    log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "sshd -T no entregó valores numéricos para ClientAliveInterval/ClientAliveCountMax." "Validar sshd -t y sshd -T; los valores no verificados no se consideran cumplimiento." "$YELLOW"
     return 2
   fi
 
-  if [ "$interval" -gt 0 ] && [ "$count" -ge 0 ]; then
-    log_result "PASS" "5.2.20 - Asegurar timeout de sesion SSH configurado" "ClientAliveInterval=$interval ClientAliveCountMax=$count" "" "$GREEN"
+  # OpenSSH 8.2+ uses ClientAliveCountMax=0 to disable disconnects, unlike older versions.
+  if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -ge 8 ]; then
+    if [ "$interval" -gt 0 ] && [ "$interval" -le 300 ] && [ "$count" -ge 1 ] && [ "$count" -le 3 ]; then
+      log_result "PASS" "5.2.20 - Asegurar timeout de sesion SSH configurado" "ClientAliveInterval=$interval; ClientAliveCountMax=$count; timeout efectivo en EL8+." "" "$GREEN"
+      return 0
+    fi
+    log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Valores actuales: ClientAliveInterval=$interval ClientAliveCountMax=$count." "Mantener ClientAliveInterval entre 1 y 300 y ClientAliveCountMax entre 1 y 3 en EL8+; cero puede deshabilitar la terminación en OpenSSH moderno. Cambiarlo puede cerrar sesiones SSH inactivas." "$YELLOW"
+    return 2
+  fi
+
+  if [ "$interval" -gt 0 ] && [ "$interval" -le 300 ] && [ "$count" -ge 0 ] && [ "$count" -le 3 ]; then
+    log_result "PASS" "5.2.20 - Asegurar timeout de sesion SSH configurado" "ClientAliveInterval=$interval; ClientAliveCountMax=$count; valores dentro del rango legacy." "" "$GREEN"
     return 0
   fi
-  log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Valores actuales: Interval=$interval Count=$count (deben ser >0)" "Configurar /etc/ssh/sshd_config: ClientAliveInterval 300 y ClientAliveCountMax 0. Reiniciar sshd" "$YELLOW"
+  log_result "WARN" "5.2.20 - Asegurar timeout de sesion SSH configurado" "Valores actuales: ClientAliveInterval=$interval ClientAliveCountMax=$count." "Validar los valores permitidos para la versión OpenSSH instalada; cambiar el timeout puede cerrar sesiones SSH inactivas." "$YELLOW"
   return 2
 }
 
@@ -1699,11 +1818,18 @@ check_sudo_logfile() {
 # 5.3.6 - ASEGURAR TIMEOUT DE AUTENTICACION SUDO
 # ==============================================
 check_sudo_timeout() {
-  if grep -q "timestamp_timeout" /etc/sudoers /etc/sudoers.d/* 2>/dev/null; then
-    log_result "PASS" "5.3.6 - Asegurar timeout de autenticacion sudo configurado" "" "" "$GREEN"
-    return 0
+  local defs="" values=""
+  defs="$(grep -hEv '^[[:space:]]*(#|$)' /etc/sudoers /etc/sudoers.d/* 2>/dev/null | grep -E '^[[:space:]]*Defaults([[:space:]]|$).*timestamp_timeout[[:space:]]*=' || true)"
+  if [ -n "$defs" ]; then
+    values="$(printf '%s\n' "$defs" | sed -nE 's/.*timestamp_timeout[[:space:]]*=[[:space:]]*(-?[0-9]+).*/\1/p')"
+    if [ -n "$values" ] && ! printf '%s\n' "$values" | awk '$1 < -1 || $1 > 15 {bad=1} END {exit !bad}'; then
+      log_result "PASS" "5.3.6 - Asegurar timeout de autenticacion sudo configurado" "Defaults activo con timestamp_timeout=$(printf '%s' "$values" | tr '\n' ' '); valores numéricos dentro del rango operativo revisado." "" "$GREEN"
+      return 0
+    fi
+    log_result "WARN" "5.3.6 - Asegurar timeout de autenticacion sudo configurado" "Se detectó timestamp_timeout, pero no se pudo validar un valor numérico efectivo entre -1 y 15: $defs" "Validar sudo -V y la configuración efectiva; un timeout corto aumenta solicitudes de contraseña, uno muy largo prolonga la sesión privilegiada." "$YELLOW"
+    return 2
   fi
-  log_result "WARN" "5.3.6 - Asegurar timeout de autenticacion sudo configurado" "timestamp_timeout no configurado" "Agregar 'Defaults timestamp_timeout=5' a /etc/sudoers con visudo" "$YELLOW"
+  log_result "WARN" "5.3.6 - Asegurar timeout de autenticacion sudo configurado" "No hay una directiva activa Defaults timestamp_timeout detectada." "Configurar un límite apropiado (por ejemplo 5 minutos) mediante visudo después de validar los flujos administrativos." "$YELLOW"
   return 2
 }
 
@@ -1736,11 +1862,28 @@ check_password_requirements() {
 # 5.5.2 - BLOQUEO POR INTENTOS FALLIDOS
 # ==============================================
 check_password_lockout() {
-  if grep -q "pam_faillock.so" /etc/pam.d/system-auth 2>/dev/null; then
-    log_result "PASS" "5.5.2 - Bloqueo por intentos fallidos configurado" "" "" "$GREEN"
+  local files="/etc/pam.d/system-auth /etc/pam.d/password-auth"
+  local active="" has_preauth=false has_authfail=false has_account=false has_legacy=false
+  local f
+  for f in $files; do
+    [ -r "$f" ] || continue
+    active="$active
+$(grep -Ev '^[[:space:]]*(#|$)' "$f" 2>/dev/null | grep -E 'pam_(faillock|tally2)\.so' || true)"
+  done
+  printf '%s\n' "$active" | grep -Eq 'pam_faillock\.so.*preauth|preauth.*pam_faillock\.so' && has_preauth=true
+  printf '%s\n' "$active" | grep -Eq 'pam_faillock\.so.*authfail|authfail.*pam_faillock\.so' && has_authfail=true
+  printf '%s\n' "$active" | grep -Eq '^[[:space:]]*account[[:space:]].*pam_faillock\.so' && has_account=true
+  printf '%s\n' "$active" | grep -q 'pam_tally2\.so' && has_legacy=true
+
+  if $has_preauth && $has_authfail && $has_account; then
+    log_result "PASS" "5.5.2 - Bloqueo por intentos fallidos configurado" "Reglas activas pam_faillock detectadas para preauth, authfail y account." "" "$GREEN"
     return 0
   fi
-  log_result "FAIL" "5.5.2 - Bloqueo por intentos fallidos configurado" "pam_faillock.so no configurado" "Configurar pam_faillock en /etc/pam.d/system-auth y password-auth. Usar authselect o editar manualmente" "$RED"
+  if $has_legacy; then
+    log_result "WARN" "5.5.2 - Bloqueo por intentos fallidos configurado" "Se detectó pam_tally2 legacy; requiere validación de umbral, desbloqueo y funcionamiento efectivo." "Auditar la configuración PAM legacy sin convertir la pila automáticamente; una edición incorrecta puede bloquear todos los accesos." "$YELLOW"
+    return 2
+  fi
+  log_result "FAIL" "5.5.2 - Bloqueo por intentos fallidos configurado" "No se encontró una configuración activa completa de pam_faillock en system-auth/password-auth." "Validar la política de authselect y el orden de PAM antes de añadir preauth/authfail/account; una configuración incorrecta puede bloquear administradores." "$RED"
   return 1
 }
 
@@ -1760,12 +1903,32 @@ check_password_reuse() {
 # 5.5.4 - ALGORITMO DE HASH SHA-512
 # ==============================================
 check_password_hashing() {
-  if grep -q "ENCRYPT_METHOD SHA512" /etc/login.defs 2>/dev/null; then
-    log_result "PASS" "5.5.4 - Algoritmo de hash SHA-512 configurado" "" "" "$GREEN"
-    return 0
+  local current="" os_major=""
+  current="$(awk '$1=="ENCRYPT_METHOD" {v=$2} END {print toupper(v)}' /etc/login.defs 2>/dev/null)"
+  if [ -r /etc/os-release ]; then
+    os_major="$(awk -F= '/^VERSION_ID=/{gsub(/"/, "", $2); split($2,v,"."); print v[1]; exit}' /etc/os-release)"
+  elif [ -r /etc/redhat-release ]; then
+    os_major="$(sed -nE 's/.*release[[:space:]]+([0-9]+).*/\1/p' /etc/redhat-release | head -1)"
   fi
-  log_result "FAIL" "5.5.4 - Algoritmo de hash SHA-512 configurado" "ENCRYPT_METHOD no es SHA512" "Editar /etc/login.defs: ENCRYPT_METHOD SHA512. Configurar pam_unix.so con sha512" "$RED"
-  return 1
+
+  case "$os_major" in
+    9|10)
+      if [ "$current" = "YESCRYPT" ]; then
+        log_result "PASS" "5.5.4 - Algoritmo de hash de contraseñas fuerte" "ENCRYPT_METHOD=yescrypt, recomendado para EL9/EL10." "" "$GREEN"
+        return 0
+      fi
+      log_result "WARN" "5.5.4 - Algoritmo de hash de contraseñas fuerte" "ENCRYPT_METHOD=${current:-no definido}; revisar la política de hash moderna de la distribución, no asumir SHA512 universal." "Comprobar el default de la distribución antes de cambiar login.defs; no se edita PAM automáticamente." "$YELLOW"
+      return 2
+      ;;
+    *)
+      if [ "$current" = "SHA512" ]; then
+        log_result "PASS" "5.5.4 - Algoritmo de hash de contraseñas fuerte" "ENCRYPT_METHOD=SHA512." "" "$GREEN"
+        return 0
+      fi
+      log_result "WARN" "5.5.4 - Algoritmo de hash de contraseñas fuerte" "ENCRYPT_METHOD=${current:-no definido}." "En EL7/EL8 legacy suele usarse SHA512; verificar el algoritmo soportado por libcrypt y PAM antes de cambiarlo. No se reescriben hashes existentes." "$YELLOW"
+      return 2
+      ;;
+  esac
 }
 
 # ==============================================
@@ -2029,14 +2192,25 @@ show_final_summary() {
 main() {
   echo -e "${GREEN}============================================${NC}"
   echo -e "${GREEN}  Herramienta de Verificacion CIS Benchmark${NC}"
-  echo -e "${GREEN}  Para RHEL/CentOS/Rocky/AlmaLinux 7,8,9,10${NC}"
+  echo -e "${GREEN}  RHEL/CentOS/Stream/Rocky/AlmaLinux/Oracle Linux 7-10${NC}"
   echo -e "${GREEN}============================================${NC}\n"
+
+  detect_cis_profile
+  echo -e "${YELLOW}[INFO] Perfil de referencia: $CIS_PROFILE${NC}"
+  echo -e "${YELLOW}[INFO] Estado: $CIS_PROFILE_STATUS${NC}"
+  echo -e "${YELLOW}[INFO] Se evalúa solo el subconjunto local; no se afirma cobertura total ni certificación CIS.${NC}\n"
 
   # Limpiar reporte anterior
   echo "CIS Benchmark Verification Report" >"$REPORT_FILE"
   echo "Fecha: $(date)" >>"$REPORT_FILE"
   echo "=============================================" >>"$REPORT_FILE"
   echo "" >>"$REPORT_FILE"
+
+  # Detect and record the official reference, without overstating local coverage.
+  echo "Perfil de referencia: $CIS_PROFILE" | tee -a "$REPORT_FILE"
+  echo "Estado del mapa: $CIS_PROFILE_STATUS" | tee -a "$REPORT_FILE"
+  echo "Cobertura: subconjunto local de controles OrangeBox; no es certificación ni porcentaje completo del benchmark CIS oficial." | tee -a "$REPORT_FILE"
+  echo "" | tee -a "$REPORT_FILE"
 
   # Seccion 1.1 - Configuracion de Filesystem
   echo -e "\n${BLUE}=== Seccion 1.1 - Configuracion del Sistema de Archivos ===${NC}" | tee -a "$REPORT_FILE"
