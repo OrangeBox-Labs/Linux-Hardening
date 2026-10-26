@@ -18,21 +18,6 @@ else
   echo "[ERROR] Falta lib/sysctl-safe.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-if [ -r "$SCRIPT_DIR/lib/firewall-detect.sh" ]; then
-  # shellcheck source=lib/firewall-detect.sh
-  source "$SCRIPT_DIR/lib/firewall-detect.sh"
-else
-  echo "[ERROR] Falta lib/firewall-detect.sh; actualice el repositorio completo." >&2
-  exit 1
-fi
-if [ -r "$SCRIPT_DIR/lib/listener-firewall-audit.sh" ]; then
-  # Auditoría de sockets vs cobertura INPUT, sin cambios de firewall.
-  # shellcheck source=lib/listener-firewall-audit.sh
-  source "$SCRIPT_DIR/lib/listener-firewall-audit.sh"
-else
-  echo "[ERROR] Falta lib/listener-firewall-audit.sh; actualice el repositorio completo." >&2
-  exit 1
-fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -231,7 +216,7 @@ disable_module() {
 }
 
 # ==============================================
-# FUNCION PARA VERIFICAR CONFLICTOS DE FIREWALL
+# GUARD DE SEGURIDAD PARA CAMBIOS DE RED CON SHOREWALL
 # ==============================================
 shorewall_is_active() {
   command -v shorewall >/dev/null 2>&1 || return 1
@@ -242,60 +227,6 @@ shorewall_is_active() {
   printf '%s\n' "$status" | grep -Eiq 'running|started|active'
 }
 
-# CSF administra reglas iptables directamente; no requiere una unidad systemd propia.
-# Se considera operativo cuando csf -l puede mostrar las cadenas activas del kernel.
-csf_rules_active() {
-  command -v csf >/dev/null 2>&1 || return 1
-  local listing
-  listing="$(csf -l 2>&1)" || return 1
-  printf '%s\n' "$listing" | grep -Eq 'iptables .* table|Chain INPUT[[:space:]]+\('
-}
-
-check_firewall_conflicts() {
-  echo -e "\n${BLUE}[*] Auditoría de solo lectura: firewall y sockets en escucha...${NC}"
-
-  local shorewall_installed=false shorewall_active=false
-  local csf_installed=false csf_active=false
-  local imunify360_rules=false
-  local firewalld_installed=false firewalld_active=false
-  local nftables_installed=false nftables_active=false
-  local iptables_installed=false iptables_active=false
-
-  command -v shorewall >/dev/null 2>&1 && shorewall_installed=true
-  shorewall_is_active && shorewall_active=true
-  command -v csf >/dev/null 2>&1 && csf_installed=true
-  csf_rules_active && csf_active=true
-  firewall_print_backend_diagnostics
-  firewall_has_imunify360_rules && imunify360_rules=true
-  if rpm -q firewalld &>/dev/null; then
-    firewalld_installed=true
-    systemctl is-active --quiet firewalld 2>/dev/null && firewalld_active=true
-  fi
-  if rpm -q nftables &>/dev/null; then
-    nftables_installed=true
-    systemctl is-active --quiet nftables 2>/dev/null && nftables_active=true
-  fi
-  if rpm -q iptables-services &>/dev/null; then
-    iptables_installed=true
-    systemctl is-active --quiet iptables 2>/dev/null && iptables_active=true
-  fi
-
-  echo "  shorewall: instalado=$shorewall_installed activo=$shorewall_active"
-  echo "  csf: instalado=$csf_installed reglas_activas=$csf_active"
-  echo "  firewalld: instalado=$firewalld_installed activo=$firewalld_active"
-  echo "  nftables: instalado=$nftables_installed activo=$nftables_active"
-  echo "  iptables-services: instalado=$iptables_installed activo=$iptables_active"
-  [ "$imunify360_rules" = true ] && echo "  [INFO] Se detectan cadenas de integración de Imunify360 en iptables."
-
-  # Coexistencia o ausencia de gestores no genera WARN por sí sola. En
-  # producción solo alertamos por listeners remotos sin control INPUT probado.
-  if [ "$shorewall_active" = true ] && { [ "$firewalld_active" = true ] || [ "$csf_active" = true ] || [ "$nftables_active" = true ] || [ "$iptables_active" = true ]; }; then
-    echo "[INFO] Hay otros gestores/backend instalados o activos junto a Shorewall; se conserva toda la configuración."
-  fi
-
-  lfa_audit_listener_firewall
-  WARNINGS=$((WARNINGS + LFA_WARNINGS))
-}
 # ==============================================
 # FUNCION PARA FLUSH ROUTES
 # ==============================================
@@ -573,7 +504,6 @@ main() {
   enable_rp_filter
   enable_syncookies
   disable_ipv6_ra
-  check_firewall_conflicts
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
