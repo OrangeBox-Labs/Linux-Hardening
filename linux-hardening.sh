@@ -100,6 +100,10 @@ detect_os(){
   fi
 }
 prepare_backup() {
+  if [ -e "$BACKUP_DIR" ] || [ -L "$BACKUP_DIR" ]; then
+    echo "[ERROR] El destino de backup $BACKUP_DIR ya existe; se evita reutilizar un backup ambiguo." >&2
+    return 1
+  fi
   if ! mkdir -p "$BACKUP_DIR"; then
     echo "[ERROR] No se pudo crear el directorio de backup $BACKUP_DIR." >&2
     return 1
@@ -148,7 +152,7 @@ backup_once() {
   if [ -L "$src" ] && [ "$(readlink "$src" 2>/dev/null || true)" != "$(readlink "$backup" 2>/dev/null || true)" ]; then
     die "La copia de seguridad del enlace $src no coincide; se aborta --fix."
   fi
-  if [ -d "$src" ] && ! diff -qr "$src" "$backup" >/dev/null 2>&1; then
+  if [ -d "$src" ] && [ ! -L "$src" ] && ! diff -qr "$src" "$backup" >/dev/null 2>&1; then
     die "La copia de seguridad del directorio $src no coincide; se aborta --fix."
   fi
   return 0
