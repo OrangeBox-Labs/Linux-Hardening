@@ -145,9 +145,9 @@ is_system_account() {
   return 1
 }
 
-// Filesystem paths must be exact mountpoints for partition and mount-option checks.
-// findmnt --target /tmp can return the parent filesystem and produce false PASSes;
-// inspect the complete active mount table and match TARGET exactly instead.
+# Filesystem paths must be exact mountpoints for partition and mount-option checks.
+# findmnt --target /tmp can return the parent filesystem and produce false PASSes;
+# inspect the complete active mount table and match TARGET exactly instead.
 cis_mount_is_exact() {
   local mountpoint="$1"
   command -v findmnt >/dev/null 2>&1 || return 2
