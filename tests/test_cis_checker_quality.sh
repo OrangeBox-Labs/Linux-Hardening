@@ -9,6 +9,7 @@ grep -Fq 'CIS Red Hat Enterprise Linux 9 Benchmark' "$CIS" || fail "no hay catá
 grep -Fq 'CIS AlmaLinux OS 9 Benchmark' "$CIS" || fail "no hay catálogo de perfil AlmaLinux 9"
 grep -Fq 'CIS Rocky Linux 10 Benchmark' "$CIS" || fail "no hay catálogo de perfil Rocky 10"
 grep -Fq 'no se afirma cobertura total ni certificación CIS' "$CIS" || fail "el verificador no advierte que su cobertura es parcial"
+grep -Fq 'referencias locales históricas; no se ha validado una equivalencia uno a uno' "$CIS" || fail "el reporte debe advertir que sus IDs no son un mapping oficial validado"
 grep -Fq 'chronyd activo; fuente seleccionada' "$CIS" || fail "chrony aún tiene PASS por solo paquete instalado"
 grep -Fq 'systemctl is-active --quiet aidecheck.timer' "$CIS" || fail "AIDE timer solo valida enabled"
 grep -Fq 'ClientAliveCountMax entre 1 y 3 en EL8+' "$CIS" || fail "SSH idle timeout no valida límites ni versión OpenSSH"
