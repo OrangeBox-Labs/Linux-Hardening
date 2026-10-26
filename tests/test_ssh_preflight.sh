@@ -26,7 +26,7 @@ grep -Fq 'elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then' "$ORCHESTR
 grep -Fq 'Los nueve controles SSH ya cumplen los objetivos efectivos' "$ORCHESTRATOR" || fail "falta omitir la pregunta cuando SSH ya cumple"
 grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; no se modifica la configuración' "$ORCHESTRATOR" || fail "falta confirmar que no se reescribe SSH conforme"
 grep -Fq 'SSH_PENDING_DIRECTIVES+=("$directive $desired")' "$ORCHESTRATOR" || fail "no se registra cada directiva pendiente"
-grep -Fq 'for directive in "\${SSH_PENDING_DIRECTIVES[@]}"' "$ORCHESTRATOR" || fail "la remediación no muestra las directivas pendientes"
+grep -Fq 'for directive in "${SSH_PENDING_DIRECTIVES[@]}"' "$ORCHESTRATOR" || fail "la remediación no muestra las directivas pendientes"
 grep -Fq 'ok "SSH $directive=$actual"' "$ORCHESTRATOR" || fail "no se informa cuando un parámetro SSH ya está conforme"
 grep -Fq 'ssh_module_apply_block_reason' "$ORCHESTRATOR" || fail "no se explica por qué se bloquea la aplicación de SSH"
 grep -Fq 'ssh_apply_pending_settings' "$ORCHESTRATOR" || fail "falta el flujo de aplicación segura SSH"
@@ -37,7 +37,7 @@ grep -Fq '[ ! -L "$SSH_DROPIN" ]' "$ORCHESTRATOR" || fail "no se protege frente 
 if grep -Fq 'ssh_module_can_apply || return 0' "$ORCHESTRATOR"; then
   fail "la auditoría compacta todavía oculta SSH si el drop-in no es aplicable"
 fi
-if grep -Fq 'se mantiene en auditoría.' "$ORCHESTRATOR"; then
+if grep -Fq 'no se puede aplicar sin sobrescribir configuración o fuera de las condiciones admitidas' "$ORCHESTRATOR"; then
   fail "el preflight aún usa un mensaje genérico sin motivo ni remediación"
 fi
 
