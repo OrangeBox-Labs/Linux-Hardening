@@ -215,23 +215,31 @@ show_ssh_audit_analysis() {
 # ==============================================
 # FUNCION PARA MOSTRAR CONFIGURACION ACTUAL
 # ==============================================
+show_effective_sshd_value() {
+  local key="$1" value=""
+  if command -v sshd >/dev/null 2>&1; then
+    value="$(sshd -T 2>/dev/null | awk -v key="$key" '$1 == key {$1=""; sub(/^[[:space:]]+/, ""); print; exit}')"
+  fi
+  if [ -n "$value" ]; then
+    printf '  %s\n' "$value"
+  else
+    echo "  [WARN] Valor efectivo no disponible mediante sshd -T"
+  fi
+}
+
 show_current_config() {
-  echo -e "\n${BLUE}[*] Configuracion actual de SSH:${NC}\n"
-
+  echo -e "\n${BLUE}[*] Configuración efectiva global de SSH (sshd -T):${NC}\n"
   echo -e "${YELLOW}KexAlgorithms:${NC}"
-  grep -ih "^KexAlgorithms" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
-
+  show_effective_sshd_value kexalgorithms
   echo -e "\n${YELLOW}Ciphers:${NC}"
-  grep -ih "^Ciphers" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
-
+  show_effective_sshd_value ciphers
   echo -e "\n${YELLOW}MACs:${NC}"
-  grep -ih "^MACs" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
-
+  show_effective_sshd_value macs
   echo -e "\n${YELLOW}HostKeyAlgorithms:${NC}"
-  grep -ih "^HostKeyAlgorithms" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
-
+  show_effective_sshd_value hostkeyalgorithms
   echo -e "\n${YELLOW}PermitRootLogin:${NC}"
-  grep -ih "^PermitRootLogin" "$SSHD_CONFIG" "$SSHD_CONFIG_D"/*.conf 2>/dev/null | head -1 || echo "  (no configurado - usando defaults del sistema)"
+  show_effective_sshd_value permitrootlogin
+  echo -e "\n${YELLOW}[INFO] Las directivas Match pueden variar por usuario, origen y conexión; estos son los valores globales.${NC}"
 }
 
 # ==============================================

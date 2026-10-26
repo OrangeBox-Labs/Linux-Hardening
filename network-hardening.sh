@@ -53,10 +53,6 @@ BACKUP_DIR="/root/network-backup-$(date +%Y%m%d-%H%M%S)"
 # LISTA DE MODULOS A DESHABILITAR
 # ==============================================
 MODULES_TO_DISABLE=(
-  "tipc:Transparent Inter-Process Communication (cluster communication)"
-  "dccp:Datagram Congestion Control Protocol (streaming multimedia)"
-  "sctp:Stream Control Transmission Protocol (telefonia IP)"
-  "rds:Reliable Datagram Sockets (Oracle RDS)"
   "atm:Asynchronous Transfer Mode"
   "decnet:Digital Equipment Corporation DECnet"
   "llc2:Logical Link Control type 2"

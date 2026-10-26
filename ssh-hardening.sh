@@ -451,7 +451,11 @@ check_extra_security() {
 # REINICIAR SSH
 # ==============================================
 restart_ssh() {
-  echo -e "\n${BLUE}[*] Validando y reiniciando SSH...${NC}"
+  if [ "$AUTO_FIX" = true ]; then
+    echo -e "\n${BLUE}[*] Validando y reiniciando SSH...${NC}"
+  else
+    echo -e "\n${BLUE}[*] Auditoría SSH: no se reiniciará ni modificará el servicio${NC}"
+  fi
 
   if [ "$AUTO_FIX" = true ]; then
     if sshd -t; then

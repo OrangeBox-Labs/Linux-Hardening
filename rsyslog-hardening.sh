@@ -85,6 +85,14 @@ configure_journald_param() {
   local expected="$2"
   local description="$3"
 
+  # systemd-journald defaults Compress=yes. A commented sample line or no active
+  # setting means the effective default is compliant unless a drop-in overrides it.
+  if [ "$param" = "Compress" ] && [ "$expected" = "yes" ] &&
+     ! grep -Eq '^[[:space:]]*Compress[[:space:]]*=' "$JOURNALD_CONF" 2>/dev/null; then
+    echo -e "${GREEN}[✓] Compress=yes (valor predeterminado; no requiere descomentar)${NC}"
+    return 0
+  fi
+
   if grep -q "^[#]*\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
     if grep -q "^#\s*${param}=${expected}" "$JOURNALD_CONF" 2>/dev/null; then
       echo -e "${YELLOW}[!] $description esta comentado${NC}"
@@ -423,11 +431,17 @@ show_summary() {
 
   echo -e "\n${YELLOW}PARA VER LOGS:${NC}"
   echo -e "  tail -f /var/log/messages"
-  echo -e "  journalctl -xe"
+  if command -v journalctl >/dev/null 2>&1; then
+    echo -e "  journalctl -xe"
+  fi
 
   echo -e "\n${YELLOW}PARA VER ESTADO:${NC}"
-  echo -e "  systemctl status rsyslog"
-  echo -e "  systemctl status systemd-journald"
+  if command -v systemctl >/dev/null 2>&1; then
+    echo -e "  systemctl status rsyslog"
+    echo -e "  systemctl status systemd-journald"
+  else
+    echo -e "  service rsyslog status"
+  fi
 
   echo -e "\n${YELLOW}PARA CONFIGURAR ENVIO REMOTO:${NC}"
   echo -e "  $0 --remote <IP_HOST>"
