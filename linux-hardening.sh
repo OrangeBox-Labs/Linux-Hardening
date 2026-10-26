@@ -263,6 +263,10 @@ ssh_state_status() {
   return "$status"
 }
 
+# Markers for the owned section inserted into sshd_config when no safe drop-in is available.
+SSH_MANAGED_BEGIN="# BEGIN ORANGEBOX SSH HARDENING MANAGED BLOCK"
+SSH_MANAGED_END="# END ORANGEBOX SSH HARDENING MANAGED BLOCK"
+
 ssh_dropin_include_enabled() {
   [ "${OS_VERSION:-0}" -ge 8 ] || return 1
   [ -d /etc/ssh/sshd_config.d ] && [ -f /etc/ssh/sshd_config ] || return 1
