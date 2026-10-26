@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.7 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.8 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -31,7 +31,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.7
+SCRIPT_VERSION=1.4.8
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -551,31 +551,17 @@ banners_module() {
   motd_tmp="$(mktemp)" || { rm -f "$login_tmp"; warn "No se pudo crear el MOTD"; return; }
   session_motd_tmp="$(mktemp)" || { rm -f "$login_tmp" "$motd_tmp"; warn "No se pudo crear el MOTD dinámico"; return; }
 
-  # Aviso legal previo a la autenticación: no enumera tecnologías defensivas.
-  cat > "$login_tmp" <<'ORANGEBOX_LOGIN_BANNER'
-*******************************************************************************
-                         SISTEMA DE ACCESO RESTRINGIDO
-                           www.orangebox.cl
-*******************************************************************************
-
-Todas las conexiones y los comandos ejecutados quedan
-asociados a la IP de origen y se registran en sistemas
-remotos de auditoría.
-
-Todo acceso, uso o actividad no autorizada será
-documentado y reportado a las autoridades competentes.
-
-Si no cuenta con autorización, desconéctese
-inmediatamente.
-
-*******************************************************************************
-
-ORANGEBOX_LOGIN_BANNER
+  # FIGlet sólo se necesita en el banner previo a la autenticación.
+  orangebox_motd_ensure_figlet "$AUTO_FIX" || true
+  if ! orangebox_motd_write_login_banner "$login_tmp"; then
+    rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
+    warn "No se pudo generar el banner previo al login"
+    return
+  fi
 
   # La IP remota cambia por sesión: un /etc/motd estático no puede conocerla.
   # El banner posterior al login se genera desde /etc/profile.d en shells interactivas.
   : > "$motd_tmp"
-  orangebox_motd_ensure_figlet "$AUTO_FIX" || true
   if ! orangebox_motd_write_profile "$session_motd_tmp"; then
     rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
     warn "No se pudo generar el MOTD dinámico"
