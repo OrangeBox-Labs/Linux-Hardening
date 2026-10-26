@@ -64,6 +64,8 @@ jobs:
         run: bash tests/test_idempotent_baseline.sh
       - name: Test operational policy guards
         run: bash tests/test_policy_guards.sh
+      - name: Test SELinux guarded transition
+        run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
         run: bash tests/test_kptr_restrict_policy.sh
 
@@ -125,4 +127,5 @@ jobs:
               /bin/bash tests/test_ssh_preflight.sh
               /bin/bash tests/test_idempotent_baseline.sh
               /bin/bash tests/test_kptr_restrict_policy.sh
+              /bin/bash tests/test_selinux_fix_guard.sh
             '

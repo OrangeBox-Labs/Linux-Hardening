@@ -53,6 +53,7 @@ sysctl_safe_description() {
     net.ipv4.tcp_syn_retries) echo "Define reintentos SYN de conexiones TCP salientes; aumentarlo puede alargar el tiempo antes de declarar fallida una conexión." ;;
     net.ipv6.conf.all.accept_ra|net.ipv6.conf.default.accept_ra) echo "Controla anuncios de router IPv6; desactivarlo puede romper rutas automáticas si la red depende de Router Advertisements." ;;
     user.max_user_namespaces) echo "El valor 0 bloquea user namespaces y puede mitigar vías de escalada local, pero puede romper contenedores rootless, sandboxes y aplicaciones que dependan de ellos." ;;
+    kernel.unprivileged_bpf_disabled) echo "Deshabilita BPF para procesos sin privilegios y reduce superficie de ataque local; puede afectar herramientas de tracing/observabilidad que ejecuten BPF sin privilegios." ;;
     vm.mmap_min_addr) echo "Evita mapeos de memoria en direcciones muy bajas; reduce ciertas explotaciones, aunque puede afectar aplicaciones antiguas." ;;
     *) sysctl -d "$1" 2>/dev/null | sed -n '1p' | sed 's/^[^:]*:[[:space:]]*//' ;;
   esac

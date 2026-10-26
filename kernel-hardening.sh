@@ -48,6 +48,51 @@ show_usage() {
 }
 
 # ==============================================
+# CAMBIOS DELICADOS: CONSENTIMIENTO Y BACKUPS
+# ==============================================
+kernel_confirm_change() {
+  local description="$1" effect="$2" answer=""
+  printf '\n[WARN] Cambio de límite/kernel: %s\n' "$description"
+  printf 'Qué hace/riesgo: %s\n' "$effect"
+  printf '%s' "¿Aplicar este parámetro? [s/N]: "
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    printf '\n[WARN] No hay terminal interactiva; se omite el cambio por seguridad.\n'
+    return 1
+  fi
+  IFS= read -r answer </dev/tty || return 1
+  case "$answer" in s|S|si|SI|sí|Sí|SÍ) return 0 ;; *) echo '[INFO] Se conserva el valor actual.'; return 1 ;; esac
+}
+
+kernel_backup_file() {
+  local source="$1" backup_dir="/var/backups/orangebox-kernel-hardening/$(date +%Y%m%d-%H%M%S)-$"
+  [ -e "$source" ] || return 0
+  if ! mkdir -p "$backup_dir" || ! chmod 700 "$backup_dir" || ! cp -p "$source" "$backup_dir/"; then
+    echo "[ERROR] No se pudo respaldar $source."
+    return 1
+  fi
+  echo "[INFO] Backup $source: $backup_dir/$(basename "$source")"
+}
+
+kernel_write_limit() {
+  local entry="$1" domain="$2" type="$3" item="$4"
+  local target="/etc/security/limits.d/zzzzzzzz-orangebox-hardening.conf" tmp=""
+  mkdir -p /etc/security/limits.d || return 1
+  [ ! -L "$target" ] || { echo "[ERROR] $target es un symlink; no se modifica."; return 1; }
+  [ ! -e "$target" ] || kernel_backup_file "$target" || return 1
+  tmp="$(mktemp /etc/security/limits.d/zzzzzzzz-orangebox-hardening.conf.XXXXXX)" || return 1
+  if [ -f "$target" ]; then
+    awk -v d="$domain" -v t="$type" -v i="$item" '
+      $1==d && $2==t && $3==i { next }
+      { print }
+    ' "$target" > "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  printf '%s\n' "$entry" >> "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 644 "$tmp" && chown root:root "$tmp" || { rm -f "$tmp"; return 1; }
+  if ! mv "$tmp" "$target"; then rm -f "$tmp"; return 1; fi
+  return 0
+}
+
+# ==============================================
 # FUNCION PARA VERIFICAR O AGREGAR PARAMETRO SYSCTL
 # ==============================================
 check_sysctl_param() {
@@ -73,58 +118,86 @@ check_kptr_restrict_policy() {
 # FUNCION PARA VERIFICAR O AGREGAR A LIMITS.CONF
 # ==============================================
 check_limits_param() {
-  local entry="$1"
-  local description="$2"
-  local limits_file="/etc/security/limits.conf"
+  local entry="$1" description="$2"
+  local domain type item expected current="" compliant=false effect=""
+  local -a limits_files=()
+  read -r domain type item expected <<< "$entry"
+  limits_files=(/etc/security/limits.conf /etc/security/limits.d/*.conf)
+  current="$(awk -v d="$domain" -v t="$type" -v i="$item" '
+    /^[[:space:]]*#/ || NF < 4 { next }
+    $1==d && $2==t && $3==i { value=$4 }
+    END { if (value != "") print value }
+  ' "${limits_files[@]}" 2>/dev/null)"
+  case "$item" in
+    core)
+      effect="impide core dumps para usuarios y reduce la exposición de secretos, pero limita el diagnóstico post-mortem."
+      [ "$current" = "0" ] && compliant=true
+      ;;
+    nofile)
+      effect="establece el máximo de descriptores abiertos por sesión; 65536 permite cargas altas, pero límites pequeños pueden agotar conexiones/archivos."
+      if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -ge "$expected" ]; then compliant=true; fi
+      ;;
+    maxlogins)
+      effect="limita sesiones simultáneas por usuario; puede impedir sesiones administrativas o automatizaciones si resulta demasiado restrictivo."
+      if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -le "$expected" ]; then compliant=true; fi
+      ;;
+    *) effect="ajusta un límite de recursos; un valor restrictivo puede afectar aplicaciones." ;;
+  esac
 
-  if grep -q "^$entry" "$limits_file" 2>/dev/null; then
-    echo -e "${GREEN}[✓] $description ya configurado${NC}"
+  if [ "$compliant" = true ]; then
+    echo -e "${GREEN}[✓] $description ya cumple (valor actual: $current)${NC}"
     return 0
   fi
-
-  echo -e "${RED}[!] $description - NO CONFIGURADO${NC}"
-  if [ "$AUTO_FIX" = true ]; then
-    if grep -q "# End of file" "$limits_file" 2>/dev/null; then
-      sed -i "/# End of file/i $entry" "$limits_file"
-    else
-      echo "$entry" >>"$limits_file"
-    fi
-    echo -e "${GREEN}[✓] $description configurado: $entry${NC}"
-    FIXED=$((FIXED + 1))
-  else
+  echo -e "${YELLOW}[WARN] $description pendiente; valor actual: ${current:-no definido}; objetivo OrangeBox: $expected.${NC}"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
+  if ! kernel_confirm_change "$description -> $expected" "$effect"; then WARNINGS=$((WARNINGS + 1)); return 0; fi
+  if ! kernel_write_limit "$entry" "$domain" "$type" "$item"; then
+    echo "[ERROR] No se pudo escribir el límite $entry."
     WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
+  echo -e "${GREEN}[✓] $description configurado: $entry${NC}"
+  FIXED=$((FIXED + 1))
 }
 
-# ==============================================
-# FUNCION PARA VERIFICAR O CONFIGURAR SYSTEMD-COREDUMP
-# ==============================================
 check_systemd_coredump() {
-  if ! command -v systemd-coredump &>/dev/null || [ ! -f /etc/systemd/coredump.conf ]; then
+  local override="/etc/systemd/coredump.conf.d/zzzzzzzz-orangebox-hardening.conf"
+  local effective="" target_dir="/etc/systemd/coredump.conf.d" tmp=""
+  if ! command -v systemd-coredump >/dev/null 2>&1 && [ ! -f /etc/systemd/coredump.conf ] && [ ! -d /etc/systemd/coredump.conf.d ]; then
+    echo "[N/A] systemd-coredump no está disponible; no aplica en este sistema."
     return 0
   fi
-
-  echo -e "\n${YELLOW}[*] Verificando systemd-coredump...${NC}"
-
-  if grep -q "^Storage=none" /etc/systemd/coredump.conf; then
-    echo -e "${GREEN}[✓] systemd-coredump ya configurado${NC}"
+  echo -e "\n${YELLOW}[*] Verificando systemd-coredump Storage...${NC}"
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    effective="$(systemd-analyze cat-config systemd/coredump.conf 2>/dev/null | awk -F= '/^[[:space:]]*Storage[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); value=$2} END{print value}')"
+  fi
+  if [ -z "$effective" ] && [ -r "$override" ]; then
+    effective="$(awk -F= '/^[[:space:]]*Storage[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); value=$2} END{print value}' "$override")"
+  fi
+  if [ "$effective" = "none" ]; then
+    echo "${GREEN}[✓] systemd-coredump Storage=none en la configuración efectiva${NC}"
     return 0
   fi
-
-  echo -e "${RED}[!] systemd-coredump Storage no esta en 'none'${NC}"
-  if [ "$AUTO_FIX" = true ]; then
-    sed -i 's/^Storage=.*/Storage=none/' /etc/systemd/coredump.conf
-    systemctl daemon-reload
-    echo -e "${GREEN}[✓] systemd-coredump configurado${NC}"
-    FIXED=$((FIXED + 1))
-  else
-    WARNINGS=$((WARNINGS + 1))
+  echo "${YELLOW}[WARN] systemd-coredump no está limitado a Storage=none; valor efectivo: ${effective:-default/no verificable}.${NC}"
+  local effect="evita guardar volcados de memoria que pueden contener secretos; puede dificultar el diagnóstico post-mortem."
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
+  if ! kernel_confirm_change "systemd-coredump Storage=none" "$effect"; then WARNINGS=$((WARNINGS + 1)); return 0; fi
+  if [ -L "$override" ]; then echo "[ERROR] $override es un symlink; no se modifica."; WARNINGS=$((WARNINGS + 1)); return 1; fi
+  if [ -f "$override" ]; then kernel_backup_file "$override" || { WARNINGS=$((WARNINGS + 1)); return 1; }; fi
+  mkdir -p "$target_dir" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  tmp="$(mktemp "$override.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  if [ -f "$override" ]; then
+    awk ' /^[[:space:]]*Storage[[:space:]]*=/ { next } { print } ' "$override" > "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
   fi
+  printf '\n[Coredump]\nStorage=none\n' >> "$tmp"
+  chmod 644 "$tmp" && chown root:root "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
+  if ! mv "$tmp" "$override"; then rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; fi
+  echo "${GREEN}[✓] Storage=none configurado en $override${NC}"
+  FIXED=$((FIXED + 1))
 }
 
-# ==============================================
-# 1. RESTRINGIR CORE DUMPS (CIS 1.5.1)
-# ==============================================
 restrict_core_dumps() {
   echo -e "\n${BLUE}[*] CIS 1.5.1 - Restringiendo core dumps...${NC}"
   check_sysctl_param "fs.suid_dumpable" "0" "fs.suid_dumpable"
@@ -223,9 +296,11 @@ network_hardening() {
 # 10. SEGURIDAD DE MEMORIA
 # ==============================================
 memory_security() {
-  echo -e "\n${BLUE}[*] Configurando seguridad de memoria...${NC}"
+  echo -e "\n${BLUE}[*] Configurando seguridad de memoria y superficies locales...${NC}"
   check_sysctl_param "kernel.randomize_va_space" "2" "ASLR (kernel.randomize_va_space)"
   check_sysctl_param "vm.mmap_min_addr" "65536" "vm.mmap_min_addr"
+  check_sysctl_param "kernel.unprivileged_bpf_disabled" "1" "kernel.unprivileged_bpf_disabled"
+  check_sysctl_param "user.max_user_namespaces" "0" "user.max_user_namespaces"
 }
 
 # ==============================================
@@ -283,7 +358,7 @@ main() {
   restrict_ptrace
   hide_kernel_addresses
   protect_filesystem
-  network_hardening
+  # Network sysctls are evaluated/applied by the separate network-full module.
   memory_security
 
   show_summary

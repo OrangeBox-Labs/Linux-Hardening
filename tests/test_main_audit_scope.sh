@@ -119,7 +119,7 @@ grep -Fq 'ssh_report_unverifiable_settings "$reason"' "$MAIN" || fail "SSH no mu
 grep -Fq 'permitrootlogin|no|PermitRootLogin' "$MAIN" || fail "SSH no incluye PermitRootLogin=no como control auditable"
 grep -Fq 'allowtcpforwarding|no|AllowTcpForwarding' "$MAIN" || fail "SSH no incluye AllowTcpForwarding=no como control auditable"
 grep -Fq 'ssh_setting_description "$key"' "$MAIN" || fail "SSH no explica la función/impacto de cada directiva"
-grep -Fq 'read-only preflight before --fix' "$MAIN" || fail "los módulos complementarios no muestran auditoría previa a --fix"
+grep -Fq 'Audit first, then ask for consent' "$MAIN" || fail "los módulos complementarios no muestran auditoría previa a --fix"
 grep -Fq 'bash_audit_system_bashrc_include' "$MAIN" || fail "Bash puede ocultar el include de /etc/bashrc si falla mktemp"
 grep -Fq 'banners_audit_unverifiable()' "$MAIN" || fail "los controles banner/MOTD pueden desaparecer si falla la generación temporal"
 grep -Fq 'SSH $directive: no se pudo verificar' "$MAIN" || fail "falta el estado no verificable por directiva SSH"

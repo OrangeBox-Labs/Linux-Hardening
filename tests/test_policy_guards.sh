@@ -54,14 +54,16 @@ grep -Fq 'cPanel detectado: se omite use_pty' "$SUDO" || fail "sudo-hardening no
 grep -Fq '¿Habilitar Defaults use_pty?' "$SUDO" || fail "sudo-hardening no pregunta antes de habilitar use_pty"
 pass "use_pty requiere confirmación y se omite en cPanel"
 
-# SELinux must only be read. Prevent known state/configuration/context-changing commands.
-grep -Fq 'selinux-setup bloqueado por política OrangeBox' "$CORE" || fail "el orquestador no bloquea selinux-setup"
-for script in "$SELINUX" "$POST_INSTALL"; do
-  if grep -Eq '^[[:space:]]*(setenforce|restorecon|semanage|reboot)[[:space:]]|sed[[:space:]]+-i.*SELINUX' "$script"; then
-    fail "$(basename "$script") contiene una acción que modifica SELinux o reinicia"
-  fi
-done
-pass "SELinux solo se audita; no hay acciones de cambio en los módulos SELinux"
+# SELinux may transition from Permissive to Enforcing only after explicit consent.
+grep -Fq 'confirm_selinux_change' "$SELINUX" || fail "SELinux --fix no requiere confirmación"
+grep -Fq 'setenforce 1' "$SELINUX" || fail "SELinux --fix no implementa la transición desde Permissive"
+grep -Fq 'SELINUX=enforcing' "$SELINUX" || fail "SELinux --fix no corrige el estado persistente"
+grep -Fq 'mode" = "Disabled"' "$SELINUX" || fail "SELinux Disabled no está protegido frente a habilitación automática"
+grep -Fq 'No se habilita automáticamente' "$SELINUX" || fail "SELinux Disabled no explica el plan requerido"
+if grep -Eq '^[[:space:]]*(restorecon|semanage|reboot)[[:space:]]' "$SELINUX"; then
+  fail "SELinux module no debe relabelar, modificar contextos ni reiniciar"
+fi
+pass "SELinux Enforcing requiere consentimiento y no habilita estado Disabled automáticamente"
 
 # Kernel LPE mitigation must not overstate the user-namespace control or infer patch state from changelog text.
 LPE="$ROOT_DIR/kernel-lpe-2026-mitigation.sh"
