@@ -22,27 +22,90 @@ NC='\033[0m'
 
 FIXED=0
 WARNINGS=0
-AUTO_FIX=true
-CHECK_MODE=false
+AUTO_FIX=false
+CHECK_MODE=true
 
 # ==============================================
 # FUNCION PARA MOSTRAR USO
 # ==============================================
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
-  echo "  $0            - Modo automatico (aplica las correcciones)"
-  echo "  $0 --check    - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 -c         - Modo verificación (version corta)"
+  echo "  $0            - Modo auditoría (solo lectura; valor predeterminado)"
+  echo "  $0 --check    - Modo auditoría explícito (solo lectura)"
+  echo "  $0 --fix      - Aplicar cambios, con confirmación individual por parámetro"
+  echo "  $0 -c         - Modo auditoría (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
-  echo "  # Aplicar los cambios directamente"
+  echo "  # Revisar el estado sin modificar el servidor"
   echo "  ./FS-hardening.sh"
   echo ""
-  echo "  # Ver qué cambios se aplicarían sin hacerlos"
-  echo "  ./FS-hardening.sh --check"
+  echo "  # Aplicar correcciones, confirmando los parámetros sensibles"
+  echo "  ./FS-hardening.sh --fix"
   echo ""
 }
 
+confirm_fs_change() {
+  local description="$1" effect="$2" answer=""
+  printf '\n[WARN] Cambio de filesystem: %s\n' "$description"
+  printf 'Qué hace/riesgo: %s\n' "$effect"
+  printf '%s' "¿Aplicar este parámetro? [s/N]: "
+  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+    printf '\n[INFO] Modo auditoría; no se aplican cambios.\n'
+    return 1
+  fi
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    printf '\n[WARN] No hay terminal interactiva; se omite el cambio por seguridad.\n'
+    return 1
+  fi
+  IFS= read -r answer </dev/tty || return 1
+  case "$answer" in s|S|si|SI|sí|Sí|SÍ) return 0 ;; *) echo '[INFO] Se conserva el estado actual.'; return 1 ;; esac
+}
+
+backup_fs_file() {
+  local source="$1" backup_dir="/var/backups/orangebox-filesystem-hardening/$(date +%Y%m%d-%H%M%S)-$"
+  [ -e "$source" ] || return 0
+  [ ! -L "$source" ] || { echo "[ERROR] $source es un enlace simbólico; no se modifica."; return 1; }
+  mkdir -p "$backup_dir" && chmod 700 "$backup_dir" && cp -p "$source" "$backup_dir/" || {
+    echo "[ERROR] No se pudo respaldar $source."
+    return 1
+  }
+  echo "[INFO] Backup $source guardado en $backup_dir/$(basename "$source")"
+}
+
+persist_mount_options() {
+  local mount_point="$1" add_if_missing="$2" spec="$3"
+  shift 3
+  local -a approved=("$@")
+  local entry="" current="" merged="" opt="" tmp="" has_entry=false
+  local -a existing=()
+  [ -f /etc/fstab ] || { echo "[ERROR] /etc/fstab no existe."; return 1; }
+  entry="$(awk -v mp="$mount_point" '$0 !~ /^[[:space:]]*#/ && NF>=4 && $2==mp {print; exit}' /etc/fstab)"
+  if [ -n "$entry" ]; then
+    has_entry=true
+    current="$(printf '%s\n' "$entry" | awk '{print $4}')"
+    merged="$current"
+    for opt in "${approved[@]}"; do
+      case ",$merged," in *",$opt,"*) ;; *) merged="$merged,$opt" ;; esac
+    done
+    tmp="$(mktemp /etc/.fstab.orangebox.XXXXXX)" || return 1
+    awk -v mp="$mount_point" -v opts="$merged" '
+      /^[[:space:]]*#/ {print; next}
+      NF>=4 && $2==mp { $4=opts }
+      {print}
+    ' /etc/fstab > "$tmp" || { rm -f "$tmp"; return 1; }
+  elif [ "$add_if_missing" = true ] && [ -n "$spec" ]; then
+    tmp="$(mktemp /etc/.fstab.orangebox.XXXXXX)" || return 1
+    cat /etc/fstab > "$tmp" || { rm -f "$tmp"; return 1; }
+    printf '\n# OrangeBox filesystem hardening: %s\n%s\n' "$mount_point" "$spec" >> "$tmp"
+  else
+    echo "[WARN] No hay una entrada fstab para $mount_point; el cambio queda aplicado solo en runtime."
+    return 2
+  fi
+  chmod --reference=/etc/fstab "$tmp" 2>/dev/null || chmod 644 "$tmp"
+  chown --reference=/etc/fstab "$tmp" 2>/dev/null || chown root:root "$tmp"
+  if ! mv "$tmp" /etc/fstab; then rm -f "$tmp"; echo "[ERROR] No se pudo actualizar /etc/fstab."; return 1; fi
+  echo "[✓] /etc/fstab actualizado para $mount_point"
+}
 # ==============================================
 # DEFINICION DE PUNTOS DE MONTAJE CRITICOS
 # ==============================================
@@ -96,66 +159,76 @@ check_lvm() {
 # ==============================================
 disable_modules() {
   local modules="cramfs squashfs udf freevxfs jffs2 hfs hfsplus"
+  local module conf_file f effect backup_failed loaded
 
-  echo -e "\n${BLUE}[*] Deshabilitando sistemas de archivos no usados...${NC}"
-
+  echo -e "\n${BLUE}[*] Deshabilitando sistemas de archivos no usados... ${NC}"
   for module in $modules; do
-    local conf_file="/etc/modprobe.d/99-disable-${module}.conf"
+    conf_file="/etc/modprobe.d/99-disable-$module.conf"
+    echo -e "\n${YELLOW}[*] Verificando modulo: $module ${NC}"
 
-    echo -e "\n${YELLOW}[*] Verificando modulo: $module${NC}"
-
-    # Verificar si el modulo existe en el sistema
     if modprobe -n -v "$module" 2>&1 | grep -q "not found"; then
       echo -e "${GREEN}[✓] $module no existe en el sistema${NC}"
       continue
     fi
-
-    # Verificar si ya esta correctamente deshabilitado con /bin/false
-    if grep -q "^install $module /bin/false" "$conf_file" 2>/dev/null; then
-      echo -e "${GREEN}[✓] $module ya estaba correctamente deshabilitado${NC}"
+    if grep -rq "^install $module /bin/false" /etc/modprobe.d/ 2>/dev/null &&
+       grep -rq "^blacklist $module" /etc/modprobe.d/ 2>/dev/null; then
+      echo -e "${GREEN}[✓] $module ya está bloqueado${NC}"
       continue
     fi
 
-    # Verificar si existe configuracion incorrecta (con /bin/true) en algun archivo
-    if grep -rq "^install $module /bin/true" /etc/modprobe.d/ 2>/dev/null; then
-      echo -e "${YELLOW}[!] $module tiene configuracion incorrecta (/bin/true)${NC}"
-      if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-        # Eliminar la configuracion incorrecta de todos los archivos
-        for f in /etc/modprobe.d/*.conf; do
-          if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
-            sed -i '/^install '$module' \/bin\/true/d' "$f"
-            sed -i '/^# Deshabilitar '$module'/d' "$f"
-            echo -e "${GREEN}[✓] Configuracion incorrecta eliminada de $f${NC}"
-          fi
-        done
-      fi
+    effect="Bloquea futuras cargas del módulo $module, reduciendo la superficie de ataque. Puede impedir montar sistemas de archivos que lo necesiten. Si ya está cargado, no se descargará automáticamente porque podría estar en uso."
+    echo -e "${YELLOW}[WARN] $module puede cargarse actualmente${NC}"
+    echo "Qué hace/riesgo: $effect"
+
+    if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+      echo "Recomendación: crear $conf_file con install $module /bin/false y blacklist $module."
+      WARNINGS=$((WARNINGS + 1))
+      continue
+    fi
+    if ! confirm_fs_change "Bloquear el módulo $module" "$effect"; then
+      WARNINGS=$((WARNINGS + 1))
+      continue
     fi
 
-    # El modulo no esta deshabilitado o hay que crearlo
-    echo -e "${RED}[!] $module NO esta deshabilitado correctamente${NC}"
+    backup_failed=false
+    for f in /etc/modprobe.d/*.conf; do
+      [ -f "$f" ] || continue
+      if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
+        backup_fs_file "$f" || backup_failed=true
+      fi
+    done
+    if [ -e "$conf_file" ]; then backup_fs_file "$conf_file" || backup_failed=true; fi
+    if $backup_failed; then
+      echo "[ERROR] Falló un backup previo; no se modifica la configuración de $module."
+      WARNINGS=$((WARNINGS + 1))
+      continue
+    fi
+    [ ! -L "$conf_file" ] || { echo "[ERROR] $conf_file es un enlace simbólico; se omite."; WARNINGS=$((WARNINGS+1)); continue; }
 
-    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-      cat >"$conf_file" <<EOF
-# ==============================================
-# Hardening: Modulo $module deshabilitado
-# Script: FS-hardening.sh
-# Fuente: https://www.orangebox.cl
-# ==============================================
+    for f in /etc/modprobe.d/*.conf; do
+      [ -f "$f" ] || continue
+      if grep -q "^install $module /bin/true" "$f" 2>/dev/null; then
+        sed -i '/^install '"$module"' \/bin\/true/d' "$f"
+        sed -i '/^# Deshabilitar '"$module"'/d' "$f"
+      fi
+    done
+
+    cat > "$conf_file" <<EOF
+# OrangeBox hardening: block loading of unused filesystem module
+# Explanation: reduces the attack surface; may prevent mounting legacy filesystems.
 install $module /bin/false
 blacklist $module
 EOF
-      echo -e "${GREEN}[✓] $module deshabilitado en $conf_file${NC}"
+    if [ $? -ne 0 ]; then
+      echo "[ERROR] No se pudo escribir $conf_file."
+      WARNINGS=$((WARNINGS + 1))
+      continue
+    fi
+    echo -e "${GREEN}[✓] $module bloqueado para futuras cargas en $conf_file${NC}"
+    FIXED=$((FIXED + 1))
 
-      # Si el modulo esta cargado, descargarlo
-      if lsmod | grep -q "^$module"; then
-        rmmod "$module" 2>/dev/null
-        echo -e "${GREEN}[✓] $module descargado del kernel${NC}"
-      fi
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}    Recomendacion: Crear $conf_file con:${NC}"
-      echo -e "      install $module /bin/false"
-      echo -e "      blacklist $module"
+    if lsmod | grep -q "^$module"; then
+      echo -e "${YELLOW}[WARN] $module está cargado actualmente; no se descarga en caliente. El bloqueo impedirá cargas futuras y la descarga debe planificarse tras confirmar que no está en uso.${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
   done
@@ -235,68 +308,66 @@ check_separated_partitions() {
 # FUNCION PARA VERIFICAR OPCIONES DE MONTAJE
 # ==============================================
 check_mount_options() {
-  local mount_point="$1"
-  local required_opts="$2"
+  local mount_point="$1" required_opts="$2" current_opts="" opt="" missing_opts="" approved_opts="" new_opts="" effect=""
+  local -a required_array=()
+  echo -e "\n${BLUE}[*] Verificando opciones de montaje de $mount_point...${NC}"
 
-  echo -e "\n${BLUE}[*] Verificando opciones de montaje de ${mount_point}...${NC}"
-
-  if ! findmnt -n "$mount_point" &>/dev/null; then
-    echo -e "${YELLOW}[!] ${mount_point} no esta montado${NC}"
-    return 1
-  fi
-
-  local current_opts=$(findmnt -n -o OPTIONS "$mount_point" 2>/dev/null | tr ',' '\n' | sort | uniq | tr '\n' ',' | sed 's/,$//')
-
-  local missing_opts=""
-  IFS=',' read -ra required_array <<<"$required_opts"
-  for opt in "${required_array[@]}"; do
-    if [[ ! "$current_opts" == *"$opt"* ]]; then
-      missing_opts="$missing_opts,$opt"
-    fi
-  done
-  missing_opts="${missing_opts#,}"
-
-  if [ -z "$missing_opts" ]; then
-    echo -e "${GREEN}[✓] ${mount_point} tiene todas las opciones requeridas${NC}"
+  if ! findmnt -n "$mount_point" >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN] $mount_point no está montado; no se modifica.${NC}"
+    WARNINGS=$((WARNINGS + 1))
     return 0
   fi
-
-  echo -e "${RED}[!] ${mount_point} falta opciones: ${missing_opts}${NC}"
-  echo -e "    Opciones actuales: ${current_opts}"
-  echo -e "    Opciones requeridas: ${required_opts}"
-
-  # Construir las opciones faltantes en ambos modos para que el comando
-  # sugerido en auditoría nunca use una variable vacía.
-  local new_opts="$current_opts"
+  current_opts="$(findmnt -n -o OPTIONS "$mount_point" 2>/dev/null | tr ',' '\n' | sort -u | paste -sd, -)"
+  IFS=',' read -r -a required_array <<< "$required_opts"
   for opt in "${required_array[@]}"; do
-    if [[ ! "$new_opts" == *"$opt"* ]]; then
-      new_opts="$new_opts,$opt"
-    fi
-  done
-
-  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-    echo -e "${YELLOW}[*] Aplicando nuevas opciones...${NC}"
-    if mount -o remount,"$new_opts" "$mount_point" 2>/dev/null; then
-      echo -e "${GREEN}[✓] ${mount_point} remontado con exito${NC}"
-
-      if grep -q "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab 2>/dev/null; then
-        cp /etc/fstab /etc/fstab.backup.$(date +%Y%m%d-%H%M%S)
-        local fstab_opts=$(grep "^[^#].*[[:space:]]${mount_point}[[:space:]]" /etc/fstab | head -1 | awk '{print $4}')
-        local fstab_new_opts="$fstab_opts"
-        for opt in "${required_array[@]}"; do
-          if [[ ! "$fstab_new_opts" == *"$opt"* ]]; then
-            fstab_new_opts="$fstab_new_opts,$opt"
+    case ",$current_opts," in
+      *",$opt,"*) ;;
+      *)
+        missing_opts="$missing_opts $opt"
+        effect=""
+        case "$opt" in
+          nodev) effect="impide interpretar nodos de dispositivo en este montaje; puede afectar herramientas que dependan de dispositivos especiales." ;;
+          nosuid) effect="ignora bits SUID/SGID en este montaje; normalmente reduce riesgo, pero programas que dependan de esos bits dejarán de elevar privilegios." ;;
+          noexec) effect="impide ejecutar directamente binarios desde este montaje; puede romper instaladores, scripts de aplicaciones, agentes o herramientas que ejecuten desde $mount_point." ;;
+          *) effect="restringe una capacidad del montaje; valida las aplicaciones que usen $mount_point." ;;
+        esac
+        echo -e "${YELLOW}[WARN] $mount_point necesita opción $opt.${NC}"
+        echo "Qué hace/riesgo: $effect"
+        if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
+          if confirm_fs_change "$mount_point: $opt" "$effect"; then
+            approved_opts="$approved_opts $opt"
+          else
+            WARNINGS=$((WARNINGS + 1))
           fi
-        done
-        sed -i "s|\(.*[[:space:]]${mount_point}[[:space:]].*\)${fstab_opts}|\1${fstab_new_opts}|" /etc/fstab
-        echo -e "${GREEN}[✓] /etc/fstab actualizado${NC}"
-      fi
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] Error al remontar ${mount_point}${NC}"
+        else
+          WARNINGS=$((WARNINGS + 1))
+        fi
+        ;;
+    esac
+  done
+  [ -n "$missing_opts" ] || { echo -e "${GREEN}[✓] $mount_point cumple las opciones requeridas${NC}"; return 0; }
+  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+    echo "Opciones actuales: $current_opts; faltantes:$missing_opts"
+    return 0
+  fi
+  [ -n "$approved_opts" ] || { echo "[INFO] No se aprobaron cambios para $mount_point."; return 0; }
+
+  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS + 1)); return 1; }
+  new_opts="$current_opts"
+  for opt in $approved_opts; do
+    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
+  done
+  if mount -o remount,"$new_opts" "$mount_point"; then
+    echo -e "${GREEN}[✓] $mount_point remontado con opciones aprobadas: $approved_opts${NC}"
+    local -a approved_array=()
+    IFS=' ' read -r -a approved_array <<< "$approved_opts"
+    if ! persist_mount_options "$mount_point" false "" "${approved_array[@]}"; then
+      echo -e "${YELLOW}[WARN] El montaje está protegido en runtime, pero no se pudo hacer persistente en /etc/fstab; revise manualmente.${NC}"
+      WARNINGS=$((WARNINGS + 1))
     fi
+    FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}[!] Se requiere aplicar: mount -o remount,${new_opts} ${mount_point}${NC}"
+    echo -e "${RED}[ERROR] No se pudo remontar $mount_point; no se modificó fstab.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -306,22 +377,29 @@ check_mount_options() {
 # ==============================================
 apply_sticky_bit() {
   echo -e "\n${BLUE}[*] Verificando sticky bit...${NC}"
-
-  local sticky_issues=$(df --local -P 2>/dev/null | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \) 2>/dev/null)
-
+  local sticky_issues effect
+  sticky_issues="$(df --local -P 2>/dev/null | awk '{if (NR!=1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \( -perm -0002 -a ! -perm -1000 \) 2>/dev/null)"
   if [ -z "$sticky_issues" ]; then
     echo -e "${GREEN}[✓] Todos los directorios world-writable tienen sticky bit${NC}"
     return 0
   fi
-
-  echo -e "${RED}[!] Directorios sin sticky bit encontrados${NC}"
-
-  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-    echo "$sticky_issues" | xargs chmod a+t 2>/dev/null
+  echo -e "${YELLOW}[WARN] Directorios escribibles por todos sin sticky bit:${NC}"
+  printf '%s\n' "$sticky_issues"
+  effect="El sticky bit limita quién puede borrar o renombrar archivos de un directorio compartido (normalmente solo el propietario o root). Es una protección común, pero puede cambiar flujos de aplicaciones que borran archivos de otros usuarios."
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if ! confirm_fs_change "Aplicar sticky bit a los directorios listados" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if printf '%s\n' "$sticky_issues" | xargs -r chmod a+t; then
     echo -e "${GREEN}[✓] Sticky bit aplicado${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${YELLOW}[!] Se requiere aplicar: chmod a+t a los directorios listados${NC}"
+    echo -e "${RED}[ERROR] No se pudo aplicar sticky bit a todos los directorios.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
@@ -331,37 +409,49 @@ apply_sticky_bit() {
 # ==============================================
 disable_autofs() {
   echo -e "\n${BLUE}[*] Verificando autofs...${NC}"
-
-  if ! command -v automount &>/dev/null && ! systemctl list-unit-files 2>/dev/null | grep -q "autofs.service"; then
-    echo -e "${GREEN}[✓] autofs no esta instalado${NC}"
+  local present=false active=false enabled=false effect
+  if command -v automount >/dev/null 2>&1; then present=true; fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl list-unit-files autofs.service 2>/dev/null | grep -q 'autofs.service' && present=true
+    systemctl is-active --quiet autofs 2>/dev/null && active=true
+    systemctl is-enabled --quiet autofs 2>/dev/null && enabled=true
+  elif command -v service >/dev/null 2>&1; then
+    service autofs status >/dev/null 2>&1 && active=true
+    if command -v chkconfig >/dev/null 2>&1 && chkconfig --list autofs 2>/dev/null | grep -Eq '2:on|3:on|4:on|5:on'; then enabled=true; fi
+  fi
+  if [ "$present" != true ]; then
+    echo -e "${GREEN}[✓] autofs no está instalado${NC}"
     return 0
   fi
-
-  local need_fix=0
-  if systemctl is-active --quiet autofs 2>/dev/null; then
-    echo -e "${RED}[!] autofs esta ACTIVO${NC}"
-    need_fix=1
-  else
-    echo -e "${GREEN}[✓] autofs no esta activo${NC}"
+  if [ "$active" != true ] && [ "$enabled" != true ]; then
+    echo -e "${GREEN}[✓] autofs no está activo ni habilitado${NC}"
+    return 0
   fi
-
-  if systemctl is-enabled --quiet autofs 2>/dev/null; then
-    echo -e "${RED}[!] autofs esta habilitado${NC}"
-    need_fix=1
-  else
-    echo -e "${GREEN}[✓] autofs no esta habilitado${NC}"
+  effect="detiene/deshabilita el montaje automático de medios y recursos. Si el servidor usa automount para NFS, directorios de usuarios o almacenamiento, esos recursos pueden dejar de montarse."
+  echo -e "${YELLOW}[WARN] autofs presente: active=$active enabled=$enabled${NC}"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
   fi
-
-  if [ $need_fix -eq 1 ]; then
-    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-      systemctl stop autofs 2>/dev/null
-      systemctl disable autofs 2>/dev/null
-      echo -e "${GREEN}[✓] autofs deshabilitado${NC}"
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${YELLOW}[!] Se requiere: systemctl stop autofs && systemctl disable autofs${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+  if ! confirm_fs_change "Deshabilitar autofs" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  local rc=0
+  if command -v systemctl >/dev/null 2>&1; then
+    [ "$active" != true ] || systemctl stop autofs || rc=1
+    [ "$enabled" != true ] || systemctl disable autofs || rc=1
+  else
+    [ "$active" != true ] || service autofs stop || rc=1
+    [ "$enabled" != true ] || chkconfig autofs off || rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    echo -e "${GREEN}[✓] autofs detenido/deshabilitado${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    echo -e "${RED}[ERROR] No se pudo deshabilitar autofs completamente.${NC}"
+    WARNINGS=$((WARNINGS + 1))
   fi
 }
 
@@ -369,87 +459,94 @@ disable_autofs() {
 # CONFIGURAR /DEV/SHM
 # ==============================================
 configure_dev_shm() {
-  echo -e "\n${BLUE}[*] Configurando /dev/shm...${NC}"
-
-  if ! findmnt -n /dev/shm &>/dev/null; then
-    echo -e "${YELLOW}[!] /dev/shm no esta montado, creando...${NC}"
-    if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-      mount -t tmpfs tmpfs /dev/shm 2>/dev/null
-    fi
-  fi
-
-  local current_opts=$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null)
-  local required_opts="noexec,nosuid,nodev"
-
-  if [[ "$current_opts" == *"noexec"* ]] && [[ "$current_opts" == *"nodev"* ]] && [[ "$current_opts" == *"nosuid"* ]]; then
-    echo -e "${GREEN}[✓] /dev/shm ya tiene opciones seguras${NC}"
+  echo -e "\n${BLUE}[*] Verificando /dev/shm...${NC}"
+  if ! findmnt -n /dev/shm >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN] /dev/shm no aparece montado; no se monta automáticamente para evitar superponer un recurso vivo.${NC}"
+    WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
-  echo -e "${RED}[!] /dev/shm falta opciones de seguridad${NC}"
-
-  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-    mount -o remount,"$required_opts" /dev/shm 2>/dev/null
-    if [ $? -eq 0 ]; then
-      echo -e "${GREEN}[✓] /dev/shm configurado con opciones seguras${NC}"
-      if ! grep -q "^[^#].*/dev/shm" /etc/fstab 2>/dev/null; then
-        echo -e "\n# ==============================================" >>/etc/fstab
-        echo "# Hardening: /dev/shm con opciones seguras" >>/etc/fstab
-        echo "# Fuente: https://www.orangebox.cl" >>/etc/fstab
-        echo "tmpfs /dev/shm tmpfs defaults,$required_opts 0 0" >>/etc/fstab
-        echo -e "${GREEN}[✓] Entrada agregada a /etc/fstab${NC}"
-      fi
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] Error al configurar /dev/shm${NC}"
-    fi
-  else
-    echo -e "${YELLOW}[!] Se requiere: mount -o remount,${required_opts} /dev/shm${NC}"
-    WARNINGS=$((WARNINGS + 1))
+  local current_opts="" opt="" approved_opts="" new_opts="" effect
+  local -a required=("noexec" "nosuid" "nodev") approved_array=()
+  current_opts="$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null | tr ',' '\n' | sort -u | paste -sd, -)"
+  for opt in "${required[@]}"; do
+    case ",$current_opts," in
+      *",$opt,"*) ;;
+      *)
+        case "$opt" in
+          noexec) effect="bloquea la ejecución directa desde la memoria compartida; puede afectar aplicaciones que generen y ejecuten binarios temporales." ;;
+          nosuid) effect="ignora bits SUID/SGID en /dev/shm; programas que dependan de esos bits no elevarán privilegios." ;;
+          nodev) effect="impide interpretar nodos de dispositivo desde /dev/shm." ;;
+        esac
+        echo -e "${YELLOW}[WARN] Falta $opt en /dev/shm.${NC}"
+        echo "Qué hace/riesgo: $effect"
+        if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
+          if confirm_fs_change "/dev/shm: $opt" "$effect"; then approved_opts="$approved_opts $opt"; else WARNINGS=$((WARNINGS+1)); fi
+        else
+          WARNINGS=$((WARNINGS+1))
+        fi
+        ;;
+    esac
+  done
+  [ -n "$approved_opts" ] || return 0
+  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
+  new_opts="$current_opts"
+  for opt in $approved_opts; do
+    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
+  done
+  if ! mount -o remount,"$new_opts" /dev/shm; then
+    echo -e "${RED}[ERROR] No se pudo remontar /dev/shm.${NC}"
+    WARNINGS=$((WARNINGS+1))
+    return 1
   fi
+  IFS=' ' read -r -a approved_array <<< "$approved_opts"
+  if ! persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,$approved_opts 0 0" "${approved_array[@]}"; then
+    echo -e "${YELLOW}[WARN] /dev/shm está corregido en runtime, pero no se pudo persistir la configuración.${NC}"
+    WARNINGS=$((WARNINGS+1))
+  fi
+  echo -e "${GREEN}[✓] /dev/shm actualizado con opciones aprobadas: $approved_opts${NC}"
+  FIXED=$((FIXED+1))
 }
 
 # ==============================================
 # CONFIGURAR /PROC CON HIDEPID
 # ==============================================
 configure_proc() {
-  echo -e "\n${BLUE}[*] Configurando /proc con hidepid=2...${NC}"
-
-  if ! findmnt -n /proc &>/dev/null; then
-    echo -e "${YELLOW}[!] /proc no esta montado${NC}"
-    return 1
-  fi
-
-  local current_opts=$(findmnt -n -o OPTIONS /proc 2>/dev/null)
-
-  if [[ "$current_opts" == *"hidepid=2"* ]] || [[ "$current_opts" == *"hidepid=invisible"* ]]; then
-    echo -e "${GREEN}[✓] /proc ya tiene hidepid=2 configurado${NC}"
+  echo -e "\n${BLUE}[*] Verificando /proc hidepid...${NC}"
+  if ! findmnt -n /proc >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN] /proc no está montado; no se modifica.${NC}"
+    WARNINGS=$((WARNINGS + 1))
     return 0
   fi
-
-  echo -e "${RED}[!] /proc no tiene hidepid=2${NC}"
-  echo -e "    Actual: $current_opts"
-  echo -e "    Requerido: hidepid=2"
-
-  if [ "$AUTO_FIX" = true ] && [ "$CHECK_MODE" = false ]; then
-    mount -o remount,hidepid=2 /proc 2>/dev/null
-    if [ $? -eq 0 ]; then
-      echo -e "${GREEN}[✓] /proc configurado con hidepid=2${NC}"
-      if ! grep -q "^[^#].*/proc" /etc/fstab 2>/dev/null; then
-        echo -e "\n# ==============================================" >>/etc/fstab
-        echo "# Hardening: /proc con hidepid=2" >>/etc/fstab
-        echo "# Fuente: https://www.orangebox.cl" >>/etc/fstab
-        echo "proc /proc proc defaults,hidepid=2 0 0" >>/etc/fstab
-        echo -e "${GREEN}[✓] Entrada agregada a /etc/fstab${NC}"
-      fi
-      FIXED=$((FIXED + 1))
-    else
-      echo -e "${RED}[!] Error al configurar /proc${NC}"
-    fi
-  else
-    echo -e "${YELLOW}[!] Se requiere: mount -o remount,hidepid=2 /proc${NC}"
-    WARNINGS=$((WARNINGS + 1))
+  local current_opts="" effect="" answer_opts="" approved_array=()
+  current_opts="$(findmnt -n -o OPTIONS /proc 2>/dev/null)"
+  if [[ ",$current_opts," == *",hidepid=2,"* ]] || [[ ",$current_opts," == *",hidepid=invisible,"* ]]; then
+    echo -e "${GREEN}[✓] /proc ya usa hidepid=2${NC}"
+    return 0
   fi
+  effect="oculta procesos de otros usuarios en /proc para reducir reconocimiento local. Puede romper o limitar agentes de monitoreo, herramientas de soporte, supervisores y aplicaciones que inspeccionan procesos de otros usuarios."
+  echo -e "${YELLOW}[WARN] /proc no tiene hidepid=2; opciones actuales: $current_opts${NC}"
+  echo "Qué hace/riesgo: $effect"
+  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if ! confirm_fs_change "/proc: hidepid=2" "$effect"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
+  if ! mount -o remount,hidepid=2 /proc; then
+    echo -e "${RED}[ERROR] No se pudo remontar /proc con hidepid=2.${NC}"
+    WARNINGS=$((WARNINGS+1))
+    return 1
+  fi
+  if ! persist_mount_options /proc true "proc /proc proc defaults,hidepid=2 0 0" "hidepid=2"; then
+    echo -e "${YELLOW}[WARN] /proc tiene hidepid=2 en runtime, pero no se pudo persistir en /etc/fstab.${NC}"
+    WARNINGS=$((WARNINGS+1))
+  fi
+  echo -e "${GREEN}[✓] /proc actualizado con hidepid=2${NC}"
+  FIXED=$((FIXED+1))
 }
 
 # ==============================================
@@ -484,55 +581,48 @@ show_summary() {
 # FUNCION PRINCIPAL
 # ==============================================
 main() {
-  echo -e "${GREEN}============================================${NC}"
+  echo -e "${GREEN}==============================================${NC}"
   echo -e "${GREEN}  Hardening de Filesystem - perfil OrangeBox${NC}"
-  echo -e "${GREEN}============================================${NC}\n"
+  echo -e "${GREEN}==============================================${NC}\n"
 
-  if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    show_usage
-    exit 0
-  fi
+  case "$1" in
+    --help|-h) show_usage; exit 0 ;;
+    --fix|-f)
+      AUTO_FIX=true
+      CHECK_MODE=false
+      echo -e "${YELLOW}MODO FIX: se solicitará confirmación individual antes de cada cambio sensible.${NC}"
+      ;;
+    --check|-c|"")
+      AUTO_FIX=false
+      CHECK_MODE=true
+      echo -e "${GREEN}MODO AUDITORÍA: no se aplicarán cambios.${NC}"
+      ;;
+    *)
+      echo "${RED}Argumento desconocido: $1${NC}" >&2
+      show_usage
+      exit 2
+      ;;
+  esac
 
-  if [ "$1" = "--check" ] || [ "$1" = "-c" ]; then
-    echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    CHECK_MODE=true
-    AUTO_FIX=false
-  else
-    echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
-    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-    CHECK_MODE=false
-    AUTO_FIX=true
-  fi
-
-  # Deshabilitar modulos de filesystem
   disable_modules
-
-  # Verificar particiones separadas (solo muestra, no puede corregirse automaticamente)
   check_separated_partitions
 
-  # Verificar opciones de montaje
-  for mount_point in /opt /var /tmp /boot /home /var/log /var/tmp /var/ossec; do
-    if findmnt -n "$mount_point" &>/dev/null; then
+  local mount_point required_opts
+  for mount_point in /opt /var /tmp /boot /home /var/log /var/tmp /var/ossec /var/log/audit; do
+    if findmnt -n "$mount_point" >/dev/null 2>&1; then
       required_opts="${MOUNT_REQUIREMENTS[$mount_point]}"
-      if [ -n "$required_opts" ]; then
-        check_mount_options "$mount_point" "$required_opts"
-      fi
+      [ -z "$required_opts" ] || check_mount_options "$mount_point" "$required_opts"
     fi
   done
 
-  # Configurar puntos especiales
   configure_dev_shm
   configure_proc
-
-  # Otras configuraciones
   apply_sticky_bit
   disable_autofs
 
   show_summary
-
-  if [ "$CHECK_MODE" = true ] && [ $WARNINGS -gt 0 ]; then
-    echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0${NC}"
+  if [ "$CHECK_MODE" = true ] && [ "$WARNINGS" -gt 0 ]; then
+    echo -e "\n${BLUE}Para aplicar los cambios, ejecute: $0 --fix${NC}"
   fi
 }
 

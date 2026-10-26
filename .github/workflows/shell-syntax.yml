@@ -64,6 +64,8 @@ jobs:
         run: bash tests/test_idempotent_baseline.sh
       - name: Test operational policy guards
         run: bash tests/test_policy_guards.sh
+      - name: Test filesystem fix safety
+        run: bash tests/test_fs_safety_guard.sh
       - name: Test SELinux guarded transition
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
