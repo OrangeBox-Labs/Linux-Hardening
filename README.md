@@ -193,7 +193,7 @@ El proyecto diferencia claramente:
 
 ### Después del login
 
-`/etc/motd` queda vacío para evitar duplicados. El perfil `/etc/profile.d/99-orangebox-motd.sh` muestra solo datos útiles al abrir una shell interactiva: IP interna del servidor, uptime normalizado, load average de 1/5/15 minutos y fecha/hora. No repite el logo ni el aviso de seguridad. FIGlet pertenece al banner previo al login: en modo `--fix` se intenta instalar desde repositorios ya configurados y, si falla, se genera el logo ASCII de fallback.
+`/etc/motd` queda vacío para evitar duplicados. El perfil `/etc/profile.d/99-orangebox-motd.sh` muestra primero el logo FIGlet (o ASCII de fallback) y luego una ficha de sesión ordenada: IP interna, uptime, `Load`, IP del cliente, usuario efectivo y fecha/hora una sola vez. Usa la misma paleta ANSI para todos los usuarios y no duplica el aviso de seguridad previo al login. En modo `--fix` se intenta instalar FIGlet desde repositorios ya configurados; no se habilitan repositorios ni se actualiza el sistema completo.
 
 El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
 
@@ -422,7 +422,7 @@ Copyright (c) 2025 Felipe Roman - OrangeBox Labs
 
 ## MOTD dinámico por sesión
 
-El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra únicamente IP interna del servidor, uptime calculado desde `/proc/uptime`, load average desde `/proc/loadavg` y fecha/hora local. No muestra logo, IP remota ni aviso de seguridad.
+El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra primero el logo FIGlet (o ASCII de fallback) y debajo IP interna, uptime desde `/proc/uptime`, carga desde `/proc/loadavg` bajo la etiqueta `Load`, IP del cliente, usuario efectivo y fecha/hora local. La fecha/hora aparece una sola vez, y el color de la ficha es uniforme para root y usuarios normales. El aviso de acceso restringido permanece en `/etc/issue` y `/etc/issue.net` antes de autenticar.
 
 FIGlet se usa para generar el logo estático del banner previo a la autenticación. Durante `--fix`, si FIGlet o la fuente `small` no están disponibles, se intenta instalar desde los repositorios ya configurados. No se habilitan repositorios ni se actualiza el sistema completo. Si no puede instalarse, `/etc/issue` y `/etc/issue.net` reciben un logo ASCII embebido. El uptime y la carga del panel de shell se obtienen de `/proc`, compatibles con CentOS 6.
 
