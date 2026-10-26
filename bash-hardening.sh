@@ -79,6 +79,10 @@ make_backup() {
   fi
   for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
     [ -e "$file" ] || [ -L "$file" ] || continue
+    if [ -L "$file" ]; then
+      echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica Bash sin un backup seguro del destino.${NC}" >&2
+      return 1
+    fi
     backup="$BACKUP_DIR$file"
     parent="$(dirname "$backup")"
     if ! mkdir -p "$parent" || [ -L "$parent" ] || [ ! -d "$parent" ]; then
