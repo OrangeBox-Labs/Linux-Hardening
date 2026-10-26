@@ -1,6 +1,6 @@
 #!/bin/bash
 # OrangeBox Linux Hardening - Safe Enterprise Baseline
-# Version 1.4.19 - RHEL/CentOS/Rocky/AlmaLinux 6-10
+# Version 1.4.20 - RHEL/CentOS/Rocky/AlmaLinux 6-10
 # Audit by default. Interactive --fix asks separately before delicate modules; --fix --auto only applies banners/Bash and audits the delicate controls.
 # Core baseline never changes SELinux or creates cron.allow/at.allow.
 # High-risk companion modules require explicit selection and --allow-risky.
@@ -23,7 +23,7 @@ else
   echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
   exit 1
 fi
-SCRIPT_VERSION=1.4.19
+SCRIPT_VERSION=1.4.20
 AUTO_FIX=false
 AUTO_MODE=false
 ALLOW_RISKY=false
@@ -650,7 +650,10 @@ kernel_module(){
       set_sysctl net.ipv6.conf.default.accept_ra 0
     fi
   elif [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
-    sysctl_safe_log "N/A" "Controles IPv6 (accept_source_route y accept_ra): este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_source_route: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.all.accept_ra: este kernel no expone /proc/sys/net/ipv6."
+    sysctl_safe_log "N/A" "net.ipv6.conf.default.accept_ra: este kernel no expone /proc/sys/net/ipv6."
   fi
 }
 
@@ -718,7 +721,7 @@ rsyslog_module(){
   local conf=/etc/systemd/journald.conf
   section "JOURNAL / SYSLOG"
   if [ "${OS_VERSION:-}" = 6 ]; then
-    na "journald Storage=persistent no aplica a CentOS/RHEL 6; se usa el stack legacy."
+    na "journald no aplica a CentOS/RHEL 6; Storage=persistent está excluido porque se usa el stack legacy."
     na "/var/log/journal como persistencia de journald no aplica a CentOS/RHEL 6."
     if rsyslog_legacy_is_active; then
       ok "rsyslog activo en el stack legacy"
@@ -729,7 +732,7 @@ rsyslog_module(){
   fi
   if [ "$AUTO_FIX" != true ]; then
     if [ ! -f "$conf" ]; then
-      warn "$conf no existe; no se puede confirmar Storage=persistent y el baseline no crea ese archivo automáticamente."
+      warn "$conf no existe; No se puede confirmar Storage=persistent y el baseline no crea ese archivo automáticamente."
     elif grep -Eq '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*persistent([[:space:]]*(#.*)?)?$' "$conf"; then
       ok "journald Storage=persistent configurado explícitamente"
     else
@@ -868,6 +871,7 @@ configure_ssh_banner() {
 
 banners_module() {
   section "BANNERS / MOTD"
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then configure_ssh_banner; fi
   local login_tmp motd_tmp session_motd_tmp target content_tmp mode owner group
 
   login_tmp="$(mktemp)" || { warn "No se pudo crear el banner previo al login"; return; }
@@ -927,7 +931,7 @@ banners_module() {
   done
 
   rm -f "$login_tmp" "$motd_tmp" "$session_motd_tmp"
-  configure_ssh_banner
+  if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then configure_ssh_banner; fi
 }
 time_module(){
   echo -e "\n$BLUE### TIME SYNC ###$NC"
@@ -1087,6 +1091,53 @@ ORANGEBOX_UNLIMITED_HISTORY
   fi
 }
 
+bash_profile_check() {
+  local file="$1" label="$2" needle="$3" detail="${4:-}"
+  if [ ! -f "$file" ]; then
+    warn "$label: no verificable; falta $file"
+    return 0
+  fi
+  if grep -Fq -- "$needle" "$file" && { [ -z "$detail" ] || grep -Fq -- "$detail" "$file"; }; then
+    ok "$label"
+  else
+    warn "$label: falta o difiere en $file"
+  fi
+}
+
+bash_audit_profile_controls() {
+  local file="$1" mode owner group
+  bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
+  bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
+  bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
+  bash_profile_check "$file" "Bash: HISTSIZE=-1 (sin límite de líneas en memoria)" 'export HISTSIZE=-1'
+  bash_profile_check "$file" "Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)" 'export HISTFILESIZE=-1'
+  bash_profile_check "$file" "Bash: no omite comandos del historial" 'export HISTCONTROL=' 'unset HISTIGNORE'
+  bash_profile_check "$file" "Bash: historial acumulativo entre sesiones" 'shopt -s histappend'
+  bash_profile_check "$file" "Bash: historial con fecha y hora" "export HISTTIMEFORMAT='%F %T '"
+  bash_profile_check "$file" "Bash: bloquea history -c/-d/-w desde el wrapper" 'history() {' '*c*|*d*|*w*)'
+  bash_profile_check "$file" "Bash: redirige HISTFILE no persistente a ~/.bash_history" 'HISTFILE="${HOME}/.bash_history"'
+  bash_profile_check "$file" "Bash: protege el archivo de historial con modo 0600" 'chmod 600 "$HISTFILE"'
+  bash_profile_check "$file" "Bash: modo de edición Emacs" 'set -o emacs'
+  bash_profile_check "$file" "Readline: Ctrl+A va al inicio de línea" 'beginning-of-line' '\C-a'
+  bash_profile_check "$file" "Readline: Ctrl+E va al final de línea" 'end-of-line' '\C-e'
+  bash_profile_check "$file" "Bash: obtiene FQDN mediante hostname -f" 'hostname -f'
+  bash_profile_check "$file" "Bash: prompt por rol root/no-root y color diferenciado" 'orangebox_set_prompt() {' '\e[1;31m'
+  bash_profile_check "$file" "Bash: prompt de usuario no-root usa color diferenciado" 'orangebox_set_prompt() {' '\e[1;32m'
+  bash_profile_check "$file" "Bash: reaplica prompt e historial en cada prompt" 'orangebox_pre_prompt() {' 'history -a'
+  bash_profile_check "$file" "Bash: registra orangebox_pre_prompt en PROMPT_COMMAND" 'orangebox_pre_prompt' 'PROMPT_COMMAND='
+  bash_profile_check "$file" "Bash: el resto del perfil solo afecta shells interactivas" '# El resto de esta configuracion solo aplica a shells interactivos.'
+  if [ -f "$file" ]; then
+    mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+    owner="$(stat -c '%U' "$file" 2>/dev/null || true)"
+    group="$(stat -c '%G' "$file" 2>/dev/null || true)"
+    if [ "$mode" = 644 ] && [ "$owner" = root ] && [ "$group" = root ]; then
+      ok "Perfil Bash OrangeBox: propietario root:root y permisos 0644"
+    else
+      warn "Perfil Bash OrangeBox: propietario/permisos actuales ${owner:-?}:${group:-?} ${mode:-?}; objetivo root:root 0644"
+    fi
+  fi
+}
+
 bash_module() {
   section "BASH / HISTORIAL / PROMPT"
   local target=/etc/profile.d/99-orangebox-linux-hardening.sh tmp f
@@ -1100,7 +1151,6 @@ bash_module() {
       FIXED=$((FIXED+1))
     else
       warn "/etc/profile.d no existe; se requiere crearlo para instalar el perfil Bash OrangeBox"
-      return
     fi
   fi
 
@@ -1242,7 +1292,9 @@ export PROMPT_COMMAND
 orangebox_set_prompt
 ORANGEBOX_BASH
 
-  if [ -f "$target" ] && cmp -s "$tmp" "$target" &&
+  if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
+    bash_audit_profile_controls "$target"
+  elif [ -f "$target" ] && cmp -s "$tmp" "$target" &&
      [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
      [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
      [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then

@@ -70,4 +70,21 @@ grep -Fq 'No se puede confirmar Storage=persistent' "$MAIN" || fail "journald no
 grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" || fail "Bash no comprueba el include de /etc/bashrc en audit"
 grep -Fq 'no existe; --fix puede crearlo con historial ilimitado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
 
+# Every managed Bash hardening control must be surfaced separately in audit.
+grep -Fq 'bash_audit_profile_controls "$target"' "$MAIN" || fail "Bash no informa cada control del perfil en audit"
+for control in \
+  'Bash timeout de usuario: TMOUT=120 y readonly' \
+  'Bash: HISTSIZE=-1 (sin límite de líneas en memoria)' \
+  'Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)' \
+  'Bash: historial con fecha y hora' \
+  'Bash: bloquea history -c/-d/-w desde el wrapper' \
+  'Readline: Ctrl+A va al inicio de línea' \
+  'Readline: Ctrl+E va al final de línea' \
+  'Bash: obtiene FQDN mediante hostname -f' \
+  'Bash: registra orangebox_pre_prompt en PROMPT_COMMAND'; do
+  grep -Fq "$control" "$MAIN" || fail "falta estado individual de hardening Bash: $control"
+done
+grep -Fq 'net.ipv6.conf.default.accept_ra: este kernel no expone' "$MAIN" || fail "falta estado IPv6 N/A granular"
+grep -Fq 'journald no aplica a CentOS/RHEL 6' "$MAIN" || fail "falta estado N/A de journald en EL6"
+
 pass "auditoría presenta estados OK y pendientes, con resumen y firewall independiente"
