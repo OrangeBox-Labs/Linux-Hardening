@@ -44,4 +44,10 @@ if grep -Fq 'no se puede aplicar sin sobrescribir configuración o fuera de las 
   fail "el preflight aún usa un mensaje genérico sin motivo ni remediación"
 fi
 
+SSH_COMPLETE="$ROOT_DIR/ssh-hardening-complete.sh"
+if grep -Eq '^[[:space:]]*ClientAliveCountMax[[:space:]]+0([[:space:]]|$)' "$SSH_COMPLETE"; then
+  fail "ssh-hardening-complete deshabilita el cierre por ClientAliveCountMax=0"
+fi
+grep -Fq 'ClientAliveCountMax 3' "$SSH_COMPLETE" || fail "ssh-hardening-complete no conserva el timeout con ClientAliveCountMax=3"
+
 pass "SSH visible en auditoría, aplicación validada con rollback e instrucciones cuando no puede corregirse automáticamente"

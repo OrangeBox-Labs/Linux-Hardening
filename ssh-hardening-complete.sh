@@ -315,7 +315,7 @@ X11Forwarding no
 AllowTcpForwarding no
 PermitUserEnvironment no
 ClientAliveInterval 300
-ClientAliveCountMax 0
+ClientAliveCountMax 3
 MaxAuthTries 4
 MaxSessions 10
 LoginGraceTime 60
