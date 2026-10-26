@@ -25,6 +25,9 @@ Script para configurar sincronizacion de tiempo segun CIS Benchmark secciones 2.
 ### Adicional
 - Fuerza sincronizacion inmediata
 - Verifica estado de sincronizacion
+- En EL6 con el paquete `ntp`, detecta si ya existe una tarea cron que reinicie `ntpd`
+- Si falta, `--fix` agrega `/etc/cron.d/orangebox-ntp-refresh` para reiniciarlo cada 6 horas; la auditoría normal solo informa y no modifica
+- El resultado del reinicio programado se registra en syslog con la etiqueta `orangebox-ntp-refresh`
 
 ## Servidores NTP configurados
 
@@ -62,6 +65,20 @@ timedatectl status
 chronyc makestep
 ntpdate -u time.google.com
 ```
+
+## Refresco periódico de ntpd en EL6
+
+La tarea queda en `/etc/cron.d/orangebox-ntp-refresh` y se ejecuta a los minutos 17 de las horas 00, 06, 12 y 18. Antes de crearla, el script busca tareas existentes en `/etc/crontab`, `/etc/cron.d/`, los crontabs de usuarios y el crontab de root para evitar duplicados. No se instala en sistemas que usan chrony ni fuera de EL6.
+
+Verificar la tarea:
+
+```
+cat /etc/cron.d/orangebox-ntp-refresh
+grep orangebox-ntp-refresh /var/log/messages
+ntpq -pn
+```
+
+Este reinicio programado es una mitigación operativa para el caso legacy reportado, no un reemplazo del diagnóstico del reloj del sistema, la plataforma virtual o la fuente NTP.
 
 ## Ver logs
 

@@ -30,6 +30,11 @@ AUTO_FIX=false
 
 BACKUP_DIR="/root/time-backup-$(date +%Y%m%d-%H%M%S)"
 
+# Mitigación operativa para ntpd legacy en EL6: refresco periódico del servicio.
+NTP_REFRESH_CRON="/etc/cron.d/orangebox-ntp-refresh"
+NTPD_RESTART_PATTERN='(service[[:space:]]+ntpd[[:space:]]+restart|/etc/init[.]d/ntpd[[:space:]]+restart|systemctl[[:space:]]+restart[[:space:]]+ntpd)'
+NTPD_REFRESH_CRON_LINE='17 */6 * * * root if /sbin/service ntpd restart >/dev/null 2>&1; then /bin/logger -t orangebox-ntp-refresh "ntpd restart OK"; else /bin/logger -p daemon.err -t orangebox-ntp-refresh "ntpd restart FAILED"; fi'
+
 # Servidores NTP (pool sudamericano)
 NTP_SERVERS=(
   "time.google.com"
@@ -74,6 +79,9 @@ make_backup() {
     fi
     if [ -f /etc/sysconfig/ntpd ]; then
       cp /etc/sysconfig/ntpd "$BACKUP_DIR/"
+    fi
+    if [ -f "$NTP_REFRESH_CRON" ]; then
+      cp "$NTP_REFRESH_CRON" "$BACKUP_DIR/"
     fi
 
     echo -e "${GREEN}[✓] Backup guardado en: $BACKUP_DIR${NC}"
@@ -308,6 +316,104 @@ EOF
 }
 
 # ==============================================
+# REFRESCO PERIODICO DE NTP PARA EL LEGACY EL6
+# ==============================================
+detect_os_major_for_ntp_refresh() {
+  local major=""
+
+  if [ -r /etc/os-release ]; then
+    major="$(sed -nE 's/^VERSION_ID="?([0-9]+)(\.[^"]*)?"?$/\1/p' /etc/os-release | head -n 1)"
+  fi
+
+  if [ -z "$major" ] && [ -r /etc/redhat-release ]; then
+    major="$(sed -n 's/.*release[[:space:]]\([0-9][0-9]*\).*/\1/p' /etc/redhat-release | head -n 1)"
+  fi
+
+  printf '%s\n' "$major"
+}
+
+ntpd_restart_job_source() {
+  local source=""
+
+  # Revisar los cron.d, el crontab del sistema y los spool de usuarios.
+  for source in /etc/crontab /etc/cron.d/* /var/spool/cron/*; do
+    [ -f "$source" ] || continue
+    if grep -Eiv '^[[:space:]]*#' "$source" 2>/dev/null | grep -Eiq "$NTPD_RESTART_PATTERN"; then
+      printf '%s\n' "$source"
+      return 0
+    fi
+  done
+
+  if command -v crontab >/dev/null 2>&1 &&
+     crontab -l -u root 2>/dev/null | grep -Eiv '^[[:space:]]*#' | grep -Eiq "$NTPD_RESTART_PATTERN"; then
+    printf '%s\n' "crontab de root"
+    return 0
+  fi
+
+  return 1
+}
+
+configure_legacy_ntp_refresh() {
+  local os_major="" job_source=""
+
+  os_major="$(detect_os_major_for_ntp_refresh)"
+  # Aplicar solo al sistema legacy EL6 que usa el paquete ntp/ntpd.
+  if [ "$os_major" != "6" ] || ! rpm -q ntp &>/dev/null; then
+    return 0
+  fi
+
+  echo -e "\n${BLUE}[*] Verificando refresco periódico de ntpd para EL6...${NC}"
+
+  if job_source="$(ntpd_restart_job_source)"; then
+    echo -e "${GREEN}[✓] Ya existe una tarea de reinicio de ntpd: $job_source${NC}"
+    return 0
+  fi
+
+  if [ "$AUTO_FIX" != true ]; then
+    echo -e "${YELLOW}[!] No se detectó un reinicio periódico de ntpd en cron; --fix agregará uno cada 6 horas.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  if [ -L "$NTP_REFRESH_CRON" ] || { [ -e "$NTP_REFRESH_CRON" ] && [ ! -f "$NTP_REFRESH_CRON" ]; }; then
+    echo -e "${RED}[!] No se puede instalar el cron de ntpd: $NTP_REFRESH_CRON no es un archivo regular.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  if ! mkdir -p /etc/cron.d; then
+    echo -e "${RED}[!] No se pudo preparar /etc/cron.d para el refresco de ntpd.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
+  if [ -f "$NTP_REFRESH_CRON" ]; then
+    {
+      printf '\n# OrangeBox: refresco periódico de ntpd legacy cada 6 horas\n'
+      printf '%s\n' "$NTPD_REFRESH_CRON_LINE"
+    } >> "$NTP_REFRESH_CRON"
+  else
+    cat > "$NTP_REFRESH_CRON" <<EOF
+# OrangeBox: refresco periódico de ntpd legacy cada 6 horas
+SHELL=/bin/sh
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+$NTPD_REFRESH_CRON_LINE
+EOF
+  fi
+
+  if chown root:root "$NTP_REFRESH_CRON" && chmod 644 "$NTP_REFRESH_CRON" &&
+     job_source="$(ntpd_restart_job_source)"; then
+    echo -e "${GREEN}[✓] Refresco periódico configurado en $NTP_REFRESH_CRON (cada 6 horas).${NC}"
+    echo -e "${YELLOW}[INFO] El resultado se registra en syslog con la etiqueta orangebox-ntp-refresh.${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    echo -e "${RED}[!] No se pudo validar la tarea periódica de ntpd tras configurarla.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+}
+
+# ==============================================
 # INICIAR Y HABILITAR SERVICIO
 # ==============================================
 start_service() {
@@ -492,6 +598,7 @@ main() {
   fi
 
   start_service
+  configure_legacy_ntp_refresh
   force_sync
   check_status
 
