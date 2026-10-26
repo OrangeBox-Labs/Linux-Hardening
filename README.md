@@ -22,7 +22,7 @@ Linux-Hardening está evolucionando hacia algo más útil que una colección de 
 
 La filosofía actual de OrangeBox es bastante simple: **primero comprobar, después preguntar y finalmente cambiar**. El baseline incorpora controles de idempotencia, preflight de configuración efectiva, auditorías de solo lectura y políticas especiales para ambientes donde romper SSH a las 3 de la mañana no es precisamente una feature.
 
-El estado detallado del proyecto, los módulos implementados, los controles pendientes y las brechas CIS está en [PROJECT-STATUS.md](PROJECT-STATUS.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
+El estado detallado del proyecto está en [PROJECT-STATUS.md](PROJECT-STATUS.md), y el inventario de controles presentes/ausentes por dominio está en [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
 
 ### Cambios recientes del baseline y los módulos
 
