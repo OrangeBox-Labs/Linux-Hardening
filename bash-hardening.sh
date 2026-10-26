@@ -9,6 +9,14 @@ else
   exit 1
 fi
 
+if [ -r "$OB_COMPAT_DIR/lib/orangebox-motd.sh" ]; then
+  # shellcheck source=lib/orangebox-motd.sh
+  . "$OB_COMPAT_DIR/lib/orangebox-motd.sh"
+else
+  echo "[ERROR] Falta lib/orangebox-motd.sh; actualice el repositorio completo." >&2
+  exit 1
+fi
+
 # ==============================================
 # Script: bash-hardening.sh
 # Autor: Felipe Roman
@@ -37,6 +45,7 @@ BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 # Archivos de configuración
 BASHRC_SYSTEM="/etc/bashrc"
 PROFILE_D="/etc/profile.d/orangebox.sh"
+PROFILE_MOTD="/etc/profile.d/99-orangebox-motd.sh"
 ALIASES_D="/etc/profile.d/aliases.sh"
 HISTORY_SYSLOG="/etc/profile.d/syslog_history.sh"
 HISTORY_SECURE="/etc/profile.d/history_secure.sh"
@@ -77,7 +86,7 @@ make_backup() {
     echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup Bash $BACKUP_DIR.${NC}" >&2
     return 1
   fi
-  for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
+  for file in "$BASHRC_SYSTEM" "$PROFILE_D" "$PROFILE_MOTD" "$ALIASES_D" "$HISTORY_SYSLOG" "$HISTORY_SECURE" "$BASHRC_ROOT" "$SKEL_BASHRC" "$RSYSLOG_CONF"; do
     [ -e "$file" ] || [ -L "$file" ] || continue
     if [ -L "$file" ]; then
       echo -e "${RED}[ERROR] $file es un enlace simbólico; no se modifica Bash sin un backup seguro del destino.${NC}" >&2
@@ -235,6 +244,56 @@ umask 027
 # Historial habilitado e ilimitado; los valores se revalidan por sesión.
 EOF
     echo -e "${GREEN}[✓] Profile creado en $PROFILE_D${NC}"
+    FIXED=$((FIXED + 1))
+  else
+    WARNINGS=$((WARNINGS + 1))
+  fi
+}
+
+# ==============================================
+# CONFIGURAR BIENVENIDA ÚNICA DE SESIÓN
+# ==============================================
+configure_session_motd() {
+  echo -e "\n${BLUE}[*] Configurando logo y datos de sesión...${NC}"
+
+  if [ -f "$PROFILE_MOTD" ] &&
+     grep -Fq 'figlet -f small OrangeBox' "$PROFILE_MOTD" &&
+     grep -Fq '"Load:"' "$PROFILE_MOTD" &&
+     ! grep -Fq 'Load (1/5/15m):' "$PROFILE_MOTD" &&
+     grep -Fq 'IP del cliente:' "$PROFILE_MOTD" &&
+     grep -Fq 'Fecha/hora:' "$PROFILE_MOTD" &&
+     [ "$(grep -Fc 'Fecha/hora:' "$PROFILE_MOTD")" -eq 1 ] &&
+     grep -Fq 'OB_CYAN=$(printf' "$PROFILE_MOTD" &&
+     ! grep -Fq 'tput' "$PROFILE_MOTD"; then
+    echo -e "${GREEN}[✓] Bienvenida de shell ya configurada${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}[!] Bienvenida de shell ausente o desactualizada${NC}"
+
+  if [ "$AUTO_FIX" = true ]; then
+    local motd_tmp
+    motd_tmp=$(mktemp "${PROFILE_MOTD}.XXXXXX") || {
+      echo -e "${RED}[ERROR] No se pudo crear temporal para $PROFILE_MOTD${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    }
+
+    if ! orangebox_motd_write_profile "$motd_tmp" || ! sh -n "$motd_tmp"; then
+      rm -f "$motd_tmp"
+      echo -e "${RED}[ERROR] No se pudo generar/validar la bienvenida dinámica${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+
+    if ! chmod 644 "$motd_tmp" || ! chown root:root "$motd_tmp" || ! mv -f "$motd_tmp" "$PROFILE_MOTD"; then
+      rm -f "$motd_tmp"
+      echo -e "${RED}[ERROR] No se pudo instalar $PROFILE_MOTD${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+
+    echo -e "${GREEN}[✓] Bienvenida de shell instalada en $PROFILE_MOTD${NC}"
     FIXED=$((FIXED + 1))
   else
     WARNINGS=$((WARNINGS + 1))
@@ -695,6 +754,13 @@ check_status() {
   echo -e "${BLUE}Profile.d:${NC}"
   [ -f "$PROFILE_D" ] && echo -e "  ${GREEN}✓${NC} $PROFILE_D existe" || echo -e "  ${RED}✗${NC} $PROFILE_D no existe"
 
+  echo -e "\n${BLUE}MOTD de shell:${NC}"
+  if [ -f "$PROFILE_MOTD" ] && grep -Fq '"Load:"' "$PROFILE_MOTD" && ! grep -Fq 'Load (1/5/15m):' "$PROFILE_MOTD" && grep -Fq 'figlet -f small OrangeBox' "$PROFILE_MOTD"; then
+    echo -e "  ${GREEN}✓${NC} Logo y ficha de sesión unificados"
+  else
+    echo -e "  ${RED}✗${NC} MOTD ausente o desactualizado"
+  fi
+
   echo -e "\n${BLUE}Aliases:${NC}"
   [ -f "$ALIASES_D" ] && echo -e "  ${GREEN}✓${NC} $ALIASES_D existe" || echo -e "  ${RED}✗${NC} $ALIASES_D no existe"
 
@@ -796,6 +862,7 @@ main() {
 
   # Ejecutar configuraciones
   configure_profile
+  configure_session_motd
   configure_aliases
   configure_syslog_history
   configure_secure_history
