@@ -203,7 +203,7 @@ ssh_setting_impact() {
     ciphers) echo "Restringe cifrados; equipos legacy pueden dejar de negociar una sesión." ;;
     macs) echo "Restringe algoritmos MAC; clientes antiguos pueden perder compatibilidad." ;;
     permitemptypasswords) echo "Impide autenticación mediante contraseñas vacías." ;;
-    challenger esponseauthentication|kbdinteractiveauthentication) echo "Desactiva keyboard-interactive; puede romper MFA o módulos PAM que dependan de ese método." ;;
+    challengeresponseauthentication|kbdinteractiveauthentication) echo "Desactiva keyboard-interactive; puede romper MFA o módulos PAM que dependan de ese método." ;;
     kerberosauthentication|gssapiauthentication) echo "Desactiva autenticación integrada Kerberos/GSSAPI; identidades de dominio o SSO pueden verse afectadas." ;;
     x11forwarding) echo "Deshabilita aplicaciones gráficas remotas por SSH." ;;
     allowtcpforwarding) echo "Deshabilita túneles TCP/port-forwarding SSH; puede afectar bastiones, proxies y automatización." ;;
