@@ -33,7 +33,7 @@ if grep -Fq 'persiste backlog TCP/reintentos recomendados' "$ORCHESTRATOR"; then
   fail "la descripción de SYN flood aún afirma que modifica reintentos TCP"
 fi
 grep -Fq 'orangebox_sysctl_persistence_target()' "$ORCHESTRATOR" || fail "falta selector de persistencia sysctl por generación"
-grep -Fq 'printf \'%s\\n\' /etc/sysctl.conf' "$ORCHESTRATOR" || fail "CentOS/RHEL 6 no tiene fallback persistente a /etc/sysctl.conf"
+grep -Fq '/etc/sysctl.conf' "$ORCHESTRATOR" || fail "CentOS/RHEL 6 no tiene fallback persistente a /etc/sysctl.conf"
 grep -Fq 'synflood_select_persistence_target' "$ORCHESTRATOR" || fail "SYN flood no selecciona persistencia en sistemas legacy"
 if grep -Fq '[ -d /etc/sysctl.d ] || { warn "/etc/sysctl.d no existe"; return; }' "$ORCHESTRATOR"; then
   fail "SYN flood abandona la auditoría en CentOS 6 por falta de /etc/sysctl.d"

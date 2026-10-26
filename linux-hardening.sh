@@ -92,9 +92,9 @@ prepare_backup(){ mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"; }
 backup_once(){ local src="$1"; [ -e "$src" ] || return 0; local dst="$BACKUP_DIR$(dirname "$src")"; mkdir -p "$dst"; cp -a "$src" "$BACKUP_DIR$src"; }
 orangebox_sysctl_persistence_target() {
   if [ "${OS_VERSION:-}" = 6 ]; then
-    printf '%s\\n' /etc/sysctl.conf
+    printf '%s\n' /etc/sysctl.conf
   else
-    printf '%s\\n' /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
+    printf '%s\n' /etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
   fi
 }
 
