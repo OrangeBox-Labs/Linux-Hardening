@@ -116,7 +116,9 @@ configure_banner_file() {
       printf '%s' "$content" > "$file"
     fi
     if [ "$file" = "/etc/motd" ]; then
-      echo -e "${GREEN}[✓] MOTD breve configurado en $file${NC}"
+      echo -e "${GREEN}[✓] /etc/motd vacío para evitar duplicados${NC}"
+    elif [ "$file" = "/etc/profile.d/99-orangebox-motd.sh" ]; then
+      echo -e "${GREEN}[✓] MOTD dinámico configurado en $file${NC}"
     else
       echo -e "${GREEN}[✓] Banner previo al login configurado en $file${NC}"
     fi
@@ -332,6 +334,7 @@ show_summary() {
     echo -e "  cp $BACKUP_DIR/motd.bak /etc/motd"
     echo -e "  cp $BACKUP_DIR/issue.bak /etc/issue"
     echo -e "  cp $BACKUP_DIR/issue.net.bak /etc/issue.net"
+    echo -e "  cp $BACKUP_DIR/99-orangebox-motd.sh.bak /etc/profile.d/99-orangebox-motd.sh"
   fi
 
   echo -e "\n${GREEN}============================================${NC}"
