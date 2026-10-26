@@ -22,6 +22,11 @@ jobs:
         run: |
           find . -path './.git' -prune -o -type f -name '*.sh' -print0 \
             | xargs -0 -r -n1 bash -n
+      - name: Verify executable bits on entrypoint scripts
+        run: |
+          test -x ./linux-hardening.sh
+          test -x ./kernel-lpe-2026-mitigation.sh
+          test -x ./configure-login-banners.sh
       - name: Test legacy OS release detection
         run: bash tests/test_os_detection_legacy.sh
       - name: Test Bash history deletion guard
