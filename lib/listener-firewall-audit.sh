@@ -202,24 +202,53 @@ lfa_family_port_state() {
   else printf '%s\n' UNKNOWN; fi
 }
 
+lfa_service_label() {
+  local process="$1" protocol="$2" port="$3" label=""
+  case "$process" in
+    ""|desconocido|unknown)
+      ;;
+    *)
+      printf '%s\n' "$process"
+      return 0
+      ;;
+  esac
+  if command -v getent >/dev/null 2>&1; then
+    label="$(getent services "$port/$protocol" 2>/dev/null | awk 'NR==1 {print $1; exit}')"
+  fi
+  [ -n "$label" ] || label="desconocido"
+  printf '%s\n' "$label"
+}
+
 lfa_audit_listener_firewall() {
-  local line protocol state recvq sendq local_addr peer rest port process families family assessment address risk
-  local sockets=0 checked=0 allowed=0 restricted=0 blocked=0 unknown=0 skipped=0 socket_output="" socket_source=""
+  local line protocol state recvq sendq local_addr peer rest port process service address families family assessment risk
+  local sockets=0 checked=0 local_only=0 allowed=0 restricted=0 blocked=0 unknown=0 skipped=0
+  local socket_output="" socket_source=""
   LFA_WARNINGS=0
+
+  # ss is available on newer systems. netstat remains a read-only fallback for
+  # legacy CentOS/RHEL 6 and minimal installs. Never use firewall write APIs.
   if command -v ss >/dev/null 2>&1; then
-    if socket_output="$(ss -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then socket_source=ss; fi
+    if socket_output="$(ss -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then
+      socket_source=ss
+    fi
   fi
   if [ -z "$socket_source" ] && command -v netstat >/dev/null 2>&1; then
-    if socket_output="$(netstat -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then socket_source=netstat; fi
+    if socket_output="$(netstat -lntup 2>/dev/null)" && [ -n "$socket_output" ]; then
+      socket_source=netstat
+    fi
   fi
   if [ -z "$socket_source" ]; then
-    echo "[WARN] Ni ss ni netstat entregaron sockets en escucha; no se puede correlacionar el firewall."
-    LFA_WARNINGS=$((LFA_WARNINGS+1)); return 0
+    echo "[WARN] Ni ss ni netstat entregaron sockets en escucha; no se puede inventariar ni correlacionar el firewall."
+    LFA_WARNINGS=$((LFA_WARNINGS+1))
+    return 0
   fi
+
   lfa_load_firewall_snapshots
+  echo "LISTENERS TCP/UDP (incluye loopback; la exposición remota se evalúa por separado):"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case "$line" in Netid\ *|State\ *|Proto\ *|Active\ *) continue ;; esac
+
     if [ "$socket_source" = ss ]; then
       IFS=' ' read -r protocol state recvq sendq local_addr peer rest <<< "$line"
       case "$protocol" in
@@ -227,22 +256,44 @@ lfa_audit_listener_firewall() {
         udp|udp6) protocol=udp ;;
         *) skipped=$((skipped+1)); continue ;;
       esac
-      process="$(printf '%s\n' "$line" | sed -n 's/.*users:((\"//;t got;b;:got s/\".*//;p')"
+      process="$(printf '%s\n' "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p')"
       [ -n "$process" ] || process=desconocido
     else
       IFS=' ' read -r protocol recvq sendq local_addr peer state rest <<< "$line"
       case "$protocol" in
-        tcp|tcp6) [ "$state" = LISTEN ] || continue; protocol=tcp; process="$rest"; [ -n "$process" ] || process=desconocido ;;
-        udp|udp6) protocol=udp; process="$rest"; [ -n "$process" ] || process="$state"; state=UNCONN ;;
+        tcp|tcp6)
+          [ "$state" = LISTEN ] || continue
+          protocol=tcp
+          process="$rest"
+          [ -n "$process" ] || process=desconocido
+          ;;
+        udp|udp6)
+          protocol=udp
+          process="$rest"
+          [ -n "$process" ] || process=desconocido
+          state=UNCONN
+          ;;
         *) skipped=$((skipped+1)); continue ;;
       esac
     fi
+
     [ -n "$protocol" ] && [ -n "$local_addr" ] || { skipped=$((skipped+1)); continue; }
     port="$(printf '%s\n' "$local_addr" | awk -F: '{print $NF}')"
     case "$port" in ''|*[!0-9]*) skipped=$((skipped+1)); continue ;; esac
+
     sockets=$((sockets+1))
     address="$(printf '%s\n' "$local_addr" | sed 's/:[0-9][0-9]*$//')"
-    case "$address" in 127.*|localhost|::1|'[::1]') continue ;; esac
+    service="$(lfa_service_label "$process" "$protocol" "$port")"
+    printf '[LISTEN] %-4s/%-5s address=%-27s service=%s\n' "$protocol" "$port" "$local_addr" "$service"
+
+    case "$address" in
+      127.*|localhost|::1|'[::1]'|::ffff:127.*)
+        local_only=$((local_only+1))
+        printf '[LOCAL]  %s/%s en %s (%s): listener limitado a loopback; no se evalúa como exposición remota.\n' "$protocol" "$port" "$local_addr" "$service"
+        continue
+        ;;
+    esac
+
     case "$address" in
       0.0.0.0) families=ipv4 ;;
       ::|'[::]') families=ipv6 ;;
@@ -251,34 +302,43 @@ lfa_audit_listener_firewall() {
       *.*) families=ipv4 ;;
       *) families="ipv4 ipv6" ;;
     esac
+
     for family in $families; do
       [ "$family" != ipv6 ] || [ -d /proc/sys/net/ipv6 ] || continue
       checked=$((checked+1))
       assessment="$(lfa_family_port_state "$family" "$protocol" "$port")"
       case "$assessment" in
         ALLOWED)
-          allowed=$((allowed+1)); LFA_WARNINGS=$((LFA_WARNINGS+1)); risk="$(lfa_service_risk "$process" "$protocol" "$port")"
-          printf '[WARN] ACCESO PERMITIDO / exposición potencial: %s/%s en %s (%s), familia %s. Riesgo a revisar: %s No se modifican reglas.\n' "$protocol" "$port" "$local_addr" "$process" "$family" "$risk"
+          allowed=$((allowed+1))
+          LFA_WARNINGS=$((LFA_WARNINGS+1))
+          risk="$(lfa_service_risk "$service" "$protocol" "$port")"
+          printf '[WARN] ACCESO PERMITIDO / exposición potencial: %s/%s en %s; servicio=%s; familia=%s. Riesgo a revisar: %s\n' "$protocol" "$port" "$local_addr" "$service" "$family" "$risk"
           ;;
         RESTRICTED)
-          restricted=$((restricted+1)); LFA_WARNINGS=$((LFA_WARNINGS+1)); risk="$(lfa_service_risk "$process" "$protocol" "$port")"
-          printf '[WARN] ACCESO RESTRINGIDO/CONDICIONAL: %s/%s en %s (%s), familia %s. Verificar redes/interfaces permitidas. Riesgo a revisar: %s No se modifican reglas.\n' "$protocol" "$port" "$local_addr" "$process" "$family" "$risk"
+          restricted=$((restricted+1))
+          LFA_WARNINGS=$((LFA_WARNINGS+1))
+          risk="$(lfa_service_risk "$service" "$protocol" "$port")"
+          printf '[WARN] ACCESO RESTRINGIDO/CONDICIONAL: %s/%s en %s; servicio=%s; familia=%s. Verificar orígenes/interfaces permitidos. Riesgo a revisar: %s\n' "$protocol" "$port" "$local_addr" "$service" "$family" "$risk"
           ;;
-        BLOCKED) blocked=$((blocked+1)) ;;
+        BLOCKED)
+          blocked=$((blocked+1))
+          printf '[OK] BLOQUEADO por la evaluación INPUT disponible: %s/%s en %s; servicio=%s; familia=%s.\n' "$protocol" "$port" "$local_addr" "$service" "$family"
+          ;;
         *)
           unknown=$((unknown+1))
-          printf '[INFO] Acceso indeterminado para %s/%s en %s (%s), familia %s; reglas complejas o backend no evaluable.\n' "$protocol" "$port" "$local_addr" "$process" "$family"
+          printf '[WARN] INDETERMINADO: %s/%s en %s; servicio=%s; familia=%s. No se considera protegido hasta revisar las reglas efectivas.\n' "$protocol" "$port" "$local_addr" "$service" "$family"
           ;;
       esac
     done
   done <<< "$socket_output"
+
   [ "$sockets" -gt 0 ] || echo "[INFO] No se encontraron sockets TCP/UDP en escucha."
   [ "$skipped" -eq 0 ] || echo "[INFO] Sockets omitidos por formato no reconocido: $skipped"
   if [ "$unknown" -gt 0 ]; then
     LFA_WARNINGS=$((LFA_WARNINGS+1))
     echo "[WARN] Hay listeners cuyo acceso no pudo verificarse con certeza; no deben considerarse protegidos hasta revisar las reglas efectivas."
   fi
-  printf '[INFO] Correlación firewall/listeners (solo lectura): sockets=%s; familias evaluadas=%s; acceso permitido/exposición potencial=%s; restringido/condicional=%s; bloqueado=%s; indeterminado=%s.\n' "$sockets" "$checked" "$allowed" "$restricted" "$blocked" "$unknown"
-  echo "[INFO] No se modificaron CSF, Shorewall, firewalld, Imunify360, iptables, nftables, servicios ni configuración."
+  printf '[INFO] Correlación firewall/listeners (solo lectura): sockets=%s; familias evaluadas=%s; loopback=%s; acceso permitido/exposición potencial=%s; restringido/condicional=%s; bloqueado=%s; indeterminado=%s.\n' "$sockets" "$checked" "$local_only" "$allowed" "$restricted" "$blocked" "$unknown"
+  echo "[INFO] No se modificaron CSF, Shorewall, firewalld, Imunify360, UFW, iptables, nftables, servicios ni configuración."
   return 0
 }
