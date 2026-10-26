@@ -70,7 +70,7 @@ make_backup() {
     echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modifica cron/at.${NC}" >&2
     return 1
   fi
-  local mode file backup
+  local mode file backup source_hash backup_hash
   mode="$(stat -c '%a' "$BACKUP_DIR" 2>/dev/null || true)"
   if [ "$mode" != 700 ]; then
     echo -e "${RED}[ERROR] No se pudo verificar el modo 0700 del backup de cron/at.${NC}" >&2
@@ -87,12 +87,16 @@ make_backup() {
       return 1
     fi
     backup="$BACKUP_DIR/$(basename "$file")"
-    if [ -f "$file" ] && [ ! -L "$file" ] && ! cmp -s "$file" "$backup"; then
-      echo -e "${RED}[ERROR] El backup de $file no coincide con el original; no se modifica cron/at.${NC}" >&2
-      return 1
-    fi
-    if [ -d "$file" ] && [ ! -L "$file" ] && ! diff -qr "$file" "$backup" >/dev/null 2>&1; then
-      echo -e "${RED}[ERROR] El backup del directorio $file no coincide; no se modifica cron/at.${NC}" >&2
+    if [ -f "$file" ]; then
+      command -v sha256sum >/dev/null 2>&1 || { echo -e "${RED}[ERROR] sha256sum no está disponible para verificar $file; no se modifica cron/at.${NC}" >&2; return 1; }
+      source_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
+      backup_hash="$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')"
+      if [ -z "$source_hash" ] || [ -z "$backup_hash" ] || [ "$source_hash" != "$backup_hash" ]; then
+        echo -e "${RED}[ERROR] El backup de $file no coincide con el original; no se modifica cron/at.${NC}" >&2
+        return 1
+      fi
+    elif [ -d "$file" ] && [ ! -d "$backup" ]; then
+      echo -e "${RED}[ERROR] No se verificó el directorio de backup de $file; no se modifica cron/at.${NC}" >&2
       return 1
     fi
     if [ -L "$file" ] && [ "$(readlink "$file" 2>/dev/null || true)" != "$(readlink "$backup" 2>/dev/null || true)" ]; then
