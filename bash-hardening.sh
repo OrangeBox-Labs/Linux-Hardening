@@ -32,7 +32,7 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)-$"
+BACKUP_DIR="/root/bash-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 
 # Archivos de configuración
 BASHRC_SYSTEM="/etc/bashrc"
