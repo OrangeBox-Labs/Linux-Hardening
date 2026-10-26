@@ -275,6 +275,10 @@ protect_filesystem() {
 # ==============================================
 network_hardening() {
   echo -e "\n${BLUE}[*] Aplicando hardening de red...${NC}"
+  # Both forwarding controls are high-impact; sysctl-safe explains their effects
+  # and requires an individual interactive confirmation before changing them.
+  check_sysctl_param "net.ipv4.ip_forward" "0" "net.ipv4.ip_forward"
+  check_sysctl_param "net.ipv6.conf.all.forwarding" "0" "net.ipv6.conf.all.forwarding"
   check_sysctl_param "net.ipv4.conf.all.accept_redirects" "0" "net.ipv4.conf.all.accept_redirects"
   check_sysctl_param "net.ipv4.conf.default.accept_redirects" "0" "net.ipv4.conf.default.accept_redirects"
   check_sysctl_param "net.ipv4.conf.all.send_redirects" "0" "net.ipv4.conf.all.send_redirects"
