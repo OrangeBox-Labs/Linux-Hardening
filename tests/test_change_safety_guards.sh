@@ -22,6 +22,7 @@ grep -Fq 'chmod 700 "$BACKUP_DIR"' "$AUDITD" || fail "backup auditd no restringe
 grep -Fq 'if ! make_backup; then' "$RSYSLOG" || fail "rsyslog puede aplicar cambios si falla el backup"
 grep -Fq 'chmod 700 "$BACKUP_DIR"' "$RSYSLOG" || fail "backup logging no restringe permisos"
 grep -Fq 'if ! make_backup; then' "$BASH_HARDENING" || fail "Bash hardening puede aplicar cambios si falla el backup"
+grep -Fq '"$PROFILE_D" "$PROFILE_MOTD" "$ALIASES_D"' "$BASH_HARDENING" || fail "Bash no incluye el MOTD dinámico en el backup previo"
 grep -Fq 'No se pudo respaldar $file' "$BASH_HARDENING" || fail "Bash no valida las copias individuales del backup"
 grep -Fq 'if ! make_backup; then' "$CRON" || fail "cron/at puede aplicar cambios si falla el backup"
 grep -Fq 'No se pudo respaldar $file' "$CRON" || fail "cron/at no comprueba las copias individuales"
