@@ -45,7 +45,8 @@ Este archivo es el punto de reanudación del trabajo. Actualizar estados y commi
 - [ ] Validar la sintaxis de los archivos modificados y ejecutar las pruebas CIS en esta rama.
 - [ ] Confirmar CI completo y compatibilidad CentOS 6/7 + AlmaLinux 8/9/10; no integrar en `main` antes de comprobarlo.
 - [ ] Elaborar trazabilidad recomendación por recomendación para cada perfil CIS catalogado. Priorizar recomendaciones añadidas/reorganizadas en las revisiones CIS 3.0.0 de RHEL/AlmaLinux/Rocky 9.
-- [ ] Corregir otros falsos PASS pendientes en GRUB/BLS/argumentos efectivos, core dumps con overrides, SELinux runtime/persistencia y restantes controles dependientes de la versión.
+- [x] Corregir en la rama el control SELinux de arranque para revisar kernel activo y fuentes BLS/GRUB/EFI, y los checks de core dumps para resolver `systemd-analyze cat-config`/drop-ins; evidencia incompleta queda en WARN.
+- [ ] Continuar revisando permisos GRUB, AIDE activo, opciones efectivas de PAM/SSH y controles CIS dependientes de la versión.
 
 ### En curso
 
