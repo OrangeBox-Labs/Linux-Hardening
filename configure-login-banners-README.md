@@ -42,17 +42,17 @@ ni enumera el firewall, herramientas de integridad o mecanismos de deteccion.
 
 ## Aviso previo a la autenticación
 
-`/etc/issue` y `/etc/issue.net` muestran el aviso legal y de seguridad antes de autenticar. El logo no se repite en este banner previo: queda reservado para el MOTD de shell.
+`/etc/issue` y `/etc/issue.net` muestran el logo OrangeBox (FIGlet generado al aplicar o ASCII de fallback) y el aviso legal y de seguridad antes de autenticar. El logo no se repite en la shell.
 
 La IP remota real no puede interpolarse dentro del `Banner` estático estándar de OpenSSH. Se debe comprobar en los logs de autenticación SSH. Mostrar la IP variable al cliente antes de autenticar requeriría una integración PAM específica y probada; este módulo no modifica automáticamente la pila PAM.
 
 ## Mensaje posterior al login (MOTD dinámico)
 
-El banner se muestra desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas. Incluye solo el logotipo OrangeBox (FIGlet si está disponible, ASCII como alternativa), la IP interna del servidor, uptime normalizado desde `/proc/uptime` y carga promedio de 1/5/15 minutos desde `/proc/loadavg`. El aviso de seguridad y el texto legal no se repiten en la shell.
+El banner de shell se muestra desde `/etc/profile.d/99-orangebox-motd.sh` en shells interactivas. Muestra únicamente IP interna del servidor, uptime normalizado desde `/proc/uptime`, carga promedio de 1/5/15 minutos desde `/proc/loadavg` y fecha/hora local. No muestra logo, IP remota ni aviso de seguridad.
 
 `/etc/motd` se deja vacío para evitar duplicados. El perfil no se ejecuta para SFTP ni para comandos SSH no interactivos; `/etc/issue.net` sigue siendo el aviso previo al login.
 
-Si FIGlet está disponible con la fuente `small`, se utiliza el logotipo coloreado. En modo `--fix`, si falta, se intenta instalar desde repositorios ya configurados; si la instalación falla o no existe la fuente, se muestra el ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
+FIGlet se utiliza para generar el logo estático de `/etc/issue` y `/etc/issue.net`. En modo `--fix`, si falta FIGlet o la fuente `small`, se intenta instalar desde repositorios ya configurados; si la instalación falla, se genera un logo ASCII integrado. No se habilitan repositorios automáticamente ni se ejecuta una actualización completa del sistema.
 
 ## Backup
 
