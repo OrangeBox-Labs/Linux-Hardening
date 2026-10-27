@@ -36,7 +36,8 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-AUDIT_RULES="/etc/audit/rules.d/98-orangebox-baseline.rules"
+AUDIT_RULES_DIR="/etc/audit/rules.d"
+AUDIT_RULES="$AUDIT_RULES_DIR/98-orangebox-baseline.rules"
 AUDITD_REBOOT_REQUIRED=false
 AUDIT_CONF="/etc/audit/auditd.conf"
 BACKUP_DIR="/root/audit-backup-$(date +%Y%m%d-%H%M%S)"
@@ -448,10 +449,10 @@ add_audit_rules() {
     "modules:Eventos de módulos del kernel"
   )
 
-  if [ ! -d /etc/audit/rules.d ] || [ ! -s "$AUDIT_RULES" ] || { [ "$AUTO_FIX" = true ] && ! audit_rules_ready; }; then
+  if [ ! -d "$AUDIT_RULES_DIR" ] || [ ! -s "$AUDIT_RULES" ] || { [ "$AUTO_FIX" = true ] && ! audit_rules_ready; }; then
     effect="Crea un conjunto de reglas persistentes para registrar cambios de identidad, tiempo, red, permisos, accesos fallidos, montajes, borrado de archivos, sudo y módulos del kernel. Puede aumentar el volumen de /var/log/audit y la carga de I/O; no se sobrescribirá un archivo de reglas existente que tenga contenido."
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "crear conjunto de reglas auditd" "directorio/archivo ausente o vacío" "$AUDIT_RULES" "$effect"; then
-      mkdir -p /etc/audit/rules.d || { WARNINGS=$((WARNINGS + 1)); return 1; }
+      mkdir -p "$AUDIT_RULES_DIR" || { WARNINGS=$((WARNINGS + 1)); return 1; }
       [ ! -L "$AUDIT_RULES" ] || { echo "[ERROR] $AUDIT_RULES es un enlace simbólico; no se modifica."; WARNINGS=$((WARNINGS+1)); return 1; }
       if [ -s "$AUDIT_RULES" ] && ! grep -q '^# OrangeBox hardening audit rules' "$AUDIT_RULES"; then
         echo -e "${RED}[ERROR] $AUDIT_RULES existe y no parece administrado por OrangeBox; se conserva sin cambios. Revise el archivo y respalde antes de resolver el conflicto.${NC}" >&2
