@@ -179,13 +179,35 @@ OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/n
 OB_DATETIME=$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null)
 [ -n "$OB_DATETIME" ] || OB_DATETIME="No disponible"
 
+# Consultar la IP pública solo durante un tiempo acotado; el login no debe
+# quedarse esperando si el servidor está aislado o el servicio externo falla.
+OB_EXTERNAL_IP=
+if command -v curl >/dev/null 2>&1; then
+  OB_EXTERNAL_IP=$(curl -4 -fsS --connect-timeout 1 --max-time 2 https://ifconfig.me/ip 2>/dev/null | tr -d '[:space:]')
+elif command -v wget >/dev/null 2>&1; then
+  OB_EXTERNAL_IP=$(wget -q -T 2 -O - https://ifconfig.me/ip 2>/dev/null | tr -d '[:space:]')
+fi
+if [ -n "$OB_EXTERNAL_IP" ] && ! printf '%s\n' "$OB_EXTERNAL_IP" | awk -F. '
+  NF != 4 { exit 1 }
+  {
+    for (i = 1; i <= 4; i++) {
+      if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+    }
+    exit 0
+  }
+'; then
+  OB_EXTERNAL_IP=
+fi
+[ -n "$OB_EXTERNAL_IP" ] || OB_EXTERNAL_IP="No disponible"
+
 printf '\n'
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Fecha/hora:" "$OB_RESET" "$OB_DATETIME"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP externa:" "$OB_RESET" "$OB_EXTERNAL_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP interna:" "$OB_RESET" "$OB_SERVER_IP"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP del cliente:" "$OB_RESET" "$OB_CLIENT_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Uptime:" "$OB_RESET" "$OB_UPTIME"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD"
-printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP del cliente:" "$OB_RESET" "$OB_CLIENT_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Usuario:" "$OB_RESET" "$OB_USERNAME"
-printf '  %s%-15s%s %s\n' "$OB_CYAN" "Fecha/hora:" "$OB_RESET" "$OB_DATETIME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
 }
