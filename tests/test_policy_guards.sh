@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
 AUDITD="$ROOT_DIR/auditd-hardening.sh"
 GRUB="$ROOT_DIR/grub-hardening.sh"
