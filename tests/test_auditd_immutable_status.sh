@@ -15,6 +15,10 @@ cat > "$TMP_DIR/bin/auditctl" <<'FAKE_AUDITCTL'
 set -eu
 case "${1:-}" in
   -l)
+    if [ "${AUDITCTL_TEST_NO_RULES:-0}" = "1" ]; then
+      printf '%s\\n' 'No rules'
+      exit 0
+    fi
     printf '%s\n' \
       '-a always,exit -S adjtimex -k time-change' \
       '-w /etc/group -p wa -k identity' \
@@ -90,5 +94,33 @@ assert_state "2"   "Configuración de auditd inmutable - OK (enabled 2)"   "no e
 assert_state "0"   "auditd está deshabilitado (enabled 0)"   "Configuración de auditd inmutable - OK"
 assert_state "10"   "auditd reporta enabled 10; no se confirma modo inmutable"   "Configuración de auditd inmutable - OK"
 assert_state "missing"   "No se pudo determinar el estado de auditd mediante auditctl -s"   "Configuración de auditd inmutable - OK"
+
+# enabled=2 is not a healthy result when no required rules are loaded.
+export AUDITCTL_TEST_ENABLED=2
+export AUDITCTL_TEST_NO_RULES=1
+WARNINGS=0
+output="$(report_auditd_immutable_status auditctl 2>&1)" || fail "el reporte immutable sin reglas falló"
+printf '%s\\n' "$output" | grep -Fq "auditd está inmutable (enabled 2), pero faltan reglas requeridas en memoria" ||
+  fail "enabled=2 con No rules debe generar una advertencia explícita"
+[ "$WARNINGS" -gt 0 ] || fail "enabled=2 con No rules debe incrementar advertencias"
+pass "enabled=2 con No rules no se reporta como configuración correcta"
+
+# --fix must stop before creating backups or editing persistent files in this state.
+backup_called="$TMP_DIR/backup-called"
+get_os_version() { printf '10\\n'; }
+get_auditctl_path() { printf 'auditctl\\n'; }
+get_auditd_enabled_state() { printf '2\\n'; }
+audit_rules_ready() { return 1; }
+make_backup() { : > "$backup_called"; return 0; }
+show_summary() { :; }
+set +e
+main --fix >"$TMP_DIR/fix-output" 2>&1
+fix_rc=$?
+set -e
+[ "$fix_rc" -eq 3 ] || fail "--fix debería abortar con código 3 si enabled=2 y faltan reglas"
+[ ! -e "$backup_called" ] || fail "--fix no debió continuar hasta el backup en un estado irreparable en caliente"
+grep -Fq "No se modificó la configuración" "$TMP_DIR/fix-output" ||
+  fail "--fix debe informar que no modificó la configuración"
+pass "--fix se detiene sin modificar archivos si auditd es inmutable y no hay reglas"
 
 pass "la interpretación de enabled se prueba con auditctl simulado y sin cambios en el sistema"
