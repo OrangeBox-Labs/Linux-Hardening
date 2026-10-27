@@ -12,6 +12,8 @@ grep -Fq -- '--fix      - Aplicar cambios, con confirmación individual por par�
 grep -Fq 'confirm_fs_change()' "$FS" || fail "faltan confirmaciones por parámetro"
 grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$FS" || fail "cambio no se omite en modo no interactivo"
 grep -Fq 'noexec) effect=' "$FS" || fail "noexec no explica que puede romper ejecución de aplicaciones"
+grep -Fq 'IMPORTANTE: /var/ossec no es un montaje independiente de /var' "$FS" || fail "noexec en /var debe avisar si bloqueará los binarios futuros de Wazuh"
+grep -Fq 'No apruebes noexec para /var hasta montar /var/ossec por separado sin noexec' "$FS" || fail "la advertencia de Wazuh debe ofrecer alternativas operativas claras"
 grep -Fq 'hidepid=2' "$FS" || fail "hidepid no se verifica"
 grep -Fiq 'puede romper o limitar agentes de monitoreo' "$FS" || fail "hidepid no explica impacto en monitoreo"
 if grep -Eq 'rmmod[[:space:]]+"?\$module' "$FS"; then fail "FS-hardening no debe descargar módulos de filesystem en caliente"; fi
