@@ -181,6 +181,12 @@ for key in time-change identity system-locale logins session perm_mod access mou
         continue
       fi
       ;;
+    scope)
+      if [ ! -e /etc/sudoers ] && [ ! -e /etc/sudoers.d ]; then
+        pass "se omite scope porque sudoers no está instalado en este entorno de prueba"
+        continue
+      fi
+      ;;
   esac
   fail "faltan reglas persistentes para $key"
 done
