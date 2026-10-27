@@ -299,8 +299,8 @@ ssh_setting_requires_confirmation() {
 
 confirm_ssh_optional_setting() {
   local directive="$1" description="$2" answer=""
-  printf '\\n[OPCIONAL] SSH: %s\\n' "$directive"
-  printf 'Qué hace/riesgo: %s\\n' "$description"
+  printf '\n[OPCIONAL] SSH: %s\n' "$directive"
+  printf 'Qué hace/riesgo: %s\n' "$description"
   case "$directive" in
     "PermitRootLogin no")
       printf '%s\\n' "Antes de aceptar: confirma otra cuenta administrativa funcional y sudo. Mantén esta sesión abierta y prueba una segunda conexión SSH."
@@ -319,7 +319,7 @@ confirm_ssh_optional_setting() {
   IFS= read -r -p "¿Aplicar '$directive'? [s/N]: " answer </dev/tty || return 1
   case "$answer" in
     s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
-    *) printf '[INFO] Se omite %s; la configuración actual se conserva.\\n' "$directive"; return 1 ;;
+    *) printf '[INFO] Se omite %s; la configuración actual se conserva.\n' "$directive"; return 1 ;;
   esac
 }
 
@@ -480,8 +480,8 @@ ssh_apply_pending_settings_with_consent() {
     key="${directive%% *}"
     key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
     description="$(ssh_setting_description "$key")"
-    printf '\\n[CAMBIO PROPUESTO] SSH %s\\n' "$directive"
-    printf 'Qué hace/riesgo: %s\\n' "$description"
+    printf '\n[CAMBIO PROPUESTO] SSH %s\n' "$directive"
+    printf 'Qué hace/riesgo: %s\n' "$description"
     if ssh_setting_requires_confirmation "$key"; then
       if confirm_ssh_optional_setting "$directive" "$description"; then
         approved+=("$directive")
@@ -489,7 +489,7 @@ ssh_apply_pending_settings_with_consent() {
         rejected+=("$directive")
       fi
     else
-      printf '[INFO] Control base: se aplicará con --fix tras validar sintaxis/valores efectivos.\\n'
+      printf '[INFO] Control base: se aplicará con --fix tras validar sintaxis/valores efectivos.\n'
       approved+=("$directive")
     fi
   done
