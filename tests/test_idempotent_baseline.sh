@@ -99,12 +99,15 @@ awk '
   /"IP del cliente:"/ { client = NR }
   /"Uptime:"/ { uptime = NR }
   /"Load:"/ { load = NR }
+  /"RAM usada:"/ { ram = NR }
+  /"Swap usada:"/ { swap = NR }
   /"Usuario:"/ { username = NR }
   END {
     if (!(datetime > 0 && datetime < external && external < internal &&
-          internal < client && client < uptime && uptime < load && load < username)) exit 1
+          internal < client && client < uptime && uptime < load && load < ram &&
+          ram < swap && swap < username)) exit 1
   }
-' "$motd_profile_tmp" || fail "el panel debe mostrar fecha, IP externa, IP interna, cliente, uptime, load y usuario en ese orden"
+' "$motd_profile_tmp" || fail "el panel debe mostrar fecha, IP externa, IP interna, cliente, uptime, load, RAM, swap y usuario en ese orden"
 grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
 grep -Fq 'figlet -f small OrangeBox' "$motd_profile_tmp" || fail "el logo FIGlet no aparece primero en el MOTD de shell"
 grep -Fq 'ORANGEBOX_ASCII' "$motd_profile_tmp" || fail "falta el fallback ASCII del logo de shell"
@@ -142,7 +145,8 @@ grep -Fq '"MemAvailable:"' "$motd_profile_tmp" || fail "la RAM debe usar MemAvai
 grep -Fq 'free_mem + buffers + cached' "$motd_profile_tmp" || fail "falta el fallback de memoria para kernels legacy"
 grep -Fq '"SwapTotal:"' "$motd_profile_tmp" || fail "el perfil no calcula swap usada a partir de SwapTotal"
 grep -Fq '"SwapFree:"' "$motd_profile_tmp" || fail "el perfil no calcula swap usada a partir de SwapFree"
-grep -Fq 'RAM usada: %s | Swap usada: %s' "$motd_profile_tmp" || fail "RAM y swap deben mostrarse junto a Load"
+grep -Fq '"RAM usada:"' "$motd_profile_tmp" || fail "falta la fila de RAM usada"
+grep -Fq '"Swap usada:"' "$motd_profile_tmp" || fail "falta la fila de swap usada"
 grep -Fq 'No configurada' "$motd_profile_tmp" || fail "la ausencia de swap debe mostrarse de forma explícita"
 
 pass "banner pre-login, logo FIGlet y ficha de sesión unificada, etiqueta Load limpia, fecha única y TMOUT no-root"
