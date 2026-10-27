@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
+KERNEL="$ROOT_DIR/kernel-hardening.sh"
 AUDITD="$ROOT_DIR/auditd-hardening.sh"
 GRUB="$ROOT_DIR/grub-hardening.sh"
 SELINUX="$ROOT_DIR/selinux-secure-setup.sh"
@@ -17,4 +18,6 @@ grep -Fq 'configure_auditd_param "space_left_action" "SYSLOG"' "$AUDITD" || fail
 grep -Fq 'configure_auditd_param "admin_space_left_action" "SUSPEND"' "$AUDITD" || fail "auditd no debe detener el host por espacio"
 ! grep -Eq 'MAC-policy|/etc/selinux' "$AUDITD" || fail "auditd no debe incluir reglas SELinux"
 grep -Fq 'confirm_change()' "$SELINUX" || fail "la utilidad SELinux independiente debe confirmar cambios"
-pass "políticas de auditd, GRUB, SELinux y sudo verificadas"
+grep -Fq 'sysctl_safe_apply_bpf_policy' "$CORE" || fail "el baseline debe preservar la política BPF 1/2"
+grep -Fq 'sysctl_safe_apply_bpf_policy' "$KERNEL" || fail "kernel-hardening debe preservar la política BPF 1/2"
+pass "políticas de auditd, GRUB, SELinux, sudo y BPF verificadas"
