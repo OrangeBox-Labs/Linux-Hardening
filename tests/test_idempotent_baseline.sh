@@ -140,6 +140,10 @@ sh -n "$motd_profile_tmp" || fail "el perfil MOTD no es compatible con sintaxis 
 grep -Fq 'SSH_CONNECTION' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra la IP remota"
 grep -Fq '/proc/uptime' "$motd_profile_tmp" || fail "el perfil MOTD generado no calcula uptime"
 grep -Fq '/proc/loadavg' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra load"
+grep -Fq 'if [ "$(id -u 2>/dev/null)" != 0 ]; then' "$motd_profile_tmp" || fail "el panel MOTD debe quedar limitado a root"
+root_guard_line=$(grep -Fn 'if [ "$(id -u 2>/dev/null)" != 0 ]; then' "$motd_profile_tmp" | cut -d: -f1)
+logo_line=$(grep -Fn 'OB_LOGO=' "$motd_profile_tmp" | head -1 | cut -d: -f1)
+[ -n "$root_guard_line" ] && [ -n "$logo_line" ] && [ "$root_guard_line" -lt "$logo_line" ] || fail "el guard de root debe ejecutarse antes de imprimir el logo o consultar métricas"
 grep -Fq '/proc/meminfo' "$motd_profile_tmp" || fail "el perfil MOTD generado no lee las métricas de memoria"
 grep -Fq '"MemAvailable:"' "$motd_profile_tmp" || fail "la RAM debe usar MemAvailable cuando el kernel la expone"
 grep -Fq 'free_mem + buffers + cached' "$motd_profile_tmp" || fail "falta el fallback de memoria para kernels legacy"
