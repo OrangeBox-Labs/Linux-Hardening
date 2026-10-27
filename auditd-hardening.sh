@@ -609,7 +609,7 @@ persistent_audit_rules_ready() {
   for key in "${required_keys[@]}"; do
     found=false
     for file in "${files[@]}"; do
-      if grep -qF -- "-k $key" "$file"; then found=true; break; fi
+      if grep -Eq "^[[:space:]]*[^#].*-k[[:space:]]+$key([[:space:]]|$)" "$file"; then found=true; break; fi
     done
     [ "$found" = true ] || return 1
   done
