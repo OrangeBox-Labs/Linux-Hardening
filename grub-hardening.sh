@@ -286,13 +286,10 @@ check_audit_backlog() {
 }
 
 # ==============================================
-# 1.6.1.2 - ASEGURAR SELINUX NO DESHABILITADO EN BOOT
-# ==============================================
-# ==============================================
 # 1.6.1.2 - AUDITAR SELINUX EN BOOT (SIN REMEDIACIÓN)
 # ==============================================
 check_selinux_boot() {
-  echo -e "\\n$BLUE[*] 1.6.1.2 - Auditando flags de SELinux en boot (solo lectura)...$NC"
+  echo -e "\n$BLUE[*] 1.6.1.2 - Auditando flags de SELinux en boot (solo lectura)...$NC"
 
   if grub_config_has_param "$GRUB_CONFIG" "selinux=0"; then
     echo -e "$RED[WARN] selinux=0 está presente en GRUB_CMDLINE_LINUX; SELinux puede quedar deshabilitado al arrancar.$NC"
