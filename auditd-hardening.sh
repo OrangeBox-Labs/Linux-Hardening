@@ -254,7 +254,7 @@ configure_auditd_param() {
 # 4.1.1.1 - ENSURE AUDITD IS INSTALLED
 # ==============================================
 check_auditd_installed() {
-  echo -e "\\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd y las herramientas de reglas... ${NC}"
+  echo -e "\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd y las herramientas de reglas... ${NC}"
   local package="" reason="" os_version="" package_installed=false tool_installed=false install_cmd=""
 
   # audit-rules es un paquete requerido en EL10. No basta con que auditd
@@ -299,20 +299,21 @@ check_auditd_installed() {
     fi
   fi
 
+  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then tool_installed=true; fi
   if [ "$package" = "audit-rules" ]; then
     rpm -q audit-rules >/dev/null 2>&1 && package_installed=true
-  elif rpm -q "$package" >/dev/null 2>&1; then
-    package_installed=true
-  fi
-  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then tool_installed=true; fi
-
-  if [ "$package_installed" = true ] && [ "$tool_installed" = true ]; then
-    echo -e "${GREEN}[✓] $package instalado y auditctl disponible${NC}"
-    if [ "$package" = "audit-rules" ] && ! { command -v augenrules >/dev/null 2>&1 || [ -x /usr/sbin/augenrules ]; }; then
-      echo -e "${YELLOW}[WARN] audit-rules está instalado, pero augenrules no está disponible; verificar integridad del paquete.${NC}"
-      WARNINGS=$((WARNINGS + 1))
+    if [ "$package_installed" = true ] && [ "$tool_installed" = true ] &&
+       { command -v augenrules >/dev/null 2>&1 || [ -x /usr/sbin/augenrules ]; }; then
+      echo -e "${GREEN}[✓] audit-rules instalado; auditctl y augenrules disponibles${NC}"
+      return 0
     fi
-    return 0
+  else
+    # Preserve EL7-9 behavior: use audit-tools only when auditctl is absent.
+    if [ "$tool_installed" = true ]; then
+      echo -e "${GREEN}[✓] auditctl disponible${NC}"
+      return 0
+    fi
+    rpm -q "$package" >/dev/null 2>&1 && package_installed=true
   fi
 
   if [ "$package" = "audit-rules" ]; then
