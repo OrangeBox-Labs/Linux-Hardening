@@ -37,7 +37,7 @@ jobs:
         run: bash tests/test_os_detection_legacy.sh
       - name: Test legacy auditd and GRUB coverage
         run: bash tests/test_legacy_audit_modules.sh
-      # Includes enabled=2 recovery planning and persistent-rule staging in isolated paths.
+      # Includes enabled=2 recovery planning and persistent-rule staging in isolated paths, including non-root CI.
       - name: Test auditd immutable state interpretation
         run: bash tests/test_auditd_immutable_status.sh
       - name: Test legacy ntpd periodic refresh guard
