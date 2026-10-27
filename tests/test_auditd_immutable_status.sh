@@ -90,7 +90,7 @@ assert_state() {
 }
 
 assert_state "1"   "auditd está habilitado (enabled 1), pero las reglas siguen siendo modificables"   "Configuración de auditd inmutable - OK"
-assert_state "2"   "Configuración de auditd inmutable - OK (enabled 2)"   "no está en modo inmutable"
+assert_state "2"   "auditd inmutable (enabled 2) y reglas requeridas cargadas en memoria"   "no está en modo inmutable"
 assert_state "0"   "auditd está deshabilitado (enabled 0)"   "Configuración de auditd inmutable - OK"
 assert_state "10"   "auditd reporta enabled 10; no se confirma modo inmutable"   "Configuración de auditd inmutable - OK"
 assert_state "missing"   "No se pudo determinar el estado de auditd mediante auditctl -s"   "Configuración de auditd inmutable - OK"
