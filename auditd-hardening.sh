@@ -36,7 +36,8 @@ FIXED=0
 WARNINGS=0
 AUTO_FIX=false
 
-AUDIT_RULES="/etc/audit/rules.d/99-hardening.rules"
+AUDIT_RULES="/etc/audit/rules.d/98-orangebox-baseline.rules"
+AUDITD_REBOOT_REQUIRED=false
 AUDIT_CONF="/etc/audit/auditd.conf"
 BACKUP_DIR="/root/audit-backup-$(date +%Y%m%d-%H%M%S)"
 
@@ -447,11 +448,16 @@ add_audit_rules() {
     "modules:Eventos de módulos del kernel"
   )
 
-  if [ ! -d /etc/audit/rules.d ] || [ ! -s "$AUDIT_RULES" ]; then
+  if [ ! -d /etc/audit/rules.d ] || [ ! -s "$AUDIT_RULES" ] || { [ "$AUTO_FIX" = true ] && ! audit_rules_ready; }; then
     effect="Crea un conjunto de reglas persistentes para registrar cambios de identidad, tiempo, red, permisos, accesos fallidos, montajes, borrado de archivos, sudo y módulos del kernel. Puede aumentar el volumen de /var/log/audit y la carga de I/O; no se sobrescribirá un archivo de reglas existente que tenga contenido."
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "crear conjunto de reglas auditd" "directorio/archivo ausente o vacío" "$AUDIT_RULES" "$effect"; then
       mkdir -p /etc/audit/rules.d || { WARNINGS=$((WARNINGS + 1)); return 1; }
       [ ! -L "$AUDIT_RULES" ] || { echo "[ERROR] $AUDIT_RULES es un enlace simbólico; no se modifica."; WARNINGS=$((WARNINGS+1)); return 1; }
+      if [ -s "$AUDIT_RULES" ] && ! grep -q '^# OrangeBox hardening audit rules' "$AUDIT_RULES"; then
+        echo -e "${RED}[ERROR] $AUDIT_RULES existe y no parece administrado por OrangeBox; se conserva sin cambios. Revise el archivo y respalde antes de resolver el conflicto.${NC}" >&2
+        WARNINGS=$((WARNINGS + 1))
+        return 1
+      fi
       cat > "$AUDIT_RULES" <<'EOF'
 # OrangeBox hardening audit rules (review volume and workload before deployment)
 -a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
@@ -546,9 +552,14 @@ restart_auditd() {
 
   AUDITCTL="$(get_auditctl_path)"
   if [ -n "$AUDITCTL" ] && [ "$("$AUDITCTL" -s 2>/dev/null | awk '$1=="enabled"{print $2; exit}')" = "2" ]; then
-    echo -e "${YELLOW}[WARN] Audit está inmutable (-e 2); no se pueden cargar reglas nuevas sin reiniciar.${NC}"
+    if audit_rules_ready; then
+      echo -e "${GREEN}[✓] auditd ya está inmutable y las reglas requeridas están cargadas; no se intenta recargarlas.${NC}"
+      return 0
+    fi
+    AUDITD_REBOOT_REQUIRED=true
+    echo -e "${YELLOW}[INFO] Kernel inmutable con reglas incompletas: reglas persistentes preparadas; se requiere reinicio controlado para cargarlas.${NC}"
     WARNINGS=$((WARNINGS + 1))
-    return 1
+    return 0
   fi
 
   if command -v augenrules >/dev/null 2>&1; then
@@ -565,8 +576,14 @@ restart_auditd() {
     fi
   fi
 
+  if ! audit_rules_ready; then
+    echo -e "${RED}[ERROR] augenrules --load terminó, pero faltan reglas requeridas en memoria. No se activará la inmutabilidad.${NC}" >&2
+    WARNINGS=$((WARNINGS + 1))
+    return 1
+  fi
+
   if ob_service_is_active auditd; then
-    echo -e "${BLUE}[INFO] auditd está activo; la recarga de reglas ya se intentó. No se reinicia el demonio a la fuerza para evitar interrumpir la auditoría.${NC}"
+    echo -e "${BLUE}[INFO] Reglas verificadas en memoria; auditd permanece activo para evitar una interrupción innecesaria.${NC}"
   elif ob_service_start auditd; then
     echo -e "${GREEN}[✓] auditd iniciado${NC}"
   else
@@ -603,9 +620,10 @@ configure_audit_immutable() {
       echo -e "${GREEN}[✓] auditd ya está en modo inmutable y las reglas requeridas están cargadas${NC}"
       return 0
     fi
-    echo -e "${RED}[ERROR] auditd está inmutable, pero faltan reglas requeridas en memoria; no se puede corregir en caliente.${NC}"
+    AUDITD_REBOOT_REQUIRED=true
+    echo -e "${YELLOW}[INFO] auditd está inmutable, pero faltan reglas en memoria. La configuración persistente queda preparada para un reinicio controlado.${NC}"
     WARNINGS=$((WARNINGS + 1))
-    return 1
+    return 0
   fi
   echo -e "${YELLOW}[!] auditd no está en modo inmutable (enabled ${enabled_state:-desconocido})${NC}"
   if ! audit_rules_ready; then
@@ -763,19 +781,18 @@ main() {
     AUTO_FIX=true
     ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
 
-    # Guard: an immutable kernel with no verified rules cannot be repaired live.
-    # Abort before backups or persistent edits so --fix does not imply success.
+    # Primero respaldar. Si el kernel ya es inmutable y faltan reglas, se prepara
+    # la configuración persistente y se solicita reinicio controlado; nunca se
+    # intenta modificar reglas en memoria ni se reinicia el host automáticamente.
     auditctl="$(get_auditctl_path)"
     enabled_state="$(get_auditd_enabled_state "$auditctl" 2>/dev/null)" || enabled_state=""
-    if [ "$enabled_state" = "2" ] && ! audit_rules_ready; then
-      echo -e "${RED}[ERROR] auditd reporta enabled 2 pero no tiene las reglas requeridas cargadas. No se modificó la configuración; la inmutabilidad exige recuperar/validar reglas persistentes y planificar un reinicio controlado.${NC}" >&2
-      WARNINGS=$((WARNINGS + 1))
-      show_summary
-      return 3
-    fi
     if ! make_backup; then
       echo -e "${RED}[ERROR] Backup fallido; se aborta antes de modificar auditd.${NC}" >&2
       exit 1
+    fi
+    if [ "$enabled_state" = "2" ] && ! audit_rules_ready; then
+      AUDITD_REBOOT_REQUIRED=true
+      echo -e "${YELLOW}[INFO] Se detectó enabled 2 sin reglas completas: --fix preparará la configuración persistente para el siguiente arranque.${NC}"
     fi
   else
     echo -e "${YELLOW}🔍 MODO VERIFICACIÓN - No se aplicarán cambios${NC}"
@@ -793,8 +810,15 @@ main() {
   add_audit_rules
   restart_auditd
   configure_audit_immutable
+  if [ "$AUDITD_REBOOT_REQUIRED" = true ]; then
+    echo -e "\n${YELLOW}[ACTION REQUIRED] La configuración persistente de auditd fue preparada, pero el kernel actual sigue inmutable.${NC}"
+    echo -e "${YELLOW}Revise /etc/audit/rules.d/98-orangebox-baseline.rules y los demás archivos *.rules; confirme que las reglas OrangeBox/CIS están presentes y que cualquier -e 2 queda al final.${NC}"
+    echo -e "${YELLOW}En la ventana de mantenimiento, reinicie el servidor y luego ejecute: auditctl -s; auditctl -l; systemctl --no-pager --full status auditd${NC}"
+    echo -e "${YELLOW}No se ejecutó reboot automáticamente. El módulo terminará con código 3 hasta validar el estado posterior al arranque.${NC}"
+  fi
   show_summary
 
+  if [ "$AUDITD_REBOOT_REQUIRED" = true ]; then return 3; fi
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
     echo -e "\n${BLUE}Para aplicar las correcciones, ejecute: $0 --fix${NC}"
   fi
