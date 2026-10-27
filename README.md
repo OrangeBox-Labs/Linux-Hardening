@@ -193,7 +193,7 @@ El proyecto diferencia claramente:
 
 ### Después del login
 
-`/etc/motd` queda vacío para evitar duplicados. El perfil `/etc/profile.d/99-orangebox-motd.sh` muestra primero el logo FIGlet (o ASCII de fallback) y luego una ficha de sesión ordenada: IP interna, uptime, `Load`, IP del cliente, usuario efectivo y fecha/hora una sola vez. Usa la misma paleta ANSI para todos los usuarios y no duplica el aviso de seguridad previo al login. En modo `--fix` se intenta instalar FIGlet desde repositorios ya configurados; no se habilitan repositorios ni se actualiza el sistema completo.
+`/etc/motd` queda vacío para evitar duplicados. El perfil `/etc/profile.d/99-orangebox-motd.sh` muestra primero el logo FIGlet (o ASCII de fallback) y luego la ficha de sesión en este orden: fecha/hora, IP externa, IP interna, IP del cliente, uptime, `Load` y usuario efectivo al final. La IP externa se consulta con `curl` (o `wget`) a `ifconfig.me` con timeout máximo de 2 segundos; si no hay conectividad o la respuesta no es una IPv4 válida, muestra `No disponible`. Usa la misma paleta ANSI para todos los usuarios y no duplica el aviso de seguridad previo al login. En modo `--fix` se intenta instalar FIGlet desde repositorios ya configurados; no se habilitan repositorios ni se actualiza el sistema completo.
 
 El banner SSH se valida con `sshd -t` y se recarga sin reiniciar el daemon.
 
@@ -422,7 +422,7 @@ Copyright (c) 2025 Felipe Roman - OrangeBox Labs
 
 ## MOTD dinámico por sesión
 
-El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra primero el logo FIGlet (o ASCII de fallback) y debajo IP interna, uptime desde `/proc/uptime`, carga desde `/proc/loadavg` bajo la etiqueta `Load`, IP del cliente, usuario efectivo y fecha/hora local. La fecha/hora aparece una sola vez, y el color de la ficha es uniforme para root y usuarios normales. El aviso de acceso restringido permanece en `/etc/issue` y `/etc/issue.net` antes de autenticar.
+El banner de shell se genera al abrir una shell interactiva desde `/etc/profile.d/99-orangebox-motd.sh`. Muestra primero el logo FIGlet (o ASCII de fallback) y debajo fecha/hora local, IP externa, IP interna, IP del cliente, uptime desde `/proc/uptime`, carga desde `/proc/loadavg` bajo la etiqueta `Load` y usuario efectivo al final. La IP externa se obtiene con `curl` o `wget` contra `ifconfig.me`, con timeout de hasta 2 segundos; ante fallo de red o una respuesta inválida muestra `No disponible`. La fecha/hora aparece una sola vez, y el color de la ficha es uniforme para root y usuarios normales. El aviso de acceso restringido permanece en `/etc/issue` y `/etc/issue.net` antes de autenticar.
 
 FIGlet se usa para generar el logo estático del banner previo a la autenticación. Durante `--fix`, si FIGlet o la fuente `small` no están disponibles, se intenta instalar desde los repositorios ya configurados. No se habilitan repositorios ni se actualiza el sistema completo. Si no puede instalarse, `/etc/issue` y `/etc/issue.net` reciben un logo ASCII embebido. El uptime y la carga del panel de shell se obtienen de `/proc`, compatibles con CentOS 6.
 
