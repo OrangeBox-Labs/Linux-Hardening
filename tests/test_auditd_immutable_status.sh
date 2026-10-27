@@ -54,6 +54,8 @@ export PATH
 # Sourcing defines the functions but must not run main() or modify auditd.
 # shellcheck source=../auditd-hardening.sh
 source "$AUDITD"
+# Force every test path to use the fake auditctl from PATH, never the host binary.
+get_auditctl_path() { command -v auditctl; }
 
 assert_state() {
   local state="$1" expected="$2" forbidden="$3" output=""
