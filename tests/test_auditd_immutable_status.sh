@@ -99,7 +99,9 @@ assert_state "missing"   "No se pudo determinar el estado de auditd mediante aud
 export AUDITCTL_TEST_ENABLED=2
 export AUDITCTL_TEST_NO_RULES=1
 WARNINGS=0
-output="$(report_auditd_immutable_status auditctl 2>&1)" || fail "el reporte immutable sin reglas falló"
+report_auditd_immutable_status auditctl >"$TMP_DIR/no-rules-output" 2>&1 ||
+  fail "el reporte immutable sin reglas falló"
+output="$(cat "$TMP_DIR/no-rules-output")"
 printf '%s\\n' "$output" | grep -Fq "auditd está inmutable (enabled 2), pero faltan reglas requeridas en memoria" ||
   fail "enabled=2 con No rules debe generar una advertencia explícita"
 [ "$WARNINGS" -gt 0 ] || fail "enabled=2 con No rules debe incrementar advertencias"
