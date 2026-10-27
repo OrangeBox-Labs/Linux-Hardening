@@ -435,3 +435,51 @@ sysctl_safe_apply_kptr_restrict_policy() {
   esac
 }
 
+
+
+# OrangeBox policy for kernel.unprivileged_bpf_disabled:
+# values 1 and 2 both disable unprivileged BPF; preserve either effective value.
+# If persistence is missing or contains an unsafe value, align it to the current
+# valid runtime value (or use 2 when runtime is 0). Never downgrade 1 to 2.
+sysctl_safe_apply_bpf_policy() {
+  local target="$1" backup_dir="$2" fix_mode="$3" begin="${4:-}" end="${5:-}"
+  local key="kernel.unprivileged_bpf_disabled" current="" defs="" file line value invalid=false
+  SYSCTL_SAFE_CHANGED=false
+  current="$(sysctl -n "$key" 2>/dev/null || true)"
+
+  case "$current" in
+    1|2)
+      defs="$(sysctl_safe_inventory "$key")"
+      if [ -z "$defs" ]; then
+        sysctl_safe_apply "$key" "$current" "$(sysctl_safe_description "$key")" "$target" "$backup_dir" "$fix_mode" "$begin" "$end"
+        return $?
+      fi
+      while IFS='|' read -r file line value; do
+        [ -n "$value" ] || continue
+        case "$value" in
+          1|2) ;;
+          *) invalid=true ;;
+        esac
+      done <<< "$defs"
+      if [ "$invalid" = false ]; then
+        sysctl_safe_log "OK" "$key=$current; la política acepta 1 o 2, ambos deshabilitan BPF sin privilegios. Se conserva el valor activo sin degradar 1 a 2."
+        return 0
+      fi
+      sysctl_safe_log "WARN" "$key tiene definiciones persistentes fuera de 1/2; se alineará con el valor activo válido ($current) y se conservarán las otras definiciones salvo conflictos gestionados por el helper."
+      sysctl_safe_apply "$key" "$current" "$(sysctl_safe_description "$key")" "$target" "$backup_dir" "$fix_mode" "$begin" "$end"
+      return $?
+      ;;
+    0)
+      sysctl_safe_apply "$key" "2" "$(sysctl_safe_description "$key")" "$target" "$backup_dir" "$fix_mode" "$begin" "$end"
+      return $?
+      ;;
+    "")
+      sysctl_safe_log "N/A" "$key no está disponible en este kernel; el control no aplica."
+      return 0
+      ;;
+    *)
+      sysctl_safe_log "WARN" "$key=$current no es un valor contemplado por la política; se conserva sin cambios y requiere revisión."
+      return 1
+      ;;
+  esac
+}
