@@ -545,7 +545,7 @@ EOF
             continue
           fi
         fi
-        printf '%s\\n' "$line" >> "$filtered_rules" || { rm -f "$staged_rules" "$filtered_rules"; WARNINGS=$((WARNINGS+1)); return 1; }
+        printf '%s\n' "$line" >> "$filtered_rules" || { rm -f "$staged_rules" "$filtered_rules"; WARNINGS=$((WARNINGS+1)); return 1; }
       done < "$staged_rules"
       if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$filtered_rules"; then
         echo "[ERROR] El staging contiene el syscall no soportado stime; se aborta sin reemplazar reglas." >&2
