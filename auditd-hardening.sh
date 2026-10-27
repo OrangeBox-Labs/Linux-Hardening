@@ -140,8 +140,8 @@ report_auditd_immutable_status() {
 # ==============================================
 make_backup() {
   [ "$AUTO_FIX" = true ] || return 0
-  if ! mkdir -p "$BACKUP_DIR" || ! chmod 700 "$BACKUP_DIR"; then
-    echo -e "${RED}[ERROR] No se pudo preparar el backup $BACKUP_DIR; no se modificará auditd.${NC}" >&2
+  if ! mkdir -m 700 "$BACKUP_DIR"; then
+    echo -e "${RED}[ERROR] No se pudo crear un directorio de backup nuevo $BACKUP_DIR; no se modificará auditd.${NC}" >&2
     return 1
   fi
   if [ -f "$AUDIT_CONF" ] && ! cp -p "$AUDIT_CONF" "$BACKUP_DIR/"; then
@@ -154,6 +154,20 @@ make_backup() {
   fi
   if [ -f /etc/audit/audit.rules ] && ! cp -p /etc/audit/audit.rules "$BACKUP_DIR/"; then
     echo -e "${RED}[ERROR] No se pudo respaldar /etc/audit/audit.rules; no se modificará auditd.${NC}" >&2
+    return 1
+  fi
+
+  # Verificar contenido de cada copia antes de permitir cambios persistentes.
+  if [ -f "$AUDIT_CONF" ] && ! cmp -s "$AUDIT_CONF" "$BACKUP_DIR/auditd.conf"; then
+    echo -e "${RED}[ERROR] El backup de $AUDIT_CONF no coincide con el original; se aborta.${NC}" >&2
+    return 1
+  fi
+  if [ -d /etc/audit/rules.d ] && ! diff -qr /etc/audit/rules.d "$BACKUP_DIR/rules.d" >/dev/null 2>&1; then
+    echo -e "${RED}[ERROR] El backup de /etc/audit/rules.d no coincide con el original; se aborta.${NC}" >&2
+    return 1
+  fi
+  if [ -f /etc/audit/audit.rules ] && ! cmp -s /etc/audit/audit.rules "$BACKUP_DIR/audit.rules"; then
+    echo -e "${RED}[ERROR] El backup de /etc/audit/audit.rules no coincide con el original; se aborta.${NC}" >&2
     return 1
   fi
   echo -e "${GREEN}[✓] Backup de auditd verificado en: $BACKUP_DIR${NC}"
