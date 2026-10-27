@@ -26,7 +26,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 | Catálogo CIS | Catalogado; trazabilidad control a control pendiente | Hay referencias para RHEL, AlmaLinux, Rocky Linux y Oracle Linux 8–10. CentOS/Stream no se equipara automáticamente a un perfil RHEL. Falta asociar cada control local a la recomendación y versión exactas, distinguir aplicabilidad y registrar controles no cubiertos/no aplicables. |
 | Pruebas y CI | Validado en verde e integrado | PR #20 se integró mediante squash en `main` como commit `0b90e3bebf8cee1f2917eef66242e45ced3fad27`. El último CI del árbol del PR, run `40402752036`, pasó sintaxis/regresiones y los seis jobs de compatibilidad CentOS 6/7 + AlmaLinux 8/9/10. Repetir CI antes de integrar futuros cambios de código. |
 
-- **Ronda de cambios 2026-10-27:** rama de prueba `fix/almalinux10-audit-selinux-safe-controls-20261027`, PR #31 en borrador. El nuevo código requiere CI y prueba operativa controlada; `main` no se ha modificado.
+- **Ronda de cambios 2026-10-27:** rama de prueba `fix/almalinux10-audit-selinux-safe-controls-20261027`, PR #31 en borrador. CI de sintaxis/regresión y compatibilidad aprobado (runs [40593223766](https://github.com/OrangeBox-Labs/Linux-Hardening/actions/runs/40593223766) y [40593223652](https://github.com/OrangeBox-Labs/Linux-Hardening/actions/runs/40593223652)); falta prueba operativa controlada de `--audit`/`--fix` en AlmaLinux 10.2. `main` no se ha modificado.
 
 ## Matriz de cobertura CIS local
 
@@ -71,7 +71,7 @@ El inventario por sección de los 143 checks locales, los dominios que no tienen
 3. **P1 — Corregir evidencias CIS que puedan dar falso PASS.** Montajes exactos, SELinux runtime/persistencia y core dumps con overrides están corregidos en la rama; queda validar CI y continuar con evidencias de GRUB/permisos, AIDE activo y opciones PAM/SSH efectivas.
 4. **P1 — Completar controles faltantes de bajo impacto.** Añadir primero verificaciones de solo lectura y pruebas; no cambiar la configuración durante una auditoría.
 5. **P2 — Aplicar cambios CIS de bajo riesgo de forma idempotente.** Mantener backup, comprobación efectiva y no tocar cuando ya cumple.
-6. **P2 — Cambios con riesgo operativo.** Incluirlos solo con mensaje breve sobre efecto e impacto, confirmación individual por terminal y omisión segura sin TTY. Especial atención a SSH/MFA/forwarding, PAM/lockout, GRUB, montajes `noexec`, bloqueo de módulos, SELinux, firewall, cron/at, `rp_filter`, IPv6 RA, user namespaces/BPF, y acciones de auditd `single`/ `halt`.
+6. **P2 — Cambios con riesgo operativo.** Cada parámetro debe explicar brevemente qué hace y el riesgo. En `--fix` se asume sí tras los preflight, respaldos, validaciones y rollback. Especial atención a SSH/MFA/forwarding, PAM/lockout, GRUB, montajes `noexec`, bloqueo de módulos, cron/at, `rp_filter`, IPv6 RA, user namespaces/BPF y acciones de auditd.
 7. **P3 — Mantener actualizados el catálogo y este tablero.** Un cambio de versión del benchmark exige revalidar IDs y no solo cambiar la cadena de versión.
 
 ## Criterios para marcar una tarea terminada

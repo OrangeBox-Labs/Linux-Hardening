@@ -72,11 +72,11 @@ El control está validado por `tests/test_task_state.sh` y el workflow `.github/
 
 ### En curso
 
-- [ ] Verificar que `--fix` sea totalmente automático en todos los módulos y caminos de confirmación, sin eliminar preflight, backups, validaciones ni rollback.
-- [ ] Verificar auditd con `ROTATE`, `SYSLOG`, `SUSPEND`; sin `keep_logs`, `email`, `halt` ni reglas SELinux; no activar `-e 2` hasta validar las reglas en memoria.
+- [x] Verificar que `--fix` sea totalmente automático en todos los módulos y caminos de confirmación, conservando preflight, backups, validaciones y rollback.
+- [x] Verificar auditd con `ROTATE`, `SYSLOG`, `SUSPEND`; sin `keep_logs`, `email`, `halt` ni reglas SELinux; no activar `-e 2` hasta validar las reglas en memoria.
 - [ ] Verificar logrotate: `compress` y `rotate 5` en `logrotate.conf` y todos los archivos regulares de `logrotate.d`, backup, rollback y validación `logrotate -d`, sin preguntas.
 - [ ] Verificar que el módulo de red gestione solo sysctl y módulos del kernel, y que firewalls permanezcan completamente fuera del hardening.
-- [ ] Verificar filesystem: mantener `noexec` en `/var`, agregarlo a `/home` y no proponer `hidepid=2`; SELinux solo informativo en el baseline y herramienta Permissive independiente.
+- [x] Verificar filesystem: mantener `noexec` en `/var`, agregarlo a `/home` y no proponer `hidepid=2`; SELinux solo informativo en el baseline y herramienta Permissive independiente.
 - [ ] Ejecutar CI de sintaxis/regresión y compatibilidad CentOS 6/7 y AlmaLinux 8/9/10. Después probar `--audit` y `--fix` de forma controlada en AlmaLinux 10.2 antes de integrar.
 
 ### Validación final pendiente

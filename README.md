@@ -46,7 +46,7 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 | `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
 | `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y aprobación automática de cambios bajo `--fix`. |
-| `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict`, `kernel.kptr_restrict` y forwarding IPv4/IPv6 con confirmación individual. |
+| `kernel-hardening.sh` | Políticas de kernel y forwarding IPv4/IPv6; explica el impacto sobre routing/NAT/VPN. En `--fix`, aprueba automáticamente las propuestas tras el preflight. |
 | `kernel-lpe-2026-mitigation.sh` | Mitigaciones específicas para escenarios LPE recientes, separadas del hardening general. |
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
@@ -236,7 +236,8 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 | `FS-hardening.sh` | Sistema de archivos |
 | `grub-hardening.sh` | GRUB |
 | `cron-hardening.sh` | cron/at |
-| `rsyslog-hardening.sh` | Logs |
+| `rsyslog-hardening.sh` | Persistencia/flujo de logs |
+| `logrotate-hardening.sh` | Compresión y rotación de logs (`compress`, `rotate 5`) |
 | `aide-install.sh` | Integridad de archivos |
 | `audit-listening-services.sh` | Servicios escuchando |
 | `generate-iptables-rules.sh` | Generación de firewall; alto riesgo |
@@ -331,7 +332,7 @@ SELinux no es un módulo de aplicación del baseline. El estado se informa; el c
 | `FS-hardening.sh` | Opciones restrictivas de montaje, módulos y autofs pueden afectar aplicaciones. Se evita `hidepid=2` por compatibilidad con Zabbix. |
 | `cron-hardening.sh` | Restricciones de cron/at pueden romper tareas de usuarios o cPanel. |
 | `grub-hardening.sh` | Cambios de arranque pueden requerir reinicio y dejar un sistema inaccesible si se aplican incorrectamente. |
-| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Forwarding IPv4/IPv6 queda detrás de confirmación individual porque puede interrumpir routing/NAT/VPN/gateways/containers. Validar rutas y consola de recuperación. |
+| `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Forwarding IPv4/IPv6 puede interrumpir routing/NAT/VPN/gateways/containers; revisa `--audit` y asegúrate de disponer de consola de recuperación antes de `--fix`. |
 | `auditd-hardening.sh` / `rsyslog-hardening.sh` | Pueden aumentar volumen de logs o afectar reglas y destinos existentes. |
 | `configure-time-sync.sh` | Cambios bruscos de hora pueden afectar certificados, autenticación y correlación de logs. |
 | `bash-hardening.sh` | Logging de comandos puede elevar volumen de logs y capturar argumentos sensibles. |
