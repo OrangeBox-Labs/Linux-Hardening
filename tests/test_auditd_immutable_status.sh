@@ -137,4 +137,26 @@ grep -Fq "No se ejecutó reboot automáticamente" "$TMP_DIR/fix-output" ||
   fail "--fix no debe reiniciar el host automáticamente"
 pass "--fix respalda y prepara la recuperación cuando enabled=2 y faltan reglas"
 
+# Prueba real de staging con rutas aisladas: no modifica /etc/audit ni carga reglas al kernel.
+AUTO_FIX=true
+FIXED=0
+WARNINGS=0
+AUDIT_RULES_DIR="$TMP_DIR/staged-rules"
+AUDIT_RULES="$AUDIT_RULES_DIR/98-orangebox-baseline.rules"
+export AUDITCTL_TEST_ENABLED=2
+export AUDITCTL_TEST_NO_RULES=1
+add_audit_rules >"$TMP_DIR/staging-output" 2>&1 ||
+  fail "add_audit_rules debe preparar reglas persistentes cuando enabled=2"
+[ -s "$AUDIT_RULES" ] || fail "no se creó el archivo persistente de reglas OrangeBox"
+grep -Fq '# OrangeBox hardening audit rules' "$AUDIT_RULES" ||
+  fail "el archivo persistente no tiene el marcador de propiedad OrangeBox"
+for key in time-change identity system-locale logins session perm_mod access mounts delete scope modules; do
+  grep -Fq -- "-k $key" "$AUDIT_RULES" || fail "faltan reglas persistentes para $key"
+done
+if grep -Eq '^[[:space:]]*-e[[:space:]]+2' "$AUDIT_RULES"; then
+  fail "la inmutabilidad no debe mezclarse con el archivo de reglas baseline"
+fi
+[ "$(stat -c %a "$AUDIT_RULES")" = "640" ] || fail "el archivo persistente debe tener modo 640"
+pass "reglas completas staged en ruta aislada sin tocar reglas en memoria"
+
 pass "la interpretación de enabled se prueba con auditctl simulado y sin cambios en el sistema"
