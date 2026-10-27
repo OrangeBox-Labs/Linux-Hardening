@@ -446,9 +446,24 @@ check_full_action() {
 # ==============================================
 # AGREGAR TODAS LAS REGLAS DE AUDITORIA
 # ==============================================
+# Detecta reglas OrangeBox obsoletas sin tocar el kernel ni archivos ajenos.
+# Los watches sobre rutas inexistentes y syscalls no soportadas deben corregirse
+# antes de permitir que el archivo se considere listo para el próximo arranque.
+orangebox_rules_need_repair() {
+  local file="$AUDIT_RULES" path=""
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  grep -q '^# OrangeBox hardening audit rules' "$file" || return 1
+  grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$file" && return 0
+  while read -r _ path _; do
+    [ -n "$path" ] || continue
+    [ -e "$path" ] || return 0
+  done < <(awk '$1 == "-w" {print $1, $2, $3}' "$file")
+  return 1
+}
+
 add_audit_rules() {
   echo -e "\n${BLUE}[*] Verificando reglas persistentes de auditoría... ${NC}"
-  local effect="" auditctl="" check key desc
+  local effect="" auditctl="" check key desc staged_rules="" filtered_rules="" watch_path=""
   local rules_checks=(
     "time-change:Eventos de fecha/hora"
     "identity:Eventos de usuario/grupo"
@@ -463,7 +478,7 @@ add_audit_rules() {
     "modules:Eventos de módulos del kernel"
   )
 
-  if [ ! -d "$AUDIT_RULES_DIR" ] || { [ "$AUTO_FIX" = true ] && ! persistent_audit_rules_ready; } || { [ "$AUTO_FIX" != true ] && [ ! -s "$AUDIT_RULES" ]; }; then
+  if [ ! -d "$AUDIT_RULES_DIR" ] || { [ "$AUTO_FIX" = true ] && { ! persistent_audit_rules_ready || orangebox_rules_need_repair; }; } || { [ "$AUTO_FIX" != true ] && [ ! -s "$AUDIT_RULES" ]; }; then
     effect="Crea un conjunto de reglas persistentes para registrar cambios de identidad, tiempo, red, permisos, accesos fallidos, montajes, borrado de archivos, sudo y módulos del kernel. Puede aumentar el volumen de /var/log/audit y la carga de I/O; no se sobrescribirá un archivo de reglas existente que tenga contenido."
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "crear conjunto de reglas auditd" "directorio/archivo ausente o vacío" "$AUDIT_RULES" "$effect"; then
       mkdir -p "$AUDIT_RULES_DIR" || { WARNINGS=$((WARNINGS + 1)); return 1; }
@@ -473,9 +488,11 @@ add_audit_rules() {
         WARNINGS=$((WARNINGS + 1))
         return 1
       fi
-      cat > "$AUDIT_RULES" <<'EOF'
+      staged_rules="$(mktemp "$AUDIT_RULES_DIR/.98-orangebox-baseline.XXXXXX")" || { echo "[ERROR] No se pudo crear un temporal para las reglas; se aborta sin modificar el archivo actual." >&2; WARNINGS=$((WARNINGS+1)); return 1; }
+      filtered_rules="$(mktemp "$AUDIT_RULES_DIR/.98-orangebox-filtered.XXXXXX")" || { rm -f "$staged_rules"; echo "[ERROR] No se pudo crear un temporal de validación; se aborta sin modificar el archivo actual." >&2; WARNINGS=$((WARNINGS+1)); return 1; }
+      cat > "$staged_rules" <<'EOF'
 # OrangeBox hardening audit rules (review volume and workload before deployment)
--a always,exit -F arch=b32 -S adjtimex -S settimeofday -S stime -k time-change
+-a always,exit -F arch=b32 -S adjtimex -S settimeofday -k time-change
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
 -w /etc/localtime -p wa -k time-change
 -w /etc/group -p wa -k identity
@@ -518,9 +535,34 @@ add_audit_rules() {
 -w /sbin/modprobe -p x -k modules
 -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
 EOF
-      chmod 640 "$AUDIT_RULES" && chown root:root "$AUDIT_RULES" || { WARNINGS=$((WARNINGS+1)); return 1; }
+      # Descarta watches sobre rutas ausentes en ESTE host (EL7-10 difieren).
+      # No se escribe sobre el archivo activo hasta que el staging esté listo.
+      while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+) ]]; then
+          watch_path="${BASH_REMATCH[1]}"
+          if [ ! -e "$watch_path" ]; then
+            echo "[INFO] Se omite watch de ruta inexistente: $watch_path"
+            continue
+          fi
+        fi
+        printf '%s\\n' "$line" >> "$filtered_rules" || { rm -f "$staged_rules" "$filtered_rules"; WARNINGS=$((WARNINGS+1)); return 1; }
+      done < "$staged_rules"
+      if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$filtered_rules"; then
+        echo "[ERROR] El staging contiene el syscall no soportado stime; se aborta sin reemplazar reglas." >&2
+        rm -f "$staged_rules" "$filtered_rules"
+        WARNINGS=$((WARNINGS+1))
+        return 1
+      fi
+      chmod 640 "$filtered_rules" && chown root:root "$filtered_rules" || { rm -f "$staged_rules" "$filtered_rules"; WARNINGS=$((WARNINGS+1)); return 1; }
+      if ! mv -f -- "$filtered_rules" "$AUDIT_RULES"; then
+        echo "[ERROR] No se pudo instalar atómicamente el archivo de reglas; se conserva el anterior." >&2
+        rm -f "$staged_rules" "$filtered_rules"
+        WARNINGS=$((WARNINGS+1))
+        return 1
+      fi
+      rm -f "$staged_rules"
       FIXED=$((FIXED + 1))
-      echo -e "${GREEN}[✓] Reglas persistentes escritas (sin activar inmutabilidad automáticamente)${NC}"
+      echo -e "${GREEN}[✓] Reglas persistentes escritas y filtradas para las rutas existentes (sin cargar al kernel)${NC}"
     else
       WARNINGS=$((WARNINGS+1))
     fi
