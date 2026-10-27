@@ -288,86 +288,31 @@ check_audit_backlog() {
 # ==============================================
 # 1.6.1.2 - ASEGURAR SELINUX NO DESHABILITADO EN BOOT
 # ==============================================
-remove_kernel_param() {
-  local param="$1" description="$2" effect="$3" tmp="" mode=""
-  if ! grub_config_has_param "$GRUB_CONFIG" "$param"; then return 0; fi
-  if ! confirm_grub_change "$description ($param)" "$effect"; then
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-  tmp="$(mktemp "$GRUB_CONFIG.orangebox.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
-  awk -v param="$param" '
-    /^[ \t]*GRUB_CMDLINE_LINUX="/ && /"$/ {
-      line=$0
-      eq=index(line, "=")
-      prefix=substr(line, 1, eq)
-      value=substr(line, eq+1)
-      sub(/^"/, "", value)
-      sub(/"$/, "", value)
-      n=split(value, fields, /[ \t]+/)
-      rebuilt=""
-      removed=0
-      for (i=1; i<=n; i++) {
-        if (fields[i] == param) { removed=1; continue }
-        if (fields[i] == "") continue
-        if (rebuilt != "") rebuilt=rebuilt " "
-        rebuilt=rebuilt fields[i]
-      }
-      if (removed) {
-        print prefix "\"" rebuilt "\""
-        changed=1
-        next
-      }
-    }
-    { print }
-    END { if (!changed) exit 1 }
-  ' "$GRUB_CONFIG" > "$tmp" || { rm -f "$tmp"; echo -e "$RED[!] No se pudo preparar la eliminación de $param.$NC"; WARNINGS=$((WARNINGS + 1)); return 1; }
-  mode="$(stat -c "%a" "$GRUB_CONFIG" 2>/dev/null || echo 600)"
-  chmod "$mode" "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
-  chown --reference="$GRUB_CONFIG" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
-  if grep -qF "$param" "$tmp"; then
-    rm -f "$tmp"
-    echo -e "$RED[!] El parámetro $param sigue presente; no se instala el cambio.$NC"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-  if mv "$tmp" "$GRUB_CONFIG"; then
-    echo -e "$GREEN[✓] $description eliminado y verificado$NC"
-    FIXED=$((FIXED + 1))
-    GRUB_PARAMS_CHANGED=true
-  else
-    rm -f "$tmp"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-}
-
+# ==============================================
+# 1.6.1.2 - AUDITAR SELINUX EN BOOT (SIN REMEDIACIÓN)
+# ==============================================
 check_selinux_boot() {
-  echo -e "\n$BLUE[*] 1.6.1.2 - Verificando SELinux no deshabilitado en boot...$NC"
+  echo -e "\\n$BLUE[*] 1.6.1.2 - Auditando flags de SELinux en boot (solo lectura)...$NC"
 
   if grub_config_has_param "$GRUB_CONFIG" "selinux=0"; then
-    echo -e "$RED[!] selinux=0 encontrado en GRUB_CMDLINE_LINUX$NC"
-    if [ "$AUTO_FIX" = true ]; then
-      effect="Quitar selinux=0 permite que SELinux pueda inicializarse tras el próximo arranque, según /etc/selinux/config. Si la política/contextos están mal preparados, servicios pueden quedar bloqueados; puede requerirse relabel y consola de recuperación."
-      remove_kernel_param "selinux=0" "evitar SELinux deshabilitado al arrancar" "$effect"
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    echo -e "$RED[WARN] selinux=0 está presente en GRUB_CMDLINE_LINUX; SELinux puede quedar deshabilitado al arrancar.$NC"
+    echo "Qué hace: el parámetro evita que SELinux se inicialice durante el arranque."
+    echo "Riesgo: quitarlo puede activar SELinux cuando la política/contextos no están preparados y bloquear servicios."
+    echo "[INFO] Política OrangeBox: SELinux y sus parámetros de arranque son solo check + warning; no se modifica GRUB."
+    WARNINGS=$((WARNINGS + 1))
     return 1
   fi
 
   if grub_config_has_param "$GRUB_CONFIG" "enforcing=0"; then
-    echo -e "$RED[!] enforcing=0 encontrado en GRUB_CMDLINE_LINUX$NC"
-    if [ "$AUTO_FIX" = true ]; then
-      effect="Quitar enforcing=0 puede pasar SELinux a enforcing en el próximo arranque cuando SELinux esté configurado como enabled. Aplicaciones con políticas o contextos incompletos pueden fallar; verifica AVCs y conserva consola de recuperación."
-      remove_kernel_param "enforcing=0" "evitar desactivar SELinux enforcing al arrancar" "$effect"
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
+    echo -e "$RED[WARN] enforcing=0 está presente en GRUB_CMDLINE_LINUX; SELinux puede no aplicar la política en enforcing.$NC"
+    echo "Qué hace: fuerza un modo no enforcing en el arranque."
+    echo "Riesgo: quitarlo puede bloquear servicios si faltan políticas o etiquetas correctas."
+    echo "[INFO] Política OrangeBox: SELinux y sus parámetros de arranque son solo check + warning; no se modifica GRUB."
+    WARNINGS=$((WARNINGS + 1))
     return 1
   fi
 
-  echo -e "$GREEN[✓] SELinux no está deshabilitado en boot$NC"
+  echo -e "$GREEN[OK] No se detectaron flags de GRUB que deshabiliten SELinux.$NC"
   return 0
 }
 
