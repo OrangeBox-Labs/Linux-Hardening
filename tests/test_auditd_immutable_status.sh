@@ -171,6 +171,29 @@ if grep -Eq '^[[:space:]]*-e[[:space:]]+2' "$AUDIT_RULES"; then
   fail "la inmutabilidad no debe mezclarse con el archivo de reglas baseline"
 fi
 [ "$(stat -c %a "$AUDIT_RULES")" = "640" ] || fail "el archivo persistente debe tener modo 640"
-pass "reglas completas staged en ruta aislada sin tocar reglas en memoria"
+if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$AUDIT_RULES"; then
+  fail "el baseline no debe generar el syscall stime"
+fi
+if [ ! -e /etc/network ] && grep -Eq '^[[:space:]]*-w[[:space:]]+/etc/network([[:space:]]|$)' "$AUDIT_RULES"; then
+  fail "el baseline no debe incluir watches de rutas ausentes"
+fi
+pass "reglas completas staged en ruta aislada sin tocar reglas en memoria ni generar stime"
+
+# Un archivo OrangeBox existente con reglas obsoletas debe repararse en staging,
+# incluso si las categorías requeridas ya están presentes. No se carga al kernel.
+printf '%s\\n' '-a always,exit -F arch=b32 -S stime -k time-change' '-w /ob-test-nonexistent-audit-watch-path -p wa -k logins' >> "$AUDIT_RULES"
+add_audit_rules >"$TMP_DIR/repair-output" 2>&1 || {
+  cat "$TMP_DIR/repair-output" >&2
+  fail "el script debe reparar el baseline OrangeBox obsoleto"
+}
+if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$AUDIT_RULES"; then
+  fail "la reparación dejó stime en el archivo persistente"
+fi
+if grep -Fq '/ob-test-nonexistent-audit-watch-path' "$AUDIT_RULES"; then
+  fail "la reparación dejó un watch sobre una ruta inexistente"
+fi
+grep -Fq 'Reglas persistentes escritas y filtradas' "$TMP_DIR/repair-output" ||
+  fail "la reparación debe informar que regeneró el archivo OrangeBox"
+pass "un baseline OrangeBox obsoleto se repara atómicamente sin cargar reglas al kernel"
 
 pass "la interpretación de enabled se prueba con auditctl simulado y sin cambios en el sistema"
