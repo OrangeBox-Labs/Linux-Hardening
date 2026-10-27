@@ -43,7 +43,7 @@ fi
 
 CRON="$ROOT_DIR/cron-hardening.sh"
 grep -Fq 'confirm_cron_change()' "$CRON" || fail "cron/at hardening must confirm each impactful change"
-grep -Fq 'crear $allow_file con root como único usuario permitido' "$CRON" || fail "cron allow-list change does not explain impact on application/hosting accounts"
+grep -Fq 'crear $allow_file con solo root' "$CRON" || fail "cron allow-list change does not explain impact on application/hosting accounts"
 grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$CRON" || fail "cron fix must skip changes without a TTY"
 grep -Fq 'No se reinicia crond' "$CRON" || fail "cron fix should not unconditionally restart the daemon after permission changes"
 if grep -Fq 'ob_service_restart crond' "$CRON"; then fail "cron hardening should not unconditionally restart crond"; fi
@@ -52,7 +52,9 @@ if grep -Fq 'ob_service_restart crond' "$CRON"; then fail "cron hardening should
 GRUB="$ROOT_DIR/grub-hardening.sh"
 grep -Fq 'confirm_grub_change()' "$GRUB" || fail "GRUB changes must require explicit terminal consent"
 grep -Fq 'grub_config_has_param()' "$GRUB" || fail "GRUB must verify active GRUB_CMDLINE_LINUX values, not comments"
-grep -Fq 'remove_kernel_param "selinux=0"' "$GRUB" || fail "SELinux boot-argument removal must use the guarded parameter helper"
+! grep -Fq 'remove_kernel_param "selinux=0"' "$GRUB" || fail "GRUB must not remove selinux=0 automatically"
+! grep -Fq 'remove_kernel_param "enforcing=0"' "$GRUB" || fail "GRUB must not remove enforcing=0 automatically"
+grep -Fq 'SELinux y sus parámetros de arranque son solo check + warning; no se modifica GRUB.' "$GRUB" || fail "GRUB SELinux checks must remain audit-only"
 grep -Fq 'confirm_grub_change "regenerar la configuración de GRUB' "$GRUB" || fail "GRUB regeneration must explain risk and require confirmation"
 grep -Fq 'múltiples grub.cfg en particiones EFI' "$GRUB" || fail "ambiguous EFI GRUB targets must not be selected by a wildcard"
 grep -Fq 'if [ "$AUTO_FIX" = true ] && [ "$GRUB_PARAMS_CHANGED" = true ]; then' "$GRUB" || fail "GRUB should not regenerate solely because file permissions changed"
