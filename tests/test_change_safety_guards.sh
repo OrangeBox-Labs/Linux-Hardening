@@ -26,6 +26,11 @@ grep -Fq '"$PROFILE_D" "$PROFILE_MOTD" "$ALIASES_D"' "$BASH_HARDENING" || fail "
 grep -Fq 'OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -a; history -c; history -r;/}"' "$BASH_HARDENING" || fail "el perfil Bash no elimina el hook heredado que vacía el historial"
 grep -Fq 'ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN' "$BASH_HARDENING" || fail "root .bashrc no migra sesiones con PROMPT_COMMAND heredado"
 grep -Fq 'history -a' "$BASH_HARDENING" || fail "Bash hardening no garantiza el guardado incremental del historial"
+grep -Fq 'export HISTSIZE=100000' "$BASH_HARDENING" || fail "bash-full no usa un HISTSIZE compatible con Bash 4.1"
+grep -Fq 'export HISTFILESIZE=100000' "$BASH_HARDENING" || fail "bash-full no limita el archivo de historial a 100000 comandos"
+if grep -Eq 'HISTSIZE=-1|HISTFILESIZE=-1' "$BASH_HARDENING"; then
+  fail "bash-full no debe usar valores negativos de historial en sistemas Bash antiguos"
+fi
 grep -Fq 'No se pudo respaldar $file' "$BASH_HARDENING" || fail "Bash no valida las copias individuales del backup"
 grep -Fq 'if ! make_backup; then' "$CRON" || fail "cron/at puede aplicar cambios si falla el backup"
 grep -Fq 'No se pudo respaldar $file' "$CRON" || fail "cron/at no comprueba las copias individuales"
