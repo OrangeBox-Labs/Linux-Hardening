@@ -150,8 +150,10 @@ AUDIT_RULES="$AUDIT_RULES_DIR/98-orangebox-baseline.rules"
 export ORANGEBOX_ASSUME_YES=1
 export AUDITCTL_TEST_ENABLED=2
 export AUDITCTL_TEST_NO_RULES=1
-add_audit_rules >"$TMP_DIR/staging-output" 2>&1 ||
+add_audit_rules >"$TMP_DIR/staging-output" 2>&1 || {
+  cat "$TMP_DIR/staging-output" >&2
   fail "add_audit_rules debe preparar reglas persistentes cuando enabled=2"
+}
 [ -s "$AUDIT_RULES" ] || { cat "$TMP_DIR/staging-output" >&2; fail "no se creó el archivo persistente de reglas OrangeBox"; }
 grep -Fq '# OrangeBox hardening audit rules' "$AUDIT_RULES" ||
   fail "el archivo persistente no tiene el marcador de propiedad OrangeBox"
