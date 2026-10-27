@@ -1680,7 +1680,7 @@ bash_profile_check() {
 
 bash_audit_profile_controls() {
   local file="$1" mode owner group
-  bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
+  bash_profile_check "$file" "Bash timeout de usuario: TMOUT=600 (10 minutos) y readonly" 'TMOUT=600 2>/dev/null || true' 'readonly TMOUT'
   bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
   bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
   bash_profile_check "$file" "Bash: HISTSIZE por versión (Bash 4.3+ ilimitado; anterior 100000)" 'orangebox_history_guard() {' 'HISTSIZE=-1' 'HISTSIZE=100000'
@@ -1782,21 +1782,21 @@ bash_module() {
   tmp="$(mktemp)" || { warn "No se pudo crear temporal para Bash"; return; }
   cat > "$tmp" <<'ORANGEBOX_BASH'
 # OrangeBox Linux Hardening - historial compatible, prompt por rol y timeout
-# Timeout por inactividad: 120 segundos en shells interactivos de usuarios no-root.
+# Timeout por inactividad: 600 segundos (10 minutos) en shells interactivos de usuarios no-root.
 # Limpiar TMOUT heredado evita que una shell root reciba el timeout del usuario.
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   unset TMOUT 2>/dev/null || true
 else
   case $- in
     *i*)
-      if [ "${TMOUT:-}" != 120 ]; then
-        TMOUT=120 2>/dev/null || true
+      if [ "${TMOUT:-}" != 600 ]; then
+        TMOUT=600 2>/dev/null || true
       fi
-      if [ "${TMOUT:-}" = 120 ]; then
+      if [ "${TMOUT:-}" = 600 ]; then
         export TMOUT
         readonly TMOUT 2>/dev/null || true
       else
-        printf '%s\n' 'OrangeBox: no fue posible fijar TMOUT=120; revise si ya estaba definido como readonly.' >&2
+        printf '%s\n' 'OrangeBox: no fue posible fijar TMOUT=600; revise si ya estaba definido como readonly.' >&2
       fi
       ;;
   esac

@@ -115,8 +115,8 @@ if grep -Eq 'AVISO DE SEGURIDAD|SISTEMA DE ACCESO RESTRINGIDO|Todas las conexion
   fail "el MOTD de shell no debe duplicar el aviso pre-login ni depender de tput para colorear"
 fi
 grep -Fq "OB_CYAN=\$(printf" "$motd_profile_tmp" || fail "el MOTD no define la paleta ANSI común"
-# Idle timeout is two minutes for interactive non-root sessions; root clears inherited TMOUT.
-grep -Fq 'TMOUT=120' "$CORE" || fail "falta timeout interactivo de 120 segundos"
+# Idle timeout is ten minutes for interactive non-root sessions; root clears inherited TMOUT.
+grep -Fq 'TMOUT=600' "$CORE" || fail "falta timeout interactivo de 600 segundos (10 minutos)"
 grep -Fq 'unset TMOUT 2>/dev/null || true' "$CORE" || fail "la shell root no elimina TMOUT heredado"
 grep -Fq 'readonly TMOUT' "$CORE" || fail "TMOUT no está protegido contra cambios por el usuario"
 grep -Fq 'solo aplica a shells interactivos' "$CORE" || fail "no se limita el resto del perfil a shells interactivos"

@@ -24,7 +24,7 @@ El control está validado por `tests/test_task_state.sh` y el workflow `.github/
 - El alcance es exclusivamente **hardening de un Linux genérico**. No crear perfiles por aplicación, servicio o combinaciones de software.
 - `linux-hardening.sh` sin `--fix` hace auditoría de solo lectura: muestra cada control, el objetivo recomendado, el valor/estado real y si cumple.
 - `linux-hardening.sh --fix` es totalmente automático: asume sí a las propuestas, manteniendo preflight, backups, validación y rollback. Las descripciones deben resumir qué protege cada parámetro y su riesgo operacional.
-- Si no existe una terminal interactiva, un cambio sensible debe omitirse, no aprobarse automáticamente.
+- `--fix` también debe funcionar sin terminal interactiva: asume sí después de los preflight del módulo, conserva backups/validación/rollback y omite el cambio si esas validaciones fallan.
 - Los módulos de hardening no inspeccionan ni modifican CSF, iptables/nftables, Shorewall, Imunify ni otros firewalls. El inventario firewall/listeners es una herramienta independiente, solo de lectura.
 - SELinux solo se informa en `linux-hardening.sh`; pasar a Permissive corresponde exclusivamente a `selinux-secure-setup.sh`, que no se invoca desde el baseline.
 - `logrotate-hardening.sh` aplica `compress` y `rotate 5` a `/etc/logrotate.conf` y los archivos regulares de `/etc/logrotate.d`, sin confirmación, con backup y validación.

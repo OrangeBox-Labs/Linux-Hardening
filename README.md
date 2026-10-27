@@ -177,10 +177,10 @@ La protección del historial es de mejor esfuerzo y no constituye un mecanismo a
 Las shells interactivas de usuarios distintos de `root` utilizan:
 
 ```text
-TMOUT=120
+TMOUT=600
 ```
 
-El timeout es de 120 segundos de inactividad.
+El timeout es de 600 segundos (10 minutos) de inactividad.
 
 Las shells root eliminan el `TMOUT` heredado y el mecanismo no se aplica a shells no interactivas.
 
