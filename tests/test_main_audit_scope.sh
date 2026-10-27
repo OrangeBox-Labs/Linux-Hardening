@@ -82,11 +82,11 @@ fi
 grep -Fq 'sysctl_safe_log "N/A"' "$MAIN" || fail "los sysctl no aplicables no muestran un estado explícito"
 grep -Fq 'No se puede confirmar Storage=persistent' "$MAIN" || fail "journald no informa config ausente"
 grep -Fq 'carga el perfil OrangeBox para shells interactivos no-login' "$MAIN" || fail "Bash no comprueba el include de /etc/bashrc en audit"
-grep -Fq 'no existe; no hay historial ilimitado configurado' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
+grep -Fq 'no existe; no hay política de historial compatible configurada' "$MAIN" || fail "Bash oculta dotfiles de historial ausentes"
 grep -Fq 'if [ "${PENDING_ONLY_AUDIT:-false}" != true ]; then' "$MAIN" || fail "un symlink en audit corta los estados individuales del historial"
 grep -Fq -- '--fix no lo reemplaza automáticamente' "$MAIN" || fail "los symlinks de dotfiles no se preservan durante fix"
-grep -Fq 'HISTSIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTSIZE de dotfiles por separado"
-grep -Fq 'HISTFILESIZE no está fijado a -1' "$MAIN" || fail "Bash no audita HISTFILESIZE de dotfiles por separado"
+grep -Fq 'HISTSIZE no está fijado a 100000' "$MAIN" || fail "Bash no audita HISTSIZE de dotfiles por separado"
+grep -Fq 'HISTFILESIZE no está fijado a 100000' "$MAIN" || fail "Bash no audita HISTFILESIZE de dotfiles por separado"
 grep -Fq 'HISTCONTROL vacío (no se omiten comandos)' "$MAIN" || fail "Bash no audita HISTCONTROL en dotfiles"
 grep -Fq 'HISTIGNORE eliminado' "$MAIN" || fail "Bash no audita HISTIGNORE en dotfiles"
 grep -Fq 'histappend habilitado' "$MAIN" || fail "Bash no audita histappend en dotfiles"
@@ -102,14 +102,14 @@ grep -Fq 'IP forwarding=1: se usa rp_filter=2' "$MAIN" || fail "la política de 
 
 # Every managed Bash hardening control must be surfaced separately in audit.
 grep -Fq 'bash_audit_profile_controls "$target"' "$MAIN" || fail "Bash no informa cada control del perfil en audit"
-grep -Fq "'orangebox_history_guard() {' 'HISTSIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTSIZE no acepta la implementación del guard"
-grep -Fq "'orangebox_history_guard() {' 'HISTFILESIZE=-1' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTFILESIZE no acepta la implementación del guard"
+grep -Fq "'orangebox_history_guard() {' 'HISTSIZE=100000' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTSIZE no acepta la implementación del guard"
+grep -Fq "'orangebox_history_guard() {' 'HISTFILESIZE=100000' 'export HISTSIZE HISTFILESIZE HISTFILE'" "$MAIN" || fail "el audit de HISTFILESIZE no acepta la implementación del guard"
 grep -Fq "'orangebox_history_guard() {' 'HISTCONTROL=' 'export HISTCONTROL'" "$MAIN" || fail "el audit de HISTCONTROL no acepta su exportación en líneas separadas"
 grep -Fq 'Bash: HISTIGNORE eliminado' "$MAIN" || fail "el perfil no revisa HISTIGNORE de forma individual"
 for control in \
   'Bash timeout de usuario: TMOUT=120 y readonly' \
-  'Bash: HISTSIZE=-1 (sin límite de líneas en memoria)' \
-  'Bash: HISTFILESIZE=-1 (sin límite de líneas persistentes)' \
+  'Bash: HISTSIZE=100000 (compatible con Bash 4.1+)' \
+  'Bash: HISTFILESIZE=100000 (límite persistente de 100000 comandos)' \
   'Bash: historial con fecha y hora' \
   'Bash: bloquea history -c/-d/-w desde el wrapper' \
   'Readline: Ctrl+A va al inicio de línea' \
