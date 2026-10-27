@@ -649,6 +649,23 @@ restart_auditd() {
   fi
 }
 
+# Algunas distribuciones no crean los archivos de faillog/utmp/wtmp/btmp
+# hasta que se usan. Solo esas categorías basadas en watches se consideran no
+# aplicables cuando no existe ninguna de sus rutas; no se ignoran si una ruta existe.
+audit_key_has_existing_watch_path() {
+  case "${1:-}" in
+    logins)
+      [ -e /var/log/faillog ] || [ -e /var/log/lastlog ] || [ -e /var/log/tallylog ]
+      ;;
+    session)
+      [ -e /var/run/utmp ] || [ -e /var/log/wtmp ] || [ -e /var/log/btmp ]
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 # Comprueba que las reglas persistentes ya cubren las categorías requeridas.
 # Evita duplicar un ruleset válido del administrador solo porque el kernel
 # está inmutable o las reglas no se encuentran cargadas en esta sesión.
@@ -667,7 +684,12 @@ persistent_audit_rules_ready() {
     for file in "${files[@]}"; do
       if grep -Eq "^[[:space:]]*[^#].*-k[[:space:]]+$key([[:space:]]|$)" "$file"; then found=true; break; fi
     done
-    [ "$found" = true ] || return 1
+    if [ "$found" != true ]; then
+      if { [ "$key" = logins ] || [ "$key" = session ]; } && ! audit_key_has_existing_watch_path "$key"; then
+        continue
+      fi
+      return 1
+    fi
   done
   return 0
 }
@@ -678,7 +700,12 @@ audit_rules_ready() {
   [ -n "$auditctl" ] || return 1
   local required_keys=(time-change identity system-locale logins session perm_mod access mounts delete scope modules)
   for key in "${required_keys[@]}"; do
-    "$auditctl" -l 2>/dev/null | grep -q -- "$key" || return 1
+    if ! "$auditctl" -l 2>/dev/null | grep -q -- "$key"; then
+      if { [ "$key" = logins ] || [ "$key" = session ]; } && ! audit_key_has_existing_watch_path "$key"; then
+        continue
+      fi
+      return 1
+    fi
   done
   return 0
 }
