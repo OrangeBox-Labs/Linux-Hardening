@@ -165,8 +165,26 @@ add_audit_rules >"$TMP_DIR/staging-output" 2>&1 || {
 grep -Fq '# OrangeBox hardening audit rules' "$AUDIT_RULES" ||
   fail "el archivo persistente no tiene el marcador de propiedad OrangeBox"
 for key in time-change identity system-locale logins session perm_mod access mounts delete scope modules; do
-  grep -Fq -- "-k $key" "$AUDIT_RULES" || fail "faltan reglas persistentes para $key"
+  if grep -Fq -- "-k $key" "$AUDIT_RULES"; then
+    continue
+  fi
+  case "$key" in
+    logins)
+      if [ ! -e /var/log/faillog ] && [ ! -e /var/log/lastlog ] && [ ! -e /var/log/tallylog ]; then
+        pass "se omite logins porque no existe ninguna ruta de login auditable en este host"
+        continue
+      fi
+      ;;
+    session)
+      if [ ! -e /var/run/utmp ] && [ ! -e /var/log/wtmp ] && [ ! -e /var/log/btmp ]; then
+        pass "se omite session porque no existe ninguna ruta de sesión auditable en este host"
+        continue
+      fi
+      ;;
+  esac
+  fail "faltan reglas persistentes para $key"
 done
+persistent_audit_rules_ready || fail "el baseline filtrado debe seguir considerándose listo cuando las rutas opcionales de login/sesión no existen"
 if grep -Eq '^[[:space:]]*-e[[:space:]]+2' "$AUDIT_RULES"; then
   fail "la inmutabilidad no debe mezclarse con el archivo de reglas baseline"
 fi
