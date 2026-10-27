@@ -26,10 +26,14 @@ grep -Fq '"$PROFILE_D" "$PROFILE_MOTD" "$ALIASES_D"' "$BASH_HARDENING" || fail "
 grep -Fq 'OB_PROMPT_COMMAND="${OB_PROMPT_COMMAND//history -a; history -c; history -r;/}"' "$BASH_HARDENING" || fail "el perfil Bash no elimina el hook heredado que vacía el historial"
 grep -Fq 'ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN' "$BASH_HARDENING" || fail "root .bashrc no migra sesiones con PROMPT_COMMAND heredado"
 grep -Fq 'history -a' "$BASH_HARDENING" || fail "Bash hardening no garantiza el guardado incremental del historial"
-grep -Fq 'export HISTSIZE=100000' "$BASH_HARDENING" || fail "bash-full no usa un HISTSIZE compatible con Bash 4.1"
-grep -Fq 'export HISTFILESIZE=100000' "$BASH_HARDENING" || fail "bash-full no limita el archivo de historial a 100000 comandos"
-if grep -Eq 'HISTSIZE=-1|HISTFILESIZE=-1' "$BASH_HARDENING"; then
-  fail "bash-full no debe usar valores negativos de historial en sistemas Bash antiguos"
+grep -Fq 'orangebox_set_history_limits() {' "$BASH_HARDENING" || fail "bash-full no selecciona la política de historial por versión"
+grep -Fq 'BASH_VERSINFO[1]:-0}" -ge 3' "$BASH_HARDENING" || fail "bash-full no detecta Bash 4.3 como corte de compatibilidad"
+grep -Fq 'HISTSIZE=-1' "$BASH_HARDENING" || fail "bash-full no conserva historial ilimitado en Bash 4.3+"
+grep -Fq 'HISTSIZE=100000' "$BASH_HARDENING" || fail "bash-full no aplica fallback para Bash anterior a 4.3"
+grep -Fq 'HISTFILESIZE=-1' "$BASH_HARDENING" || fail "bash-full no mantiene archivo ilimitado en Bash 4.3+"
+grep -Fq 'HISTFILESIZE=100000' "$BASH_HARDENING" || fail "bash-full no limita el historial persistente en Bash anterior a 4.3"
+if grep -Eq 'export HISTSIZE=100000|export HISTFILESIZE=100000' "$BASH_HARDENING"; then
+  fail "bash-full no debe imponer el fallback de Bash antiguo a todas las versiones"
 fi
 grep -Fq 'No se pudo respaldar $file' "$BASH_HARDENING" || fail "Bash no valida las copias individuales del backup"
 grep -Fq 'if ! make_backup; then' "$CRON" || fail "cron/at puede aplicar cambios si falla el backup"
