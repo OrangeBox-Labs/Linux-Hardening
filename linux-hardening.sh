@@ -1442,15 +1442,17 @@ normalize_history_dotfile() {
     else
       warn "$file: falta el bloque administrado OrangeBox de historial"
     fi
-    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=100000[[:space:]]*$' "$file"; then
-      ok "$file: HISTSIZE=100000"
+    if grep -Fq 'orangebox_set_history_limits() {' "$file" &&
+       grep -Fq 'HISTSIZE=-1' "$file" && grep -Fq 'HISTSIZE=100000' "$file"; then
+      ok "$file: HISTSIZE adaptado a Bash 4.3+ o fallback para Bash antiguo"
     else
-      warn "$file: HISTSIZE no está fijado a 100000"
+      warn "$file: falta selección compatible de HISTSIZE según versión de Bash"
     fi
-    if grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=100000[[:space:]]*$' "$file"; then
-      ok "$file: HISTFILESIZE=100000"
+    if grep -Fq 'orangebox_set_history_limits() {' "$file" &&
+       grep -Fq 'HISTFILESIZE=-1' "$file" && grep -Fq 'HISTFILESIZE=100000' "$file"; then
+      ok "$file: HISTFILESIZE adaptado a Bash 4.3+ o fallback para Bash antiguo"
     else
-      warn "$file: HISTFILESIZE no está fijado a 100000"
+      warn "$file: falta selección compatible de HISTFILESIZE según versión de Bash"
     fi
     if grep -Eq '^[[:space:]]*set[[:space:]]+-o[[:space:]]+history([[:space:]]|$)' "$file"; then
       ok "$file: historial interactivo habilitado"
@@ -1493,11 +1495,12 @@ normalize_history_dotfile() {
 
   if [ -f "$file" ] &&
      grep -Fq '# ORANGEBOX UNLIMITED HISTORY BEGIN' "$file" &&
-     grep -Eq '^[[:space:]]*export[[:space:]]+HISTSIZE=100000[[:space:]]*$' "$file" &&
-     grep -Eq '^[[:space:]]*export[[:space:]]+HISTFILESIZE=100000[[:space:]]*$' "$file" &&
+     grep -Fq 'orangebox_set_history_limits() {' "$file" &&
+     grep -Fq 'HISTSIZE=-1' "$file" && grep -Fq 'HISTSIZE=100000' "$file" &&
+     grep -Fq 'HISTFILESIZE=-1' "$file" && grep -Fq 'HISTFILESIZE=100000' "$file" &&
      ! grep -Eq '^[[:space:]]*readonly[[:space:]]+HISTFILE([[:space:]]|$)' "$file" &&
      ! grep -Eq 'PROMPT_COMMAND=.*history -c; history -r|^[[:space:]]*PROMPT_COMMAND="orangebox_history_guard;' "$file"; then
-    ok "$file: historial habilitado con límite 100000"
+    ok "$file: historial adaptado automáticamente a la versión de Bash"
     return 0
   fi
   if [ ! -f "$file" ]; then
@@ -1526,10 +1529,20 @@ normalize_history_dotfile() {
   fi
   cat >> "$tmp" <<'ORANGEBOX_UNLIMITED_HISTORY'
 # ORANGEBOX UNLIMITED HISTORY BEGIN
-# El historial conserva hasta 100000 comandos, compatible con Bash 4.1+.
+# Bash 4.3+ usa -1 para historial ilimitado; Bash 4.1/4.2 usa 100000.
+orangebox_set_history_limits() {
+  if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+     { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+    HISTSIZE=-1
+    HISTFILESIZE=-1
+  else
+    HISTSIZE=100000
+    HISTFILESIZE=100000
+  fi
+  export HISTSIZE HISTFILESIZE
+}
+orangebox_set_history_limits
 set -o history
-export HISTSIZE=100000
-export HISTFILESIZE=100000
 export HISTCONTROL=
 unset HISTIGNORE
 case "${HISTFILE:-}" in
@@ -1570,8 +1583,8 @@ bash_audit_profile_controls() {
   bash_profile_check "$file" "Bash timeout de usuario: TMOUT=120 y readonly" 'TMOUT=120 2>/dev/null || true' 'readonly TMOUT'
   bash_profile_check "$file" "Bash root: elimina TMOUT heredado" 'unset TMOUT 2>/dev/null || true'
   bash_profile_check "$file" "Bash: historial habilitado" 'set -o history'
-  bash_profile_check "$file" "Bash: HISTSIZE=100000 (compatible con Bash 4.1+)" 'orangebox_history_guard() {' 'HISTSIZE=100000' 'export HISTSIZE HISTFILESIZE HISTFILE'
-  bash_profile_check "$file" "Bash: HISTFILESIZE=100000 (límite persistente de 100000 comandos)" 'orangebox_history_guard() {' 'HISTFILESIZE=100000' 'export HISTSIZE HISTFILESIZE HISTFILE'
+  bash_profile_check "$file" "Bash: HISTSIZE por versión (Bash 4.3+ ilimitado; anterior 100000)" 'orangebox_history_guard() {' 'HISTSIZE=-1' 'HISTSIZE=100000'
+  bash_profile_check "$file" "Bash: HISTFILESIZE por versión (Bash 4.3+ ilimitado; anterior 100000)" 'orangebox_history_guard() {' 'HISTFILESIZE=-1' 'HISTFILESIZE=100000'
   bash_profile_check "$file" "Bash: HISTCONTROL vacío (no se omiten comandos)" 'orangebox_history_guard() {' 'HISTCONTROL=' 'export HISTCONTROL'
   bash_profile_check "$file" "Bash: HISTIGNORE eliminado" 'orangebox_history_guard() {' 'unset HISTIGNORE'
   bash_profile_check "$file" "Bash: historial acumulativo entre sesiones" 'shopt -s histappend'
@@ -1724,8 +1737,15 @@ history() {
 
 orangebox_history_guard() {
   set -o history 2>/dev/null || true
-  HISTSIZE=100000
-  HISTFILESIZE=100000
+  # Bash 4.3 added support for negative sizes meaning unlimited.
+  if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+     { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+    HISTSIZE=-1
+    HISTFILESIZE=-1
+  else
+    HISTSIZE=100000
+    HISTFILESIZE=100000
+  fi
   case "${HISTFILE:-}" in
     ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="${HOME}/.bash_history" ;;
   esac
@@ -1800,17 +1820,17 @@ ORANGEBOX_BASH
      [ "$(stat -c '%a' "$target" 2>/dev/null)" = 644 ] &&
      [ "$(stat -c '%U' "$target" 2>/dev/null)" = root ] &&
      [ "$(stat -c '%G' "$target" 2>/dev/null)" = root ]; then
-    ok "Bash History habilitado (límite 100000); prompt OrangeBox ya configurado"
+    ok "Bash History con límites compatibles según versión; prompt OrangeBox ya configurado"
   elif $AUTO_FIX; then
     [ ! -e "$target" ] || backup_once "$target"
     if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
-      ok "Bash History habilitado (límite 100000) y prompt por rol aplicado en $target"
+      ok "Bash History con límites compatibles según versión y prompt por rol aplicado en $target"
       FIXED=$((FIXED+1))
     else
       warn "No se pudo instalar/verificar $target"
     fi
   else
-    warn "$target requiere habilitar Bash History y establecer HISTSIZE/HISTFILESIZE=100000"
+    warn "$target requiere habilitar Bash History con límites adecuados a la versión de Bash"
   fi
   rm -f "$tmp"
 
