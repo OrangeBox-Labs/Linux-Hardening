@@ -137,6 +137,10 @@ grep -Fq "No se ejecutó reboot automáticamente" "$TMP_DIR/fix-output" ||
   fail "--fix no debe reiniciar el host automáticamente"
 pass "--fix respalda y prepara la recuperación cuando enabled=2 y faltan reglas"
 
+# Recuperar las funciones reales después de las sustituciones usadas para probar main().
+# El source no ejecuta main(); PATH conserva el auditctl simulado.
+source "$AUDITD"
+
 # Prueba real de staging con rutas aisladas: no modifica /etc/audit ni carga reglas al kernel.
 AUTO_FIX=true
 FIXED=0
