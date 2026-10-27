@@ -660,6 +660,9 @@ audit_key_has_existing_watch_path() {
     session)
       [ -e /var/run/utmp ] || [ -e /var/log/wtmp ] || [ -e /var/log/btmp ]
       ;;
+    scope)
+      [ -e /etc/sudoers ] || [ -e /etc/sudoers.d ]
+      ;;
     *)
       return 0
       ;;
@@ -685,7 +688,7 @@ persistent_audit_rules_ready() {
       if grep -Eq "^[[:space:]]*[^#].*-k[[:space:]]+$key([[:space:]]|$)" "$file"; then found=true; break; fi
     done
     if [ "$found" != true ]; then
-      if { [ "$key" = logins ] || [ "$key" = session ]; } && ! audit_key_has_existing_watch_path "$key"; then
+      if { [ "$key" = logins ] || [ "$key" = session ] || [ "$key" = scope ]; } && ! audit_key_has_existing_watch_path "$key"; then
         continue
       fi
       return 1
