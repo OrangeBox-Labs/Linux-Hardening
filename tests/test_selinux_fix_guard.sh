@@ -8,7 +8,7 @@ pass(){ printf '[PASS] %s\\n' "$*"; }
 
 grep -Fq 'FIX_REQUESTED=true' "$SELINUX" || fail "--fix debe conservar compatibilidad CLI sin aplicar cambios"
 grep -Fq 'OrangeBox SELinux - auditoría estrictamente de solo lectura' "$SELINUX" || fail "no se declara explícitamente la política audit-only"
-grep -Fq 'No modifica SELinux' "$SELINUX" || fail "el mensaje de --fix no explica que SELinux no se modifica"
+grep -Fq 'no modifica SELinux' "$SELINUX" || fail "el mensaje de --fix no explica que SELinux no se modifica"
 grep -Fq 'No se modifica.' "$SELINUX" || fail "el estado persistente no se presenta como solo lectura"
 ! grep -Eq '^[[:space:]]*setenforce[[:space:]]' "$SELINUX" || fail "SELinux audit-only no debe ejecutar setenforce"
 ! grep -Eq '^[[:space:]]*(mv|sed[[:space:]]+-i|cp)[[:space:]].*/etc/selinux/config' "$SELINUX" || fail "SELinux audit-only no debe escribir /etc/selinux/config"
