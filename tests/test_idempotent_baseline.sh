@@ -11,12 +11,12 @@ pass() { printf '[PASS] %s\n' "$*"; }
 # Kernel/SYN flood must rely on per-parameter sysctl checks, not a blanket module prompt.
 grep -Fq '      kernel)' "$CORE" || fail "kernel no tiene tratamiento de confirmación por parámetro"
 grep -Fq '      synflood)' "$CORE" || fail "SYN flood no tiene tratamiento de confirmación por parámetro"
-grep -Fq 'solo los que falten o difieran solicitarán confirmación' "$CORE" || fail "falta la política de confirmación por parámetro"
+grep -Fq '--fix aplica automáticamente solo los que falten o difieran' "$CORE" || fail "falta la política de confirmación por parámetro"
 grep -Fq 'sysctl_safe_apply ' "$CORE" || fail "baseline dejó de usar el helper seguro de sysctl"
 
 # sudo owns its specific prompt and is explicitly exempt from a redundant generic prompt.
 grep -Fq '      sudo)' "$CORE" || fail "sudo no tiene una rama de confirmación específica"
-grep -Fq 'solo su control específico puede solicitar confirmación' "$CORE" || fail "sudo aún depende de confirmación genérica"
+grep -Fq '--fix aprueba automáticamente cada cambio que supera la validación.' "$CORE" || fail "sudo aún depende de confirmación genérica"
 grep -Fq 'cPanel detectado: por política OrangeBox no se activa use_pty' "$CORE" || fail "se perdió la exclusión de use_pty en cPanel"
 
 # Journald should not ask/restart when already persistent; unavailable config stays read-only.

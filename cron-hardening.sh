@@ -34,6 +34,7 @@ BACKUP_DIR="/root/cron-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 # FUNCION PARA MOSTRAR AYUDA
 # ==============================================
 confirm_cron_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s\n" "${1:-cambio}"; return 0; fi
   local control="$1" effect="$2" answer=""
   echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
   echo "Qué hace/riesgo: $effect"

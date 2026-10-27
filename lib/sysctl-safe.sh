@@ -29,36 +29,36 @@ sysctl_safe_log() {
 
 sysctl_safe_description() {
   case "$1" in
-    fs.suid_dumpable) echo "Impide core dumps de programas privilegiados que podrían contener datos sensibles; puede limitar el análisis post-mortem." ;;
-    kernel.dmesg_restrict) echo "Restringe el acceso no privilegiado a mensajes del kernel y reduce la exposición de información del sistema." ;;
-    kernel.kptr_restrict) echo "Oculta direcciones de memoria del kernel, dificultando ataques que dependen de direcciones internas." ;;
-    kernel.randomize_va_space) echo "Controla ASLR; el valor 2 aleatoriza ampliamente el espacio de direcciones de los procesos." ;;
-    kernel.yama.ptrace_scope) echo "Restringe qué procesos pueden inspeccionar otros mediante ptrace; puede afectar gdb, strace y herramientas de monitoreo." ;;
+    fs.suid_dumpable) echo "Qué hace: evita core dumps de procesos privilegiados. Riesgo: limita el análisis post-mortem." ;;
+    kernel.dmesg_restrict) echo "Qué hace: restringe la lectura de mensajes del kernel. Riesgo: usuarios sin root tendrán menos datos para diagnosticar fallas." ;;
+    kernel.kptr_restrict) echo "Qué hace: oculta direcciones internas del kernel. Riesgo: algunas herramientas de diagnóstico muestran menos detalles." ;;
+    kernel.randomize_va_space) echo "Qué hace: aleatoriza direcciones de memoria de procesos. Riesgo: aplicaciones antiguas que dependan de direcciones fijas podrían fallar." ;;
+    kernel.yama.ptrace_scope) echo "Qué hace: limita qué procesos pueden inspeccionarse con ptrace. Riesgo: puede restringir gdb, strace y diagnósticos." ;;
     kernel.user_ptrace|kernel.user_ptrace_self) echo "Restringe el uso de ptrace; verifique compatibilidad con depuración y herramientas de diagnóstico." ;;
-    fs.protected_fifos) echo "Protege FIFO en directorios sticky compartidos; el valor 2 también cubre directorios group-writable. Puede afectar flujos IPC que dependan de abrir FIFO de otro usuario." ;;
-    fs.protected_regular) echo "Impide ciertos accesos/creaciones de archivos regulares en directorios sticky compartidos cuando el archivo pertenece a otro usuario/grupo. Reduce ataques locales en /tmp, pero puede romper aplicaciones que dependen de esas operaciones compartidas." ;;
-    fs.protected_hardlinks) echo "Restringe hard links a archivos que el usuario no controla, protegiendo archivos sensibles." ;;
-    fs.protected_symlinks) echo "Mitiga ataques con enlaces simbólicos en directorios compartidos y escribibles." ;;
+    fs.protected_fifos) echo "Qué hace: protege FIFO en directorios compartidos. Riesgo: puede bloquear aplicaciones que abren FIFO de otros usuarios." ;;
+    fs.protected_regular) echo "Qué hace: limita accesos a archivos ajenos en directorios compartidos como /tmp. Riesgo: puede afectar aplicaciones que comparten archivos temporales." ;;
+    fs.protected_hardlinks) echo "Qué hace: impide crear hard links a archivos que el usuario no controla. Riesgo: algunos flujos que los usan pueden fallar." ;;
+    fs.protected_symlinks) echo "Qué hace: limita el seguimiento de enlaces simbólicos en directorios compartidos. Riesgo: aplicaciones que dependen de ellos pueden fallar." ;;
     net.ipv4.ip_forward) echo "Deshabilita el reenvío IPv4 del host. Puede cortar routing, NAT, gateway/VPN, firewalls, redes de contenedores y cargas que enrutan tráfico. Solo cambia tras confirmación individual y con acceso de recuperación." ;;
     net.ipv6.conf.all.forwarding) echo "Deshabilita el reenvío IPv6 del host. Puede interrumpir routing IPv6, VPN, gateways y redes de contenedores; el ajuste también puede cambiar el comportamiento de Router Advertisements. Solo cambia tras confirmación individual." ;;
-    net.ipv4.conf.all.accept_redirects|net.ipv4.conf.default.accept_redirects) echo "Ignora redirecciones ICMP recibidas; reduce cambios de ruta inducidos por terceros. Revise si la red depende de ellas." ;;
-    net.ipv6.conf.all.accept_redirects|net.ipv6.conf.default.accept_redirects) echo "Ignora redirecciones ICMPv6 recibidas; evita modificaciones de ruta inducidas por terceros, pero puede afectar redes que dependan de esas redirecciones. El cambio se confirma individualmente." ;;
-    net.ipv4.conf.all.secure_redirects|net.ipv4.conf.default.secure_redirects) echo "Controla redirecciones ICMP consideradas seguras desde gateways conocidos. El valor 0 es más restrictivo y puede afectar redes que dependan de esos redirects." ;;
-    net.ipv4.conf.all.send_redirects|net.ipv4.conf.default.send_redirects) echo "Controla el envío de redirecciones ICMP por este host; desactivarlo evita que actúe como router anunciando rutas." ;;
-    net.ipv4.conf.all.accept_source_route|net.ipv4.conf.default.accept_source_route|net.ipv6.conf.all.accept_source_route|net.ipv6.conf.default.accept_source_route) echo "Rechaza paquetes con rutas especificadas por el origen; reduce manipulación de rutas." ;;
-    net.ipv4.conf.all.log_martians|net.ipv4.conf.default.log_martians) echo "Registra paquetes con direcciones de origen sospechosas; puede aumentar el volumen de logs." ;;
-    net.ipv4.conf.all.rp_filter|net.ipv4.conf.default.rp_filter) echo "Valida la ruta inversa para reducir spoofing. El valor 1 es estricto y 2 flexible; el modo estricto puede descartar tráfico asimétrico o multihomed." ;;
-    net.ipv4.icmp_echo_ignore_broadcasts) echo "Ignora ICMP echo a broadcast y reduce participación en ataques de amplificación tipo Smurf." ;;
-    net.ipv4.icmp_ignore_bogus_error_responses) echo "Ignora mensajes ICMP de error inválidos y reduce ruido por respuestas malformadas." ;;
-    net.ipv4.tcp_syncookies) echo "Activa SYN cookies cuando la cola TCP de conexiones pendientes se satura; bajo ataque puede reducir algunas características TCP." ;;
-    net.ipv4.tcp_max_syn_backlog) echo "Define la cola máxima de conexiones TCP que aún no completan el handshake; valores altos toleran más pendientes y usan más recursos potencialmente." ;;
-    net.core.somaxconn) echo "Limita la cola máxima de conexiones completadas solicitada por aplicaciones; valores altos ayudan con picos si la aplicación los aprovecha." ;;
-    net.ipv4.tcp_synack_retries) echo "Define las retransmisiones SYN-ACK; cambiarlo afecta la tolerancia a pérdida/latencia y la duración de conexiones incompletas." ;;
-    net.ipv4.tcp_syn_retries) echo "Define reintentos SYN de conexiones TCP salientes; aumentarlo puede alargar el tiempo antes de declarar fallida una conexión." ;;
-    net.ipv6.conf.all.accept_ra|net.ipv6.conf.default.accept_ra) echo "Controla anuncios de router IPv6; desactivarlo puede romper rutas automáticas si la red depende de Router Advertisements." ;;
-    user.max_user_namespaces) echo "El valor 0 bloquea user namespaces y puede mitigar vías de escalada local, pero puede romper contenedores rootless, sandboxes y aplicaciones que dependan de ellos." ;;
-    kernel.unprivileged_bpf_disabled) echo "Deshabilita BPF para procesos sin privilegios y reduce superficie de ataque local; puede afectar herramientas de tracing/observabilidad que ejecuten BPF sin privilegios." ;;
-    vm.mmap_min_addr) echo "Evita mapeos de memoria en direcciones muy bajas; reduce ciertas explotaciones, aunque puede afectar aplicaciones antiguas." ;;
+    net.ipv4.conf.all.accept_redirects|net.ipv4.conf.default.accept_redirects) echo "Qué hace: ignora redirecciones de rutas IPv4. Riesgo: puede afectar redes que dependan de ellas." ;;
+    net.ipv6.conf.all.accept_redirects|net.ipv6.conf.default.accept_redirects) echo "Qué hace: ignora redirecciones de rutas IPv6. Riesgo: puede afectar redes que dependan de ellas." ;;
+    net.ipv4.conf.all.secure_redirects|net.ipv4.conf.default.secure_redirects) echo "Qué hace: acepta o ignora redirecciones ICMP de gateways conocidos. Riesgo: puede afectar redes que dependan de esos avisos." ;;
+    net.ipv4.conf.all.send_redirects|net.ipv4.conf.default.send_redirects) echo "Qué hace: controla si el host anuncia rutas mediante ICMP. Riesgo: no debe desactivarse en routers que dependan de esa función." ;;
+    net.ipv4.conf.all.accept_source_route|net.ipv4.conf.default.accept_source_route|net.ipv6.conf.all.accept_source_route|net.ipv6.conf.default.accept_source_route) echo "Qué hace: rechaza paquetes con la ruta definida por el origen. Riesgo: redes muy específicas que la usen pueden fallar." ;;
+    net.ipv4.conf.all.log_martians|net.ipv4.conf.default.log_martians) echo "Qué hace: registra paquetes con orígenes sospechosos. Riesgo: puede aumentar el volumen de logs." ;;
+    net.ipv4.conf.all.rp_filter|net.ipv4.conf.default.rp_filter) echo "Qué hace: verifica la ruta de origen para reducir spoofing. Riesgo: modo estricto puede descartar tráfico asimétrico o multihomed." ;;
+    net.ipv4.icmp_echo_ignore_broadcasts) echo "Qué hace: ignora ping IPv4 a broadcast y reduce ataques de amplificación. Riesgo: no se responderá a esos pings." ;;
+    net.ipv4.icmp_ignore_bogus_error_responses) echo "Qué hace: ignora errores ICMP inválidos. Riesgo: mensajes malformados no aparecerán como diagnóstico." ;;
+    net.ipv4.tcp_syncookies) echo "Qué hace: usa SYN cookies cuando se satura la cola TCP. Riesgo: durante saturación puede cambiar algunas características TCP." ;;
+    net.ipv4.tcp_max_syn_backlog) echo "Qué hace: fija la cola de conexiones TCP pendientes. Riesgo: valores altos toleran más ráfagas y consumen más recursos." ;;
+    net.core.somaxconn) echo "Qué hace: limita la cola de conexiones listas para aceptar. Riesgo: valores muy bajos pueden provocar rechazos en picos." ;;
+    net.ipv4.tcp_synack_retries) echo "Qué hace: limita reintentos SYN-ACK de conexiones entrantes. Riesgo: valores bajos reducen tolerancia a pérdida o latencia." ;;
+    net.ipv4.tcp_syn_retries) echo "Qué hace: limita reintentos SYN de conexiones salientes. Riesgo: valores bajos fallan antes en redes con pérdida." ;;
+    net.ipv6.conf.all.accept_ra|net.ipv6.conf.default.accept_ra) echo "Qué hace: controla rutas IPv6 recibidas por Router Advertisements. Riesgo: desactivarlo puede romper autoconfiguración de rutas." ;;
+    user.max_user_namespaces) echo "Qué hace: limita espacios de nombres de usuario. Riesgo: ponerlo en 0 puede romper contenedores rootless y sandboxes." ;;
+    kernel.unprivileged_bpf_disabled) echo "Qué hace: deshabilita BPF sin privilegios. Riesgo: puede afectar herramientas de tracing que requieran BPF sin root." ;;
+    vm.mmap_min_addr) echo "Qué hace: bloquea mapeos en direcciones de memoria muy bajas. Riesgo: puede afectar aplicaciones antiguas." ;;
     *) sysctl -d "$1" 2>/dev/null | sed -n '1p' | sed 's/^[^:]*:[[:space:]]*//' ;;
   esac
 }
@@ -287,14 +287,18 @@ sysctl_safe_apply() {
     fi
 
     if [ "$fix_mode" != true ]; then sysctl_safe_log "WARN" "Auditoría: se conserva la configuración actual."; return 1; fi
-    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."; return 1; fi
-    if [ "$sysctl_conf_conflict" = true ]; then
-      printf '¿Confirmas aplicar %s=%s, crear el override en %s y actualizar solo las asignaciones conflictivas de /etc/sysctl.conf? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+    if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then
+      sysctl_safe_log "AUTO-YES" "Aprobado: persistir $key=$expected y resolver solo los conflictos confirmados."
     else
-      printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+      if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."; return 1; fi
+      if [ "$sysctl_conf_conflict" = true ]; then
+        printf '¿Confirmas aplicar %s=%s, crear el override en %s y actualizar solo las asignaciones conflictivas de /etc/sysctl.conf? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+      else
+        printf '¿Confirmas aplicar %s=%s y añadir/actualizar el override en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+      fi
+      IFS= read -r answer < /dev/tty || answer=""
+      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     fi
-    IFS= read -r answer < /dev/tty || answer=""
-    case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     need_persist=true
   elif [ "$current" = "$expected" ] && [ "$any_defs" = true ]; then
     if [ "${PENDING_ONLY_AUDIT:-false}" = true ]; then
@@ -337,13 +341,17 @@ sysctl_safe_apply() {
         sysctl_safe_log "WARN" "Auditoría: no se cambia $key."
         return 1
       fi
-      if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-        sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."
-        return 1
+      if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then
+        sysctl_safe_log "AUTO-YES" "Aprobado: cambiar $key de $current a $expected y persistirlo."
+      else
+        if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+          sysctl_safe_log "WARN" "No hay terminal interactiva; se omite $key por seguridad."
+          return 1
+        fi
+        printf '¿Confirmas cambiar %s de %s a %s y persistirlo cuando corresponda? [s/N] ' "$key" "$current" "$expected" > /dev/tty
+        IFS= read -r answer < /dev/tty || answer=""
+        case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
       fi
-      printf '¿Confirmas cambiar %s de %s a %s y persistirlo cuando corresponda? [s/N] ' "$key" "$current" "$expected" > /dev/tty
-      IFS= read -r answer < /dev/tty || answer=""
-      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó $key."; return 1 ;; esac
     fi
   fi
 
@@ -356,13 +364,17 @@ sysctl_safe_apply() {
       sysctl_safe_log "WARN" "Auditoría: no se cambia la persistencia de $key."
       return 1
     fi
-    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-      sysctl_safe_log "WARN" "No hay terminal interactiva; se omite la persistencia de $key por seguridad."
-      return 1
+    if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then
+      sysctl_safe_log "AUTO-YES" "Aprobado: persistir $key=$expected."
+    else
+      if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        sysctl_safe_log "WARN" "No hay terminal interactiva; se omite la persistencia de $key por seguridad."
+        return 1
+      fi
+      printf '¿Confirmas persistir %s=%s en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
+      IFS= read -r answer < /dev/tty || answer=""
+      case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó la persistencia de $key."; return 1 ;; esac
     fi
-    printf '¿Confirmas persistir %s=%s en %s? [s/N] ' "$key" "$expected" "$target" > /dev/tty
-    IFS= read -r answer < /dev/tty || answer=""
-    case "$answer" in y|Y|yes|YES|s|S|si|SI|sí|Sí|SÍ) ;; *) sysctl_safe_log "OMITIDO" "No se modificó la persistencia de $key."; return 1 ;; esac
   fi
 
   if [ "$need_persist" = true ]; then

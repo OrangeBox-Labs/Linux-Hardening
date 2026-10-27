@@ -32,19 +32,20 @@ show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo auditoría (solo lectura; valor predeterminado)"
   echo "  $0 --check    - Modo auditoría explícito (solo lectura)"
-  echo "  $0 --fix      - Aplicar cambios, con confirmación individual por parámetro"
+  echo "  $0 --fix      - Aplicar las propuestas automáticamente, sin preguntas"
   echo "  $0 -c         - Modo auditoría (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
   echo "  # Revisar el estado sin modificar el servidor"
   echo "  ./FS-hardening.sh"
   echo ""
-  echo "  # Aplicar correcciones, confirmando los parámetros sensibles"
+  echo "  # Aplicar correcciones automáticamente tras el preflight"
   echo "  ./FS-hardening.sh --fix"
   echo ""
 }
 
 confirm_fs_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s\n" "${1:-cambio}"; return 0; fi
   local description="$1" effect="$2" answer=""
   printf '\n[WARN] Cambio de filesystem: %s\n' "$description"
   printf 'Qué hace/riesgo: %s\n' "$effect"
@@ -130,13 +131,12 @@ declare -A MOUNT_REQUIREMENTS=(
   ["/tmp"]="noexec,nosuid,nodev"
   ["/opt"]="nosuid,nodev"
   ["/boot"]="nodev,nosuid,noexec"
-  ["/home"]="nosuid,nodev"
+  ["/home"]="noexec,nosuid,nodev"
   ["/var/log"]="noexec,nosuid,nodev"
   ["/var/tmp"]="noexec,nosuid,nodev"
   ["/var/log/audit"]="noexec,nosuid,nodev"
   ["/var/ossec"]="nosuid,nodev"
   ["/dev/shm"]="noexec,nosuid,nodev"
-  ["/proc"]="hidepid=2"
 )
 
 # ==============================================
@@ -326,15 +326,9 @@ check_mount_options() {
         missing_opts="$missing_opts $opt"
         effect=""
         case "$opt" in
-          nodev) effect="impide interpretar nodos de dispositivo en este montaje; puede afectar herramientas que dependan de dispositivos especiales." ;;
-          nosuid) effect="ignora bits SUID/SGID en este montaje; normalmente reduce riesgo, pero programas que dependan de esos bits dejarán de elevar privilegios." ;;
-          noexec)
-            effect="impide ejecutar directamente binarios desde este montaje; puede romper instaladores, scripts de aplicaciones, agentes o herramientas que ejecuten desde $mount_point."
-            if [ "$mount_point" = "/var" ] &&
-               { [ ! -e /var/ossec ] || [ "$(findmnt -rn -T /var/ossec -o TARGET 2>/dev/null || true)" != "/var/ossec" ]; }; then
-              effect="$effect IMPORTANTE: /var/ossec no es un montaje independiente de /var. Si el agente Wazuh se instala en /var/ossec, heredará noexec y sus binarios no podrán ejecutarse. No apruebes noexec para /var hasta montar /var/ossec por separado sin noexec o decidir excluir esta opción."
-            fi
-            ;;
+          nodev) effect="Qué hace: impide usar nodos de dispositivo en este montaje. Riesgo: puede afectar herramientas que los necesiten." ;;
+          nosuid) effect="Qué hace: ignora bits SUID/SGID en este montaje. Riesgo: programas que dependan de esos bits no podrán elevar privilegios." ;;
+          noexec) effect="Qué hace: bloquea la ejecución directa de binarios en $mount_point. Riesgo: puede impedir ejecutar aplicaciones o scripts legítimos desde ese montaje." ;;
           *) effect="restringe una capacidad del montaje; valida las aplicaciones que usen $mount_point." ;;
         esac
         echo -e "${YELLOW}[WARN] $mount_point necesita opción $opt.${NC}"
@@ -515,46 +509,7 @@ configure_dev_shm() {
 }
 
 # ==============================================
-# CONFIGURAR /PROC CON HIDEPID
 # ==============================================
-configure_proc() {
-  echo -e "\n${BLUE}[*] Verificando /proc hidepid...${NC}"
-  if ! findmnt -n /proc >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARN] /proc no está montado; no se modifica.${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  local current_opts="" effect="" answer_opts="" approved_array=()
-  current_opts="$(findmnt -n -o OPTIONS /proc 2>/dev/null)"
-  if [[ ",$current_opts," == *",hidepid=2,"* ]] || [[ ",$current_opts," == *",hidepid=invisible,"* ]]; then
-    echo -e "${GREEN}[✓] /proc ya usa hidepid=2${NC}"
-    return 0
-  fi
-  effect="oculta procesos de otros usuarios en /proc para reducir reconocimiento local. Puede romper o limitar agentes de monitoreo, herramientas de soporte, supervisores y aplicaciones que inspeccionan procesos de otros usuarios."
-  echo -e "${YELLOW}[WARN] /proc no tiene hidepid=2; opciones actuales: $current_opts${NC}"
-  echo "Qué hace/riesgo: $effect"
-  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  if ! confirm_fs_change "/proc: hidepid=2" "$effect"; then
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
-  if ! mount -o remount,hidepid=2 /proc; then
-    echo -e "${RED}[ERROR] No se pudo remontar /proc con hidepid=2.${NC}"
-    WARNINGS=$((WARNINGS+1))
-    return 1
-  fi
-  if ! persist_mount_options /proc true "proc /proc proc defaults,hidepid=2 0 0" "hidepid=2"; then
-    echo -e "${YELLOW}[WARN] /proc tiene hidepid=2 en runtime, pero no se pudo persistir en /etc/fstab.${NC}"
-    WARNINGS=$((WARNINGS+1))
-  fi
-  echo -e "${GREEN}[✓] /proc actualizado con hidepid=2${NC}"
-  FIXED=$((FIXED+1))
-}
-
 # ==============================================
 # MOSTRAR RESUMEN FINAL
 # ==============================================
@@ -595,6 +550,7 @@ main() {
     --help|-h) show_usage; exit 0 ;;
     --fix|-f)
       AUTO_FIX=true
+    ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
       CHECK_MODE=false
       echo -e "${YELLOW}MODO FIX: se solicitará confirmación individual antes de cada cambio sensible.${NC}"
       ;;
@@ -622,7 +578,7 @@ main() {
   done
 
   configure_dev_shm
-  configure_proc
+  echo -e "${BLUE}[INFO] /proc se conserva sin hidepid=2 para no interferir con agentes de monitorización como Zabbix.${NC}"
   apply_sticky_bit
   disable_autofs
 

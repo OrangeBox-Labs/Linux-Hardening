@@ -70,6 +70,7 @@ show_usage() {
 # FUNCION PARA HACER BACKUP
 # ==============================================
 confirm_rsyslog_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s\n" "${1:-cambio}"; return 0; fi
   local control="$1" effect="$2" answer=""
   echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
   echo "Qué hace/riesgo: $effect"
@@ -342,6 +343,7 @@ configure_remote_logging() {
   RSYSLOG_CONFIG_CHANGED=true
   echo -e "$GREEN[✓] Regla de forwarding agregada; pendiente validar rsyslog y confirmar el reinicio.$NC"
   AUTO_FIX=true
+    export ORANGEBOX_ASSUME_YES=1
   restart_services
   AUTO_FIX="$prior_auto"
 }
@@ -459,7 +461,7 @@ configure_journald() {
     echo -e "$YELLOW[N/A] systemd-journald no está disponible; se omiten sus controles.$NC"
     return 0
   fi
-  configure_journald_param "ForwardToSyslog" "yes" "ForwardToSyslog"
+  echo -e "${BLUE}[INFO] ForwardToSyslog no se fuerza: rsyslog puede leer journald directamente; reenviar eventos puede duplicar registros.${NC}"
   configure_journald_param "Compress" "yes" "Compress"
   configure_journald_param "Storage" "persistent" "Storage"
 
@@ -605,6 +607,7 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
+    ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
     if ! make_backup; then
       echo -e "$RED[ERROR] Backup fallido; se aborta antes de modificar rsyslog/journald.$NC" >&2
       exit 1

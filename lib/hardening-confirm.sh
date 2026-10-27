@@ -13,6 +13,10 @@ ob_confirm_hardening_change() {
     printf '[INFO] Modo auditoría; no se modifica el sistema.\n'
     return 1
   fi
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then
+    printf '[AUTO-YES] Aprobado por --fix: %s\n' "$title"
+    return 0
+  fi
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
     printf '[WARN] No hay terminal interactiva; se omite el cambio para evitar aprobación implícita.\n'
     return 1

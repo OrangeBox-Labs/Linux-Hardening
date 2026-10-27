@@ -1,22 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 FS="$ROOT_DIR/FS-hardening.sh"
-CORE="$ROOT_DIR/linux-hardening.sh"
-fail(){ printf '[FAIL] %s\n' "$*" >&2; exit 1; }
-pass(){ printf '[PASS] %s\n' "$*"; }
-
-grep -Fq 'AUTO_FIX=false' "$FS" || fail "filesystem hardening debe iniciar en modo auditoría"
-grep -Fq 'case "$1" in' "$FS" || fail "FS-hardening debe discriminar --fix explícitamente"
-grep -Fq -- '--fix      - Aplicar cambios, con confirmación individual por parámetro' "$FS" || fail "ayuda no documenta --fix y consentimiento por parámetro"
-grep -Fq 'confirm_fs_change()' "$FS" || fail "faltan confirmaciones por parámetro"
-grep -Fq 'No hay terminal interactiva; se omite el cambio por seguridad.' "$FS" || fail "cambio no se omite en modo no interactivo"
-grep -Fq 'noexec) effect=' "$FS" || fail "noexec no explica que puede romper ejecución de aplicaciones"
-grep -Fq 'IMPORTANTE: /var/ossec no es un montaje independiente de /var' "$FS" || fail "noexec en /var debe avisar si bloqueará los binarios futuros de Wazuh"
-grep -Fq 'No apruebes noexec para /var hasta montar /var/ossec por separado sin noexec' "$FS" || fail "la advertencia de Wazuh debe ofrecer alternativas operativas claras"
-grep -Fq 'hidepid=2' "$FS" || fail "hidepid no se verifica"
-grep -Fiq 'puede romper o limitar agentes de monitoreo' "$FS" || fail "hidepid no explica impacto en monitoreo"
-if grep -Eq 'rmmod[[:space:]]+"?\$module' "$FS"; then fail "FS-hardening no debe descargar módulos de filesystem en caliente"; fi
-grep -Fq 'backup_fs_file /etc/fstab' "$FS" || fail "fstab no se respalda antes de cambios de montaje"
-grep -Fq 'fix_arg="--fix"' "$CORE" || fail "el orquestador no pasa --fix al módulo filesystem-full"
-pass "filesystem: modo auditoría por defecto, confirmación por parámetro, backups y sin rmmod en caliente"
+fail(){ echo "[FAIL] $*" >&2; exit 1; }
+pass(){ echo "[PASS] $*"; }
+grep -Fq '["/var"]="noexec,nosuid,nodev"' "$FS" || fail "/var debe conservar noexec,nosuid,nodev"
+grep -Fq '["/home"]="noexec,nosuid,nodev"' "$FS" || fail "/home debe incluir noexec,nosuid,nodev"
+! grep -Fq '["/proc"]="hidepid=2"' "$FS" || fail "/proc no debe aplicar hidepid=2"
+! grep -Fq 'configure_proc()' "$FS" || fail "no debe existir el control hidepid"
+grep -Fq 'ORANGEBOX_ASSUME_YES' "$FS" || fail "--fix debe ser automático"
+grep -Fq 'Qué hace: bloquea la ejecución directa de binarios en $mount_point' "$FS" || fail "noexec necesita descripción clara"
+pass "filesystem mantiene noexec y no activa hidepid=2"

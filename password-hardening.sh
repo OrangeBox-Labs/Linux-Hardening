@@ -61,6 +61,7 @@ password_parameter_description() {
 }
 
 confirm_password_setting() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s=%s\n" "$2" "$4"; return 0; fi
   local file="$1" key="$2" current="$3" value="$4" effect="$5" answer=""
   printf '\n[WARN] Cambio de política de autenticación: %s -> %s=%s\n' "$file" "$key" "$value"
   printf 'Valor actual: %s\n' "${current:-no definido}"
@@ -319,12 +320,19 @@ file_permissions_module(){
 encrypt_method_module(){
   echo -e "\n$BLUE### PASSWORD HASHING ###$NC"
   local current major expected
-  current="$(awk '$1=="ENCRYPT_METHOD"{v=$2} END{print v}' "$LOGIN_DEFS" 2>/dev/null || true)"
+  current="$(awk '$1=="ENCRYPT_METHOD"{v=tolower($2)} END{print v}' "$LOGIN_DEFS" 2>/dev/null || true)"
   major="$(get_el_major)"
   expected=SHA512
   if [[ "$major" =~ ^[0-9]+$ ]] && [ "$major" -ge 9 ]; then expected=yescrypt; fi
   if [ "$current" = "$expected" ]; then
-    ok "ENCRYPT_METHOD=$expected"
+    local raw_current
+    raw_current="$(awk '$1=="ENCRYPT_METHOD"{v=tolower($2)} END{print v}' "$LOGIN_DEFS" 2>/dev/null || true)"
+    if [ "$raw_current" != "$expected" ]; then
+      set_conf_value "$LOGIN_DEFS" ENCRYPT_METHOD "$expected"
+      ok "ENCRYPT_METHOD normalizado a $expected (sin cambiar hashes existentes)"
+    else
+      ok "ENCRYPT_METHOD=$expected"
+    fi
   else
     set_conf_value "$LOGIN_DEFS" ENCRYPT_METHOD "$expected"
   fi
@@ -334,7 +342,7 @@ encrypt_method_module(){
 main(){
   require_root
   while [ $# -gt 0 ]; do
-    case "$1" in --fix|-f) AUTO_FIX=true;; --help|-h) echo "Uso: $0 [--fix]"; exit 0;; *) die "Argumento desconocido: $1";; esac
+    case "$1" in --fix|-f) AUTO_FIX=true; ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES;; --help|-h) echo "Uso: $0 [--fix]"; exit 0;; *) die "Argumento desconocido: $1";; esac
     shift
   done
   $AUTO_FIX && echo -e "$YELLOW[WARN] MODO FIX: solo cambios operativamente seguros; PAM authselect/lockout queda en auditoría.$NC" || echo -e "$GREEN[OK] MODO AUDITORÍA: sin cambios$NC"

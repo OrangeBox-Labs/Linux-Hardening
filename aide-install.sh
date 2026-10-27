@@ -17,6 +17,7 @@ AIDE_NEW_DB="/var/lib/aide/aide.db.new.gz"
 BACKUP_DIR="/root/aide-backup-$(date +%Y%m%d-%H%M%S)"
 
 confirm_aide_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] AIDE %s\n" "${1:-cambio}"; return 0; fi
   local title="$1" current="$2" proposed="$3" effect="$4" answer=""
   echo -e "\n${YELLOW}[WARN] Acción AIDE pendiente: $title${NC}"
   echo "Estado actual: $current"
@@ -213,7 +214,7 @@ main() {
       echo "Sin opciones: auditoría de solo lectura; --fix pide confirmación por cada cambio."
       exit 0
       ;;
-    --fix|-f) AUTO_FIX=true ;;
+    --fix|-f) AUTO_FIX=true; ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES ;;
     "") AUTO_FIX=false ;;
     *) echo -e "${RED}[!] Opción desconocida: $1${NC}" >&2; exit 2 ;;
   esac

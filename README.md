@@ -10,17 +10,17 @@
 
 Colección de scripts de **Linux hardening** desarrollados por **OrangeBox IT Services** para asegurar servidores Linux Enterprise de forma reproducible, transparente y auditable.
 
-El proyecto cubre **SSH, sudo, PAM, passwords, auditd, SELinux, kernel, filesystem, GRUB, red, cron, rsyslog, servicios, AIDE, sincronización horaria, firewalls y mitigaciones de seguridad**.
+El hardening cubre **SSH, sudo, PAM, contraseñas, auditd, kernel, filesystem/montajes, GRUB, sysctl de red, cron, rsyslog, servicios, AIDE, sincronización horaria y mitigaciones**. SELinux se informa, pero se cambia únicamente mediante su herramienta dedicada; la auditoría de firewalls/listeners es independiente y de solo lectura.
 
 La idea es simple: código visible, comportamiento explícito y herramientas que un administrador Linux pueda revisar antes de aplicarlas.
 
-> **Primero comprobar. Después preguntar. Finalmente cambiar.**
+> **Auditoría sin cambios. `--fix` automático con preflight, respaldos, validación y rollback.**
 
 ## 🚀 ¿Qué hay de nuevo?
 
 Linux-Hardening está evolucionando hacia algo más útil que una colección de scripts que modifican archivos porque sí.
 
-La filosofía actual de OrangeBox es bastante simple: **primero comprobar, después preguntar y finalmente cambiar**. El baseline incorpora controles de idempotencia, preflight de configuración efectiva, auditorías de solo lectura y políticas especiales para ambientes donde romper SSH a las 3 de la mañana no es precisamente una feature.
+La filosofía de OrangeBox es separar claramente auditoría y aplicación. `--audit` no modifica el sistema; `--fix` asume sí a las propuestas de los módulos seleccionados, pero conserva preflight, respaldos, validaciones y rollback. El baseline informa SELinux y no invoca su herramienta dedicada. Los módulos de hardening nunca detectan ni modifican firewalls.
 
 El estado detallado del proyecto está en [PROJECT-STATUS.md](PROJECT-STATUS.md), y el inventario de controles presentes/ausentes por dominio está en [CIS-COVERAGE-MAP.md](CIS-COVERAGE-MAP.md). El verificador CIS local implementa un subconjunto de controles; su porcentaje no representa cobertura completa ni certificación CIS.
 
@@ -40,38 +40,39 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 |---|---|
 | `linux-hardening.sh` | Baseline 1.4.26: auditoría predeterminada de controles corregibles con estados `[OK]`/`[WARN]` y resumen de correctos, pendientes y errores. |
 | `bash-hardening.sh` | Prompt con FQDN, prompt por rol, historial por usuario, permisos `0600`, recuperación de bindings Emacs/Readline, timeout de sesión y controles sobre operaciones comunes del historial. |
-| `network-hardening.sh` | Hardening sysctl de red, SYN flood, `rp_filter`, detección de firewalls y auditoría de cobertura INPUT sin modificar reglas del firewall. |
+| `network-hardening.sh` | Hardening de sysctl de red, SYN flood, `rp_filter` y módulos del kernel. No inspecciona ni modifica firewalls. |
 | `audit-listening-services.sh` | Inventario de listeners TCP/UDP por proceso y dirección, orientado a distinguir servicios locales de exposición real. |
 | `audit-firewall-listeners.sh` | Auditoría independiente de gestores, backends, sockets y reglas INPUT. Solo lectura; fuera del flujo del baseline. |
 | `lib/listener-firewall-audit.sh` | Biblioteca de correlación de listeners no-loopback con políticas y reglas verificables. Solo lectura. |
 | `lib/firewall-detect.sh` | Detección de backends y escenarios como firewalld, nftables, iptables, CSF, Imunify360 y Shorewall. |
-| `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y confirmación individual antes de cambios. |
+| `lib/sysctl-safe.sh` | Inventario de valores activos/persistentes, detección de conflictos, overrides centralizados y aprobación automática de cambios bajo `--fix`. |
 | `kernel-hardening.sh` | Políticas explícitas para `fs.suid_dumpable`, `kernel.dmesg_restrict`, `kernel.kptr_restrict` y forwarding IPv4/IPv6 con confirmación individual. |
 | `kernel-lpe-2026-mitigation.sh` | Mitigaciones específicas para escenarios LPE recientes, separadas del hardening general. |
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
-| `sudo-hardening.sh` | `use_pty` requiere confirmación específica y se omite en hosts cPanel. |
-| `auditd-hardening.sh` | Auditoría reforzada y separación entre comprobación y aplicación. |
-| `rsyslog-hardening.sh` | Evita reconfigurar o preguntar cuando journald ya cumple el objetivo. |
-| `aide-install.sh` | AIDE es opcional y requiere consentimiento en `--fix`; se advierte posible solapamiento con Wazuh FIM. |
-| `selinux-secure-setup.sh` | Auditoría de solo lectura. No cambia modo, configuración, contextos, paquetes ni reinicia el sistema. |
+| `sudo-hardening.sh` | Preflight de sudoers; `use_pty` se omite en cPanel y `--fix` aprueba automáticamente los cambios propuestos. |
+| `auditd-hardening.sh` | Reglas persistentes verificadas antes de inmutabilidad; conserva rotación `ROTATE`, `space_left_action=SYSLOG` y `admin_space_left_action=SUSPEND`. |
+| `rsyslog-hardening.sh` | Configura persistencia de journald cuando corresponde; no fuerza `ForwardToSyslog=yes` y reinicia servicios automáticamente tras cambios aplicados. |
+| `logrotate-hardening.sh` | Normaliza `compress` y `rotate 5` en `/etc/logrotate.conf` y todos los archivos regulares de `/etc/logrotate.d`, con backup y validación. |
+| `aide-install.sh` | AIDE es opcional y se ejecuta por selección explícita; bajo `--fix` las propuestas se aprueban automáticamente y se advierte el posible solapamiento con Wazuh FIM. |
+| `selinux-secure-setup.sh` | Herramienta independiente para cambiar explícitamente a Permissive con confirmación, respaldo de `/etc/selinux/config` y sin reinicio automático. No se ejecuta desde el baseline. |
 | `cron-hardening.sh` | Política conservadora con `cron.allow`/`at.allow` para evitar romper cPanel y otros entornos de hosting. |
-| `FS-hardening.sh` | Controles sobre filesystem, montajes, `hidepid`, módulos y autofs con advertencias de impacto operacional. |
+| `FS-hardening.sh` | Controles de filesystem, montajes, módulos y autofs. No activa `hidepid=2`, para mantener la compatibilidad con Zabbix. |
 | `grub-hardening.sh` | Hardening de arranque con advertencias por cambios que pueden requerir reinicio. |
 | `configure-time-sync.sh` | Configuración de sincronización horaria con advertencia sobre cambios bruscos de tiempo y servicios dependientes. |
 | `cpu-hardening.sh` | Mitigaciones relacionadas con CPU y uso del helper seguro de sysctl. |
 | `remove-xinetd.sh` | Eliminación de componente legacy como módulo separado del baseline principal. |
 | `remove-gui-hardening.sh` | Reducción opcional de superficie de ataque eliminando componentes GUI. |
-| `generate-iptables-rules.sh` | Módulo de alto riesgo; no forma parte del flujo automático y puede cortar acceso remoto si se usa incorrectamente. |
+| `generate-iptables-rules.sh` | Herramienta independiente fuera del baseline. No la invocan `linux-hardening.sh` ni `network-hardening.sh`. |
 | `post-install.sh` | Preparación inicial; queda fuera de la auditoría agregada porque puede instalar paquetes o modificar configuración incluso sin `--fix`. |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente de la auditoría operacional de los módulos. |
 | `linux-hardening-audit.sh` | Auditoría agregada de solo lectura; no ejecuta `--fix` ni mezcla su resultado con el porcentaje CIS. |
 
 ## 🧠 Hardening idempotente
 
-El baseline global de `linux-hardening.sh` audita los parámetros de SSH, Bash, contraseñas/PAM, sudo, kernel, red, auditd, cron/at, USB storage, GRUB, filesystem/montajes, rsyslog/journald y SELinux. Cada módulo complementario muestra sus propios estados y resumen; sus contadores se mantienen separados para no confundir módulos ejecutados con controles aprobados.
+El baseline global audita SSH, Bash, contraseñas/PAM, sudo, kernel, sysctl de red, auditd, cron/at, USB storage, GRUB, filesystem/montajes, rsyslog/journald y el estado de SELinux. No incluye la herramienta dedicada de SELinux ni operaciones de firewall. También ejecuta el módulo de rotación/compresión de logs. Cada módulo conserva su propio resumen.
 
-Al ejecutar `--fix`, el orquestador ejecuta primero la auditoría de cada módulo y después presenta el alcance y pide confirmación antes de los cambios con riesgo. Los sysctl y algunas operaciones de red requieren confirmación adicional por parámetro. `--fix --auto` solo aplica los banners/MOTD; el resto queda en auditoría, sin modificaciones.
+Al ejecutar `--fix`, el orquestador transmite aprobación automática a los módulos: no pregunta por cada cambio. Los módulos mantienen preflight, respaldos, validaciones y rollback. `--fix` puede cambiar SSH, sysctl, montajes, auditoría, logging y políticas de cuentas; ejecuta primero `--audit` y revisa sus resultados. `--auto` se conserva como alias de `--fix`.
 
 La sincronización horaria se evalúa en el baseline global, pero no se reconfigura con `--fix` general, porque modificar ntpd/chronyd puede afectar autenticación Kerberos/Samba AD, certificados y correlación temporal. Solo se trata si se selecciona explícitamente `--module time-sync --fix`.
 
@@ -85,7 +86,7 @@ Esto permite ejecutar las comprobaciones repetidamente sin convertir cada ejecuc
 
 El módulo SSH siempre muestra los estados `[OK]` y `[WARN]` de los nueve controles del baseline en la auditoría compacta; no oculta los pendientes cuando no puede usar el directorio de drop-ins.
 
-En `--fix`, los cambios requieren confirmación y se intenta primero el drop-in únicamente si `sshd_config` lo incluye antes de cualquier bloque `Match`. Si esa vía no está disponible, el script crea un bloque gestionado al inicio de `/etc/ssh/sshd_config`, con backup previo. Después valida la sintaxis con `sshd -t`, comprueba los valores efectivos y recarga `sshd`; si la validación o la recarga falla, intenta revertir el cambio. No sobrescribe un drop-in existente.
+En `--fix`, los cambios propuestos se aprueban automáticamente y se intenta primero el drop-in únicamente si `sshd_config` lo incluye antes de cualquier bloque `Match`. Si esa vía no está disponible, el script crea un bloque gestionado al inicio de `/etc/ssh/sshd_config`, con backup previo. Después valida la sintaxis con `sshd -t`, comprueba los valores efectivos y recarga `sshd`; si la validación o la recarga falla, intenta revertir el cambio. No sobrescribe un drop-in existente.
 
 Cuando no puede modificar los archivos con seguridad, la salida indica el motivo específico y muestra las directivas pendientes, dónde colocarlas y cómo validar/recargar SSH manualmente. Mantén abierta la sesión actual y prueba una segunda conexión antes de cerrar.
 
@@ -95,9 +96,9 @@ Esto evita dejar un mensaje genérico de “se mantiene en auditoría” sin exp
 
 Los controles sysctl distinguen entre valor activo, persistente, configuración existente, configuración conflictiva y estados que no pueden verificarse con seguridad.
 
-Los cambios pendientes pueden requerir confirmación individual.
+En auditoría se explican los cambios pendientes; en `--fix` se aplican automáticamente tras las validaciones correspondientes.
 
-Los parámetros de forwarding IPv4/IPv6 ahora también se auditan en el baseline y el módulo de kernel independiente. El objetivo CIS es deshabilitarlos, pero **no se fuerzan automáticamente**: cambiar `net.ipv4.ip_forward` o `net.ipv6.conf.all.forwarding` puede interrumpir routing, NAT, VPN, gateways y redes de contenedores. En `--fix`, cada parámetro explica el impacto y solicita confirmación individual `[s/N]`; sin terminal interactiva se omite. Si IPv4 forwarding se conserva, el baseline usa `rp_filter=2` (modo flexible) para reducir descartes de tráfico asimétrico.
+Los parámetros de forwarding IPv4/IPv6 ahora también se auditan en el baseline y el módulo de kernel independiente. El objetivo CIS es deshabilitarlos, pero **no se fuerzan automáticamente**: cambiar `net.ipv4.ip_forward` o `net.ipv6.conf.all.forwarding` puede interrumpir routing, NAT, VPN, gateways y redes de contenedores. En `--fix`, los parámetros propuestos se aprueban automáticamente tras el preflight; el modo auditoría permite revisar el impacto antes de aplicarlos. Si IPv4 forwarding se conserva, el baseline usa `rp_filter=2` (modo flexible) para reducir descartes de tráfico asimétrico.
 
 
 Política OrangeBox para los controles principales:
@@ -107,7 +108,7 @@ fs.suid_dumpable = 0
 kernel.dmesg_restrict = 1
 ```
 
-Para `kernel.kptr_restrict`, los valores activos `1` o `2` se consideran seguros y se conservan. Solo un valor `0` propone cambio a `1`, siguiendo la confirmación individual del modo `--fix`.
+Para `kernel.kptr_restrict`, los valores activos `1` o `2` se consideran seguros y se conservan. Solo un valor `0` propone cambio a `1`; `--fix` aplica automáticamente la propuesta tras las validaciones.
 
 La protección SYN flood revisa:
 
@@ -119,7 +120,7 @@ net.core.somaxconn
 
 El baseline no modifica automáticamente `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`, porque esos parámetros dependen de latencia, pérdida, aplicaciones y política operacional.
 
-El hardening también audita `net.ipv6.conf.{all,default}.accept_redirects`. Ignorar redirects ICMPv6 reduce cambios de ruta inducidos por terceros, pero puede afectar redes que dependan de ellos, por lo que cada cambio solicita confirmación; si el kernel no expone IPv6, se informa N/A.
+El hardening también audita `net.ipv6.conf.{all,default}.accept_redirects`. Ignorar redirects ICMPv6 reduce cambios de ruta inducidos por terceros, pero puede afectar redes que dependan de ellos. `--fix` aplica automáticamente las propuestas; si el kernel no expone IPv6, se informa N/A.
 
 Porque sí: el kernel también tiene derecho a no recibir tuning de TikTok.
 
@@ -201,25 +202,17 @@ Los banners no enumeran controles defensivos ni revelan el estado de SELinux.
 
 ## 🛡️ SELinux
 
-`selinux-secure-setup.sh` funciona como auditoría de solo lectura.
+`linux-hardening.sh` solo informa el estado runtime y persistente de SELinux. No cambia el modo, la configuración, los contextos ni los paquetes, y no ejecuta la herramienta dedicada.
 
-Por política OrangeBox, el proyecto no cambia automáticamente:
-
-- modo Enforcing/Permissive
-- `/etc/selinux/config`
-- contextos
-- paquetes SELinux
-- reinicios
-
-Primero se revisa. Después decide el administrador.
+Para cambiar explícitamente a Permissive, usa `./selinux-secure-setup.sh --fix`. La herramienta independiente solicita confirmación, respalda `/etc/selinux/config`, aplica `setenforce 0` si corresponde y no reinicia automáticamente. Si SELinux está Disabled o el kernel lo desactiva con `selinux=0`, se requiere planificación adicional.
 
 ## 🧩 AIDE y Wazuh
 
-AIDE es opcional. Durante `./linux-hardening.sh --fix`, si no está instalado, se solicita autorización antes de instalarlo y configurar la base.
+AIDE es opcional y no se instala por defecto en la ejecución global. Si seleccionas el módulo dedicado con `--module aide --fix`, `--fix` aprueba automáticamente la instalación/configuración propuesta tras el preflight.
 
 El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar controles sin una razón clara.
 
-`--fix --auto` no instala AIDE.
+`--auto` es un alias de `--fix`; AIDE solo se trata cuando se selecciona su módulo dedicado.
 
 ## 📋 Scripts
 
@@ -236,7 +229,7 @@ El sistema informa la posible coexistencia con Wazuh FIM para evitar duplicar co
 | `password-hardening.sh` | Contraseñas y políticas PAM |
 | `sudo-hardening.sh` | sudo |
 | `auditd-hardening.sh` | Auditoría |
-| `selinux-secure-setup.sh` | Auditoría SELinux de solo lectura |
+| `selinux-secure-setup.sh` | Herramienta independiente: cambia a Permissive con confirmación y backup; no forma parte del baseline |
 | `kernel-hardening.sh` | Kernel |
 | `kernel-lpe-2026-mitigation.sh` | Mitigaciones LPE |
 | `network-hardening.sh` | Red y sysctl |
@@ -302,44 +295,40 @@ No son exactamente lo mismo.
 ./linux-hardening.sh --audit
 ```
 
-Muestra todos los controles del baseline interactivo con su estado individual: `[OK]` conforme, `[WARN]` pendiente o que requiere revisión, y `[N/A]` cuando no aplica a la plataforma o está excluido por política. Incluye los nueve parámetros SSH (cada uno se marca no verificable si no hay configuración/daemon utilizable) y el banner SSH, `sudoers`/`use_pty`, cada sysctl disponible y cada control IPv6 no aplicable, SYN flood, `Storage=persistent` y `/var/log/journal`, los cuatro archivos de banners/MOTD, cada control del perfil Bash (timeout, historial, protección frente a borrado, timestamp, permisos, Readline, FQDN, prompt y `PROMPT_COMMAND`), los dotfiles de historial (si son enlaces simbólicos se inspeccionan en auditoría pero no se reemplazan automáticamente; marcador, `HISTSIZE`, `HISTFILESIZE`, `HISTCONTROL`, `HISTIGNORE`, `histappend`, `HISTFILE` readonly/fallback y reglas `PROMPT_COMMAND`), los overrides en perfiles externos y el include de `/etc/bashrc`. Si falla la generación de temporales, los controles afectados aparecen igualmente como no verificables, no se omiten. También revisa el estado opcional de AIDE (paquete, base y cron diario a las 05:00), porque `--fix` interactivo lo ofrece. El resumen separa controles correctos, no aplicables, pendientes y errores. La auditoría no cambia archivos ni servicios. Firewall y listeners se auditan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
+Muestra todos los controles del baseline con su estado individual: `[OK]` conforme, `[WARN]` pendiente o que requiere revisión, y `[N/A]` cuando no aplica a la plataforma o está excluido por política. Incluye los nueve parámetros SSH (cada uno se marca no verificable si no hay configuración/daemon utilizable) y el banner SSH, `sudoers`/`use_pty`, cada sysctl disponible y cada control IPv6 no aplicable, SYN flood, `Storage=persistent` y `/var/log/journal`, los cuatro archivos de banners/MOTD, cada control del perfil Bash (timeout, historial, protección frente a borrado, timestamp, permisos, Readline, FQDN, prompt y `PROMPT_COMMAND`), los dotfiles de historial (si son enlaces simbólicos se inspeccionan en auditoría pero no se reemplazan automáticamente; marcador, `HISTSIZE`, `HISTFILESIZE`, `HISTCONTROL`, `HISTIGNORE`, `histappend`, `HISTFILE` readonly/fallback y reglas `PROMPT_COMMAND`), los overrides en perfiles externos y el include de `/etc/bashrc`. Si falla la generación de temporales, los controles afectados aparecen igualmente como no verificables, no se omiten. También informa el estado opcional de AIDE (paquete, base y cron diario a las 05:00); la instalación se selecciona explícitamente. El resumen separa controles correctos, no aplicables, pendientes y errores. La auditoría no cambia archivos ni servicios. Firewall y listeners se auditan por separado con `./audit-firewall-listeners.sh` y `./audit-listening-services.sh`.
 
-### Aplicar de forma interactiva
+### Aplicar cambios automáticamente
 
 ```bash
 ./linux-hardening.sh --fix
 ```
 
-Primero comprueba los valores efectivos y persistentes. Kernel y SYN flood solicitan confirmación por parámetro; sudo utiliza su confirmación específica; journald solo pregunta si necesita cambios.
+Primero ejecuta los preflight de configuración efectiva. Después asume sí a las propuestas de los módulos seleccionados; valida cada cambio, respalda los archivos y revierte cuando una validación falla. No vuelve a preguntar por reinicios o recargas necesarios para aplicar cambios ya aprobados.
 
 Si los valores ya cumplen, muestra `[OK]` sin pedir autorizaciones redundantes ni reescribirlos.
 
-### Aplicación automática conservadora
+### Alias de compatibilidad
 
-```bash
-./linux-hardening.sh --fix --auto
-```
-
-Aplica únicamente banners/MOTD y Bash con historial ajustado a la versión: ilimitado en Bash 4.3+ y fallback a 100000 comandos en Bash anterior a 4.3. Los controles delicados, incluidos kernel y SYN flood, permanecen en auditoría.
+`./linux-hardening.sh --auto` equivale a `./linux-hardening.sh --fix`. Ambos asumen sí a las propuestas; revisa antes la salida de `--audit` y asegura un respaldo y una vía de recuperación.
 
 ### Módulos especializados
 
-El orquestador permite seleccionar módulos de AIDE, auditd, Bash, sincronización horaria, CPU, cron, filesystem, GRUB, kernel, mitigación LPE, red, passwords, xinetd, GUI, rsyslog, SELinux, SSH y sudo.
+El orquestador permite seleccionar módulos de AIDE, auditd, Bash, sincronización horaria, CPU, cron, filesystem, GRUB, kernel, logrotate, mitigación LPE, sysctl de red, passwords, xinetd, GUI, rsyslog, SSH y sudo. SELinux se informa en el baseline; su herramienta independiente no forma parte de la selección global.
 
 El benchmark CIS se ejecuta por separado.
 
 Los scripts de eliminación de paquetes/servicios requieren selección manual. `post-install.sh` queda fuera del orquestador porque no dispone de una ruta de auditoría de solo lectura y puede instalar paquetes o modificar configuración incluso sin `--fix`.
 
-La opción `--module selinux-setup` está bloqueada por política porque SELinux se mantiene como auditoría de solo lectura.
+SELinux no es un módulo de aplicación del baseline. El estado se informa; el cambio a Permissive se hace exclusivamente con la herramienta independiente `selinux-secure-setup.sh`.
 
 ## ⚠️ Controles de alto riesgo
 
 | Módulo/script | Riesgo operacional |
 |---|---|
-| `generate-iptables-rules.sh` | Puede vaciar reglas iptables y establecer `INPUT DROP`, cortando SSH. No debe combinarse con Shorewall. |
-| `kernel` / `synflood` / `network-full` | Cambios de kernel/red pueden afectar VPN, forwarding, NAT, gateways, redes de contenedores, rutas asimétricas y aplicaciones. Forwarding IPv4/IPv6 solicita confirmación por parámetro y se omite sin TTY; `--auto` deja los controles de riesgo en auditoría. |
+| `generate-iptables-rules.sh` | Herramienta independiente de alto riesgo, fuera del baseline; puede vaciar reglas y establecer `INPUT DROP`. Este hardening nunca la ejecuta. |
+| `kernel` / `synflood` / `network-full` | Cambios de kernel/sysctl pueden afectar VPN, forwarding, NAT, gateways, redes de contenedores, rutas asimétricas y aplicaciones. `--fix` aplica automáticamente las propuestas; revisa `--audit` antes. El módulo de red no toca firewalls. |
 | `ssh-hardening.sh` / `ssh-hardening-complete.sh` | Pueden afectar clientes antiguos, automatizaciones y métodos de autenticación. |
-| `FS-hardening.sh` | Opciones restrictivas, `hidepid`, módulos y autofs pueden afectar monitoreo y aplicaciones. |
+| `FS-hardening.sh` | Opciones restrictivas de montaje, módulos y autofs pueden afectar aplicaciones. Se evita `hidepid=2` por compatibilidad con Zabbix. |
 | `cron-hardening.sh` | Restricciones de cron/at pueden romper tareas de usuarios o cPanel. |
 | `grub-hardening.sh` | Cambios de arranque pueden requerir reinicio y dejar un sistema inaccesible si se aplican incorrectamente. |
 | `kernel-hardening.sh` / `kernel-lpe-2026-mitigation.sh` | Pueden cambiar sysctl, módulos o comportamiento del kernel. Forwarding IPv4/IPv6 queda detrás de confirmación individual porque puede interrumpir routing/NAT/VPN/gateways/containers. Validar rutas y consola de recuperación. |
@@ -348,7 +337,7 @@ La opción `--module selinux-setup` está bloqueada por política porque SELinux
 | `bash-hardening.sh` | Logging de comandos puede elevar volumen de logs y capturar argumentos sensibles. |
 | Scripts de eliminación | Pueden eliminar dependencias, paquetes o servicios necesarios. Revisar inventario y reversión. |
 
-Si el servidor es remoto, usa snapshot y consola fuera de banda antes de aplicar controles de red, SSH, filesystem, kernel o firewall.
+Si el servidor es remoto, usa snapshot y consola fuera de banda antes de aplicar cambios automáticos de SSH, sysctl, filesystem, kernel o GRUB. Los firewalls están fuera del alcance del hardening.
 
 ## 🧪 Compatibilidad
 

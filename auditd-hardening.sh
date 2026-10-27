@@ -184,13 +184,13 @@ configure_auditd_param() {
     max_log_file)
       effect="Define el tamaño máximo de cada archivo de log de auditd en MB. Un valor bajo genera rotación frecuente; uno alto consume más espacio por archivo. No cambia por sí solo la retención total." ;;
     max_log_file_action)
-      effect="Define qué hacer al llegar al tamaño máximo del log. keep_logs evita eliminar automáticamente logs antiguos y puede llenar /var/log/audit o el filesystem, lo que puede afectar servicios y el propio sistema." ;;
+      effect="Rota los logs cuando alcanzan el tamaño límite. La retención queda controlada por num_logs y evita conservar archivos indefinidamente." ;;
     space_left_action)
-      effect="Define la acción de aviso cuando queda poco espacio. email intenta notificar; depende de la configuración de correo y no garantiza por sí sola que llegue una alerta." ;;
+      effect="Define la acción al quedar poco espacio; SYSLOG registra un aviso. La disponibilidad del disco se supervisa externamente con Zabbix." ;;
     action_mail_acct)
       effect="Define el destinatario de avisos de auditd. Si root no recibe correo local o no hay MTA/forwarding, el aviso puede no llegar." ;;
     admin_space_left_action)
-      effect="Se ejecutaría al alcanzar el umbral crítico de espacio para auditd. halt detiene el host y puede dejar inaccesible un servidor remoto; hay que validar monitorización de disco, alertas y vía de consola/recuperación antes de habilitarlo." ;;
+      effect="SUSPEND pausa la escritura de auditoría al alcanzar el umbral crítico; no apaga el equipo. Puede dejar eventos sin registrar hasta recuperar espacio." ;;
     *)
       effect="Cambia una directiva del servicio de auditoría y debe validarse contra la configuración operativa del servidor." ;;
   esac
@@ -409,7 +409,7 @@ check_log_storage() {
 # ==============================================
 check_log_retention() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.4 - Verificando retencion de logs audit...${NC}"
-  configure_auditd_param "max_log_file_action" "keep_logs" "max_log_file_action"
+  configure_auditd_param "max_log_file_action" "ROTATE" "max_log_file_action"
 }
 
 # ==============================================
@@ -417,9 +417,8 @@ check_log_retention() {
 # ==============================================
 check_full_action() {
   echo -e "\n${BLUE}[*] CIS 4.1.1.5 - Verificando accion cuando logs estan llenos...${NC}"
-  configure_auditd_param "space_left_action" "email" "space_left_action"
-  configure_auditd_param "action_mail_acct" "root" "action_mail_acct"
-  configure_auditd_param "admin_space_left_action" "halt" "admin_space_left_action"
+  configure_auditd_param "space_left_action" "SYSLOG" "space_left_action"
+  configure_auditd_param "admin_space_left_action" "SUSPEND" "admin_space_left_action"
 }
 
 # ==============================================
@@ -432,7 +431,6 @@ add_audit_rules() {
     "time-change:Eventos de fecha/hora"
     "identity:Eventos de usuario/grupo"
     "system-locale:Eventos de red"
-    "MAC-policy:Eventos de MAC/SELinux"
     "logins:Eventos de login/logout"
     "session:Eventos de sesión"
     "perm_mod:Eventos de cambios de permisos"
@@ -465,7 +463,6 @@ add_audit_rules() {
 -w /etc/hosts -p wa -k system-locale
 -w /etc/networks -p wa -k system-locale
 -w /etc/network -p wa -k system-locale
--w /etc/selinux -p wa -k MAC-policy
 -w /var/log/faillog -p wa -k logins
 -w /var/log/lastlog -p wa -k logins
 -w /var/log/tallylog -p wa -k logins
@@ -542,13 +539,10 @@ restart_auditd() {
   fi
 
   AUDITCTL="$(get_auditctl_path)"
-  if [ -n "$AUDITCTL" ] && [ -f "$AUDIT_RULES" ]; then
-    if "$AUDITCTL" -R "$AUDIT_RULES" 2>/dev/null; then
-      echo -e "${GREEN}[✓] Reglas cargadas con auditctl -R${NC}"
-    else
-      echo -e "${YELLOW}[WARN] auditctl -R rechazó reglas; revisar sintaxis/compatibilidad antes de continuar.${NC}"
-      WARNINGS=$((WARNINGS+1))
-    fi
+  if [ -n "$AUDITCTL" ] && [ "$("$AUDITCTL" -s 2>/dev/null | awk '$1=="enabled"{print $2; exit}')" = "2" ]; then
+    echo -e "${YELLOW}[WARN] Audit está inmutable (-e 2); no se pueden cargar reglas nuevas sin reiniciar.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
 
   if command -v augenrules >/dev/null 2>&1; then
@@ -575,6 +569,17 @@ restart_auditd() {
   fi
 }
 
+audit_rules_ready() {
+  local auditctl="" key
+  auditctl="$(get_auditctl_path)"
+  [ -n "$auditctl" ] || return 1
+  local required_keys=(time-change identity system-locale logins session perm_mod access mounts delete scope modules)
+  for key in "${required_keys[@]}"; do
+    "$auditctl" -l 2>/dev/null | grep -q -- "$key" || return 1
+  done
+  return 0
+}
+
 configure_audit_immutable() {
   local auditctl="" rule_file="/etc/audit/rules.d/zzzzzzzz-orangebox-immutable.rules"
   local effect="" state="" enabled_state=""
@@ -592,6 +597,11 @@ configure_audit_immutable() {
     return 0
   fi
   echo -e "${YELLOW}[!] auditd no está en modo inmutable (enabled ${enabled_state:-desconocido})${NC}"
+  if ! audit_rules_ready; then
+    echo -e "${YELLOW}[WARN] No se activa -e 2: faltan reglas requeridas cargadas y verificadas en memoria.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
 
   effect="La opción -e 2 bloquea cambios posteriores a las reglas de auditd hasta reiniciar el sistema. Refuerza la integridad, pero puede impedir corregir errores de reglas sin reinicio y complicar la recuperación remota. Solo se aplica después de las demás modificaciones y con una vía de consola/recuperación probada."
   if ! ob_confirm_hardening_change "activar inmutabilidad de reglas auditd (-e 2)" "auditctl enabled distinto de 2" "persistir -e 2 y cargar reglas" "$effect"; then
@@ -677,7 +687,6 @@ legacy_audit_rules_check() {
     "time-change:Eventos de fecha/hora"
     "identity:Eventos de usuario/grupo"
     "system-locale:Eventos de red"
-    "MAC-policy:Eventos de MAC/SELinux"
     "logins:Eventos de login/logout"
     "session:Eventos de sesión"
     "perm_mod:Eventos de cambios de permisos"
@@ -741,6 +750,7 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
+    ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
     if ! make_backup; then
       echo -e "${RED}[ERROR] Backup fallido; se aborta antes de modificar auditd.${NC}" >&2
       exit 1
