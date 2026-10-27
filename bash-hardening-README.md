@@ -101,7 +101,7 @@ sudo ./bash-hardening.sh
 - Activa HISTTIMEFORMAT para historial con fecha/hora
 - Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
 - Establece umask segura (027)
-- Mantiene el historial habilitado y sin límite de líneas; no marca `HISTFILE` como `readonly` para no romper su configuración
+- Mantiene el historial habilitado con un límite alto de 100000 comandos, compatible con Bash 4.1; no marca `HISTFILE` como `readonly` para no romper su configuración
 
 ### 2. Alias Avanzados (/etc/profile.d/aliases.sh)
 
@@ -137,7 +137,7 @@ sudo ./bash-hardening.sh
 
 - Prompt en color rojo para identificar fácilmente sesiones root
 - Timeout más estricto (10 minutos)
-- Historial ilimitado (`HISTSIZE=-1`, `HISTFILESIZE=-1`) y archivo `~/.bash_history` protegido con permisos `0600`
+- Historial de hasta 100000 comandos (`HISTSIZE=100000`, `HISTFILESIZE=100000`) y archivo `~/.bash_history` protegido con permisos `0600`
 - Alias con confirmaciones obligatorias
 
 ### 6. Configuración para Nuevos Usuarios (/etc/skel/.bashrc)
@@ -216,13 +216,13 @@ Para usuario root: TMOUT=600 (10 minutos)
 
 ### Tamaños de historial
 
-Todos los usuarios: `HISTSIZE=-1`, `HISTFILESIZE=-1` (sin límite de líneas). El archivo puede crecer indefinidamente; conviene definir una política de retención/rotación si se necesita limitar el uso de disco.
+Todos los usuarios: `HISTSIZE=100000` y `HISTFILESIZE=100000`. Se evita `HISTSIZE=-1` porque Bash 4.1 no documenta el valor negativo como ilimitado y en este entorno dejó la lista en memoria vacía. El historial conserva hasta 100000 comandos por sesión/archivo.
 
 ## Solución de Problemas
 
 ### Los cambios no se ven en la sesión actual
 
-Abrir una nueva sesión interactiva o aplicar manualmente:
+Abrir una nueva sesión interactiva para recargar el historial desde `~/.bash_history`. Para revisar los valores activos, ejecutar `echo "$HISTSIZE $HISTFILESIZE $HISTFILE"`.
 
 ```bash
 set -o emacs
