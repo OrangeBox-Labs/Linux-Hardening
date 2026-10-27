@@ -107,8 +107,13 @@ case $- in
 esac
 [ -t 1 ] || return 0 2>/dev/null || exit 0
 
-# Una paleta ANSI común para todos los usuarios; no depende de tput ni de
-# si la cuenta que inicia Bash es root o un usuario normal.
+# El panel de diagnóstico de sesión se reserva para root. Los usuarios
+# normales conservan el banner pre-login, pero no repiten esta ficha.
+if [ "$(id -u 2>/dev/null)" != 0 ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+# Una paleta ANSI común para root; no depende de tput.
 OB_RESET=
 OB_CYAN=
 if [ -t 1 ] && [ "${TERM:-}" != dumb ]; then
