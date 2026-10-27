@@ -96,16 +96,14 @@ grep -Fq 'cPanel detectado: se omite use_pty' "$SUDO" || fail "sudo-hardening no
 grep -Fq '¿Habilitar Defaults use_pty?' "$SUDO" || fail "sudo-hardening no pregunta antes de habilitar use_pty"
 pass "use_pty requiere confirmación y se omite en cPanel"
 
-# SELinux may transition from Permissive to Enforcing only after explicit consent.
-grep -Fq 'confirm_selinux_change' "$SELINUX" || fail "SELinux --fix no requiere confirmación"
-grep -Fq 'setenforce 1' "$SELINUX" || fail "SELinux --fix no implementa la transición desde Permissive"
-grep -Fq 'SELINUX=enforcing' "$SELINUX" || fail "SELinux --fix no corrige el estado persistente"
-grep -Fq 'mode" = "Disabled"' "$SELINUX" || fail "SELinux Disabled no está protegido frente a habilitación automática"
-grep -Fq 'No se habilita automáticamente' "$SELINUX" || fail "SELinux Disabled no explica el plan requerido"
-if grep -Eq '^[[:space:]]*(restorecon|semanage|reboot)[[:space:]]' "$SELINUX"; then
-  fail "SELinux module no debe relabelar, modificar contextos ni reiniciar"
-fi
-pass "SELinux Enforcing requiere consentimiento y no habilita estado Disabled automáticamente"
+# SELinux is intentionally audit-only in the OrangeBox hardening baseline.
+grep -Fq 'FIX_REQUESTED=true' "$SELINUX" || fail "SELinux --fix must remain a compatible audit-only CLI option"
+grep -Fq 'OrangeBox SELinux - auditoría estrictamente de solo lectura' "$SELINUX" || fail "SELinux is not declared audit-only"
+! grep -Eq '^[[:space:]]*setenforce[[:space:]]' "$SELINUX" || fail "SELinux module must not change runtime state"
+! grep -Eq '^[[:space:]]*(mv|sed[[:space:]]+-i|cp)[[:space:]].*/etc/selinux/config' "$SELINUX" || fail "SELinux module must not modify persistent config"
+grep -Fq 'Disabled);' "$SELINUX" || fail "SELinux Disabled state is not reported"
+grep -Fq 'OrangeBox no cambia el estado' "$SELINUX" || fail "SELinux warning must state that it will not change mode"
+pass "SELinux remains check-and-warning only, including explicit --fix calls"
 
 # Kernel LPE mitigation must not overstate the user-namespace control or infer patch state from changelog text.
 LPE="$ROOT_DIR/kernel-lpe-2026-mitigation.sh"
