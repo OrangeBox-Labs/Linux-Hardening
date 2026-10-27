@@ -333,14 +333,14 @@ apply_permissions() {
 
 apply_user_restriction() {
   local allow_file="$1" deny_file="$2" service="$3" effect="" allow_ready=false
-  echo -e "\\n${BLUE}[*] Restricción de usuarios para $service${NC}"
+  echo -e "\n${BLUE}[*] Restricción de usuarios para $service${NC}"
 
   # Establish the allow-list first. Never remove a deny-list before the more
   # restrictive allow-list has been created and verified.
   if [ ! -f "$allow_file" ]; then
     effect="Crea $allow_file con solo root. En sistemas que respetan allow, limita quién puede crear tareas cron/at. Riesgo: las cuentas de servicio, usuarios de hosting o automatizaciones que no sean de root pueden perder la capacidad de programar tareas."
     if confirm_cron_change "crear $allow_file con solo root" "$effect"; then
-      if printf '%s\\n' root > "$allow_file" &&
+      if printf '%s\n' root > "$allow_file" &&
          chmod 640 "$allow_file" &&
          chown root:root "$allow_file" &&
          grep -qx 'root' "$allow_file"; then
@@ -364,7 +364,7 @@ apply_user_restriction() {
     else
       effect="Añade root a la lista permitida existente sin quitar usuarios ya autorizados. Riesgo: cambia qué cuentas pueden administrar tareas, pero conserva las entradas existentes."
       if confirm_cron_change "agregar root a $allow_file" "$effect"; then
-        if printf '%s\\n' root >> "$allow_file" && grep -qx 'root' "$allow_file"; then
+        if printf '%s\n' root >> "$allow_file" && grep -qx 'root' "$allow_file"; then
           echo -e "$GREEN[✓] root agregado a $allow_file$NC"
           FIXED=$((FIXED + 1))
           allow_ready=true
