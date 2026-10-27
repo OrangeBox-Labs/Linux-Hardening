@@ -1466,7 +1466,7 @@ grub_module(){
   else
     warn "grub.cfg no localizado"
   fi
-  info "GRUB no se modifica automáticamente; los parámetros de arranque requieren revisión específica"
+  info "Los cambios de GRUB requieren soporte de consola y reinicio; --fix regenera y valida la configuración tras aplicar los parámetros propuestos."
 }
 aide_audit_module() {
   section "AIDE / INTEGRIDAD (OPCIONAL)"
@@ -2091,7 +2091,7 @@ run_internal_module_with_confirmation() {
         if [ "$ssh_status" -eq 0 ]; then
           info "Los controles SSH ya cumplen los objetivos efectivos; se omite cualquier confirmación."
         elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
-          info "SSH se aplicará con validación y rollback; cada parámetro sensible tendrá una confirmación individual."
+          info "SSH se aplica tras preflight; --fix aprueba automáticamente los cambios propuestos y valida sshd antes de recargar."
         else
           reason="$(ssh_module_apply_block_reason || true)"
           if [ "$ssh_status" -eq 1 ]; then
