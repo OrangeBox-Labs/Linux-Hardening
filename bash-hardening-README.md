@@ -101,7 +101,7 @@ sudo ./bash-hardening.sh
 - Activa HISTTIMEFORMAT para historial con fecha/hora
 - Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
 - Establece umask segura (027)
-- Mantiene el historial habilitado con un límite alto de 100000 comandos, compatible con Bash 4.1; no marca `HISTFILE` como `readonly` para no romper su configuración
+- Selecciona el límite según Bash: `HISTSIZE=-1` y `HISTFILESIZE=-1` en Bash 4.3+, o 100000 en versiones anteriores (fallback para RHEL 6/7); no marca `HISTFILE` como `readonly`
 
 ### 2. Alias Avanzados (/etc/profile.d/aliases.sh)
 
@@ -137,7 +137,7 @@ sudo ./bash-hardening.sh
 
 - Prompt en color rojo para identificar fácilmente sesiones root
 - Timeout más estricto (10 minutos)
-- Historial de hasta 100000 comandos (`HISTSIZE=100000`, `HISTFILESIZE=100000`) y archivo `~/.bash_history` protegido con permisos `0600`
+- Historial ilimitado en Bash 4.3+ y hasta 100000 comandos en Bash anterior a 4.3; archivo `~/.bash_history` protegido con permisos `0600`
 - Alias con confirmaciones obligatorias
 
 ### 6. Configuración para Nuevos Usuarios (/etc/skel/.bashrc)
@@ -216,7 +216,7 @@ Para usuario root: TMOUT=600 (10 minutos)
 
 ### Tamaños de historial
 
-Todos los usuarios: `HISTSIZE=100000` y `HISTFILESIZE=100000`. Se evita `HISTSIZE=-1` porque Bash 4.1 no documenta el valor negativo como ilimitado y en este entorno dejó la lista en memoria vacía. El historial conserva hasta 100000 comandos por sesión/archivo.
+La política es `HISTSIZE=-1` y `HISTFILESIZE=-1` desde Bash 4.3, donde los valores negativos se definieron como ilimitados. En Bash anterior a 4.3 (por ejemplo, RHEL 6 con Bash 4.1 y RHEL 7 con Bash 4.2) usa 100000 para mantener la lista en memoria y el archivo persistente en un tamaño alto. La selección se realiza según la versión efectiva de Bash, no solo por la distribución.
 
 ## Solución de Problemas
 
