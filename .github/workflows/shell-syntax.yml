@@ -99,6 +99,8 @@ jobs:
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
         run: bash tests/test_kptr_restrict_policy.sh
+      - name: Test kernel.unprivileged_bpf_disabled policy
+        run: bash tests/test_bpf_policy.sh
 
   # Syntax/tests on representative RPM-family generations. CentOS 6/7 cover
   # legacy Bash releases; AlmaLinux 8/9/10 cover modern RHEL-compatible userspace.
