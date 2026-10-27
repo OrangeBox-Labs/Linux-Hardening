@@ -18,7 +18,7 @@ grep -Fq 'no se descargará en caliente' "$NETWORK" || fail "la confirmación de
 grep -Fq 'if ! make_backup; then' "$NETWORK" || fail "network-hardening puede aplicar cambios si falla el backup"
 grep -Fq 'chmod 700 "$BACKUP_DIR"' "$NETWORK" || fail "backup de red no restringe permisos"
 grep -Fq 'if ! make_backup; then' "$AUDITD" || fail "auditd puede aplicar cambios si falla el backup"
-grep -Fq 'chmod 700 "$BACKUP_DIR"' "$AUDITD" || fail "backup auditd no restringe permisos"
+grep -Fq 'mkdir -m 700 "$BACKUP_DIR"' "$AUDITD" || fail "backup auditd no crea un directorio exclusivo con permisos restrictivos"
 grep -Fq 'if ! make_backup; then' "$RSYSLOG" || fail "rsyslog puede aplicar cambios si falla el backup"
 grep -Fq 'chmod 700 "$BACKUP_DIR"' "$RSYSLOG" || fail "backup logging no restringe permisos"
 grep -Fq 'if ! make_backup; then' "$BASH_HARDENING" || fail "Bash hardening puede aplicar cambios si falla el backup"
