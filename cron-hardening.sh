@@ -332,36 +332,73 @@ apply_permissions() {
 }
 
 apply_user_restriction() {
-  local allow_file="$1" deny_file="$2" service="$3" effect=""
-  echo -e "\n$BLUE[*] Restricción de usuarios para $service$NC"
+  local allow_file="$1" deny_file="$2" service="$3" effect="" allow_ready=false
+  echo -e "\\n${BLUE}[*] Restricción de usuarios para $service${NC}"
 
-  if [ -f "$deny_file" ]; then
-    effect="Eliminar $deny_file. Una lista allow explícita debe ser la fuente de autorización; borrar la deny no debe ampliar permisos una vez que exista allow, pero cambia el mecanismo usado para controlar altas de tareas."
-    if confirm_cron_change "eliminar $deny_file" "$effect"; then
-      if rm -f "$deny_file"; then echo -e "$GREEN[✓] $deny_file eliminado$NC"; FIXED=$((FIXED + 1)); else echo -e "$RED[!] No se pudo eliminar $deny_file$NC"; WARNINGS=$((WARNINGS + 1)); fi
-    else WARNINGS=$((WARNINGS + 1)); fi
-  fi
-
+  # Establish the allow-list first. Never remove a deny-list before the more
+  # restrictive allow-list has been created and verified.
   if [ ! -f "$allow_file" ]; then
-    effect="Crear $allow_file con solo root. En sistemas cron/at que respetan allow, esto limita quién puede crear o gestionar tareas programadas; puede romper flujos de aplicaciones, hosting y cuentas de servicio. Añade usuarios autorizados después de revisar sus necesidades."
-    if confirm_cron_change "crear $allow_file con root como único usuario permitido" "$effect"; then
-      if printf '%s\n' root > "$allow_file" && chmod 640 "$allow_file" && chown root:root "$allow_file"; then
+    effect="Crea $allow_file con solo root. En sistemas que respetan allow, limita quién puede crear tareas cron/at. Riesgo: las cuentas de servicio, usuarios de hosting o automatizaciones que no sean de root pueden perder la capacidad de programar tareas."
+    if confirm_cron_change "crear $allow_file con solo root" "$effect"; then
+      if printf '%s\\n' root > "$allow_file" &&
+         chmod 640 "$allow_file" &&
+         chown root:root "$allow_file" &&
+         grep -qx 'root' "$allow_file"; then
         echo -e "$GREEN[✓] $allow_file creado con root (0640 root:root)$NC"
         FIXED=$((FIXED + 1))
+        allow_ready=true
       else
         rm -f "$allow_file"
-        echo -e "$RED[!] No se pudo configurar $allow_file$NC"
+        echo -e "$RED[!] No se pudo crear/verificar $allow_file; no se tocará $deny_file$NC"
+        WARNINGS=$((WARNINGS + 1))
+        return 1
+      fi
+    else
+      WARNINGS=$((WARNINGS + 1))
+      echo "[INFO] Se conserva $deny_file; no se eliminará mientras no haya un allow-list verificado."
+      return 0
+    fi
+  else
+    if grep -qx 'root' "$allow_file"; then
+      allow_ready=true
+    else
+      effect="Añade root a la lista permitida existente sin quitar usuarios ya autorizados. Riesgo: cambia qué cuentas pueden administrar tareas, pero conserva las entradas existentes."
+      if confirm_cron_change "agregar root a $allow_file" "$effect"; then
+        if printf '%s\\n' root >> "$allow_file" && grep -qx 'root' "$allow_file"; then
+          echo -e "$GREEN[✓] root agregado a $allow_file$NC"
+          FIXED=$((FIXED + 1))
+          allow_ready=true
+        else
+          echo -e "$RED[!] No se pudo validar root en $allow_file$NC"
+          WARNINGS=$((WARNINGS + 1))
+        fi
+      else
         WARNINGS=$((WARNINGS + 1))
       fi
-    else WARNINGS=$((WARNINGS + 1)); fi
-  else
-    if ! grep -qx 'root' "$allow_file"; then
-      effect="Añade root a la lista autorizada actual sin eliminar sus demás usuarios. Asegura que el administrador pueda gestionar tareas, pero la lista existente sigue determinando quién puede crearlas."
-      if confirm_cron_change "agregar root a $allow_file" "$effect"; then
-        if printf '%s\n' root >> "$allow_file"; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
-      else WARNINGS=$((WARNINGS + 1)); fi
     fi
     apply_permissions "$allow_file" "640" "root" "root" "Archivo $allow_file"
+  fi
+
+  if [ "$allow_ready" != true ]; then
+    echo -e "$YELLOW[WARN] $allow_file no permite confirmar que root está autorizado; se conserva $deny_file sin cambios.$NC"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  if [ -f "$deny_file" ]; then
+    effect="Elimina $deny_file después de verificar $allow_file. La allow-list pasa a ser la política explícita. Riesgo: confirma que las cuentas/servicios que deben programar tareas estén incluidas en $allow_file antes de aceptar."
+    if confirm_cron_change "eliminar $deny_file (allow-list ya verificado)" "$effect"; then
+      if rm -f "$deny_file"; then
+        echo -e "$GREEN[✓] $deny_file eliminado después de verificar $allow_file$NC"
+        FIXED=$((FIXED + 1))
+      else
+        echo -e "$RED[!] No se pudo eliminar $deny_file$NC"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    else
+      WARNINGS=$((WARNINGS + 1))
+      echo "[INFO] Se conserva $deny_file; la allow-list verificada permanece activa."
+    fi
   fi
 }
 
