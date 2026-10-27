@@ -148,6 +148,8 @@ WARNINGS=0
 AUDIT_RULES_DIR="$TMP_DIR/staged-rules"
 AUDIT_RULES="$AUDIT_RULES_DIR/98-orangebox-baseline.rules"
 export ORANGEBOX_ASSUME_YES=1
+# CI runners may be unprivileged; ownership changes are outside this isolated staging test.
+chown() { return 0; }
 export AUDITCTL_TEST_ENABLED=2
 export AUDITCTL_TEST_NO_RULES=1
 add_audit_rules >"$TMP_DIR/staging-output" 2>&1 || {
