@@ -137,5 +137,12 @@ sh -n "$motd_profile_tmp" || fail "el perfil MOTD no es compatible con sintaxis 
 grep -Fq 'SSH_CONNECTION' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra la IP remota"
 grep -Fq '/proc/uptime' "$motd_profile_tmp" || fail "el perfil MOTD generado no calcula uptime"
 grep -Fq '/proc/loadavg' "$motd_profile_tmp" || fail "el perfil MOTD generado no muestra load"
+grep -Fq '/proc/meminfo' "$motd_profile_tmp" || fail "el perfil MOTD generado no lee las métricas de memoria"
+grep -Fq '"MemAvailable:"' "$motd_profile_tmp" || fail "la RAM debe usar MemAvailable cuando el kernel la expone"
+grep -Fq 'free_mem + buffers + cached' "$motd_profile_tmp" || fail "falta el fallback de memoria para kernels legacy"
+grep -Fq '"SwapTotal:"' "$motd_profile_tmp" || fail "el perfil no calcula swap usada a partir de SwapTotal"
+grep -Fq '"SwapFree:"' "$motd_profile_tmp" || fail "el perfil no calcula swap usada a partir de SwapFree"
+grep -Fq 'RAM usada: %s | Swap usada: %s' "$motd_profile_tmp" || fail "RAM y swap deben mostrarse junto a Load"
+grep -Fq 'No configurada' "$motd_profile_tmp" || fail "la ausencia de swap debe mostrarse de forma explícita"
 
 pass "banner pre-login, logo FIGlet y ficha de sesión unificada, etiqueta Load limpia, fecha única y TMOUT no-root"
