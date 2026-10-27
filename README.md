@@ -320,7 +320,7 @@ Si los valores ya cumplen, muestra `[OK]` sin pedir autorizaciones redundantes n
 ./linux-hardening.sh --fix --auto
 ```
 
-Aplica únicamente banners/MOTD y Bash con historial compatible de hasta 100000 comandos. Los controles delicados, incluidos kernel y SYN flood, permanecen en auditoría.
+Aplica únicamente banners/MOTD y Bash con historial ajustado a la versión: ilimitado en Bash 4.3+ y fallback a 100000 comandos en Bash anterior a 4.3. Los controles delicados, incluidos kernel y SYN flood, permanecen en auditoría.
 
 ### Módulos especializados
 
