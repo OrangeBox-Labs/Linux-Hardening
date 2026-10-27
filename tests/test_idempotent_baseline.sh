@@ -85,9 +85,26 @@ if grep -Fq 'Load (1/5/15m):' "$motd_profile_tmp"; then
   fail "la etiqueta Load no debe mostrar intervalos internos"
 fi
 grep -Fq 'IP del cliente:' "$motd_profile_tmp" || fail "el perfil no muestra la IP del cliente"
+grep -Fq '"IP externa:"' "$motd_profile_tmp" || fail "el perfil no muestra la IP externa"
+grep -Fq 'OB_EXTERNAL_IP=' "$motd_profile_tmp" || fail "el perfil no consulta la IP externa"
+grep -Fq 'curl -4 -fsS --connect-timeout 1 --max-time 2 https://ifconfig.me/ip' "$motd_profile_tmp" || fail "la consulta externa con curl debe tener timeout acotado"
+grep -Fq 'wget -q -T 2 -O - https://ifconfig.me/ip' "$motd_profile_tmp" || fail "falta la alternativa acotada con wget"
 grep -Fq '"Usuario:"' "$motd_profile_tmp" || fail "el perfil no muestra al usuario efectivo"
 grep -Fq 'Fecha/hora:' "$motd_profile_tmp" || fail "el perfil no muestra fecha y hora"
 [ "$(grep -Fc 'Fecha/hora:' "$motd_profile_tmp")" -eq 1 ] || fail "la fecha/hora debe aparecer una sola vez"
+awk '
+  /"Fecha\/hora:"/ { datetime = NR }
+  /"IP externa:"/ { external = NR }
+  /"IP interna:"/ { internal = NR }
+  /"IP del cliente:"/ { client = NR }
+  /"Uptime:"/ { uptime = NR }
+  /"Load:"/ { load = NR }
+  /"Usuario:"/ { username = NR }
+  END {
+    if (!(datetime > 0 && datetime < external && external < internal &&
+          internal < client && client < uptime && uptime < load && load < username)) exit 1
+  }
+' "$motd_profile_tmp" || fail "el panel debe mostrar fecha, IP externa, IP interna, cliente, uptime, load y usuario en ese orden"
 grep -Fq "date '+%Y-%m-%d %H:%M:%S %Z'" "$motd_profile_tmp" || fail "falta el formato de fecha/hora"
 grep -Fq 'figlet -f small OrangeBox' "$motd_profile_tmp" || fail "el logo FIGlet no aparece primero en el MOTD de shell"
 grep -Fq 'ORANGEBOX_ASCII' "$motd_profile_tmp" || fail "falta el fallback ASCII del logo de shell"
