@@ -176,6 +176,41 @@ OB_UPTIME=$(awk 'NR == 1 {s=int($1); printf "up %d days, %d hours, %d minutes", 
 [ -n "$OB_UPTIME" ] || OB_UPTIME="No disponible"
 OB_LOAD=$(awk 'NR == 1 {printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)
 [ -n "$OB_LOAD" ] || OB_LOAD="No disponible"
+
+# Memoria actual: MemAvailable cuando el kernel la expone; fallback a
+# free+buffers+cache para kernels legacy (por ejemplo, CentOS/RHEL 6).
+OB_MEMORY_STATS=$(awk '
+  $1 == "MemTotal:" { total = $2 }
+  $1 == "MemAvailable:" { available = $2; have_available = 1 }
+  $1 == "MemFree:" { free_mem = $2 }
+  $1 == "Buffers:" { buffers = $2 }
+  $1 == "Cached:" { cached = $2 }
+  $1 == "SwapTotal:" { swap_total = $2 }
+  $1 == "SwapFree:" { swap_free = $2 }
+  END {
+    if (total > 0) {
+      if (!have_available) available = free_mem + buffers + cached
+      used = total - available
+      if (used < 0) used = 0
+      printf "%.1f/%.1f GiB (%.0f%%)", used / 1048576, total / 1048576, used * 100 / total
+    } else {
+      printf "No disponible"
+    }
+    printf "|"
+    if (swap_total > 0) {
+      swap_used = swap_total - swap_free
+      if (swap_used < 0) swap_used = 0
+      printf "%.1f/%.1f GiB (%.0f%%)", swap_used / 1048576, swap_total / 1048576, swap_used * 100 / swap_total
+    } else if (swap_total == 0) {
+      printf "No configurada"
+    } else {
+      printf "No disponible"
+    }
+  }
+' /proc/meminfo 2>/dev/null)
+[ -n "$OB_MEMORY_STATS" ] || OB_MEMORY_STATS="No disponible|No disponible"
+OB_RAM_USAGE=${OB_MEMORY_STATS%%|*}
+OB_SWAP_USAGE=${OB_MEMORY_STATS#*|}
 OB_DATETIME=$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null)
 [ -n "$OB_DATETIME" ] || OB_DATETIME="No disponible"
 
@@ -206,7 +241,7 @@ printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP externa:" "$OB_RESET" "$OB_EXTERNAL_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP interna:" "$OB_RESET" "$OB_SERVER_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP del cliente:" "$OB_RESET" "$OB_CLIENT_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Uptime:" "$OB_RESET" "$OB_UPTIME"
-printf '  %s%-15s%s %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD"
+printf '  %s%-15s%s %s | RAM usada: %s | Swap usada: %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD" "$OB_RAM_USAGE" "$OB_SWAP_USAGE"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Usuario:" "$OB_RESET" "$OB_USERNAME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
