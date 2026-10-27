@@ -181,7 +181,7 @@ pass "reglas completas staged en ruta aislada sin tocar reglas en memoria ni gen
 
 # Un archivo OrangeBox existente con reglas obsoletas debe repararse en staging,
 # incluso si las categorías requeridas ya están presentes. No se carga al kernel.
-printf '%s\\n' '-a always,exit -F arch=b32 -S stime -k time-change' '-w /ob-test-nonexistent-audit-watch-path -p wa -k logins' >> "$AUDIT_RULES"
+printf '%s\n' '-a always,exit -F arch=b32 -S stime -k time-change' '-w /ob-test-nonexistent-audit-watch-path -p wa -k logins' >> "$AUDIT_RULES"
 add_audit_rules >"$TMP_DIR/repair-output" 2>&1 || {
   cat "$TMP_DIR/repair-output" >&2
   fail "el script debe reparar el baseline OrangeBox obsoleto"
