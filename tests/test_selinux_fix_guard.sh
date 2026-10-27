@@ -3,8 +3,8 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SELINUX="$ROOT_DIR/selinux-secure-setup.sh"
 ORCHESTRATOR="$ROOT_DIR/linux-hardening.sh"
-fail(){ printf '[FAIL] %s\\n' "$*" >&2; exit 1; }
-pass(){ printf '[PASS] %s\\n' "$*"; }
+fail(){ printf '[FAIL] %s\n' "$*" >&2; exit 1; }
+pass(){ printf '[PASS] %s\n' "$*"; }
 
 grep -Fq 'FIX_REQUESTED=true' "$SELINUX" || fail "--fix debe conservar compatibilidad CLI sin aplicar cambios"
 grep -Fq 'OrangeBox SELinux - auditoría estrictamente de solo lectura' "$SELINUX" || fail "no se declara explícitamente la política audit-only"
