@@ -1503,7 +1503,7 @@ normalize_history_dotfile() {
   if [ ! -f "$file" ]; then
     if ! $AUTO_FIX; then warn "$file no existe; --fix puede crearlo con historial compatible de 100000 comandos."; return 0; fi
   elif ! $AUTO_FIX; then
-    warn "$file: historial no cumple la política; --fix lo normalizará a ilimitado"
+    warn "$file: historial no cumple la política compatible; --fix lo normalizará a 100000 comandos"
     return 0
   fi
   [ ! -e "$file" ] || backup_once "$file"
@@ -1804,7 +1804,7 @@ ORANGEBOX_BASH
   elif $AUTO_FIX; then
     [ ! -e "$target" ] || backup_once "$target"
     if install -o root -g root -m 644 "$tmp" "$target" && cmp -s "$tmp" "$target"; then
-      ok "Bash History habilitado sin límite y prompt por rol aplicado en $target"
+      ok "Bash History habilitado (límite 100000) y prompt por rol aplicado en $target"
       FIXED=$((FIXED+1))
     else
       warn "No se pudo instalar/verificar $target"
