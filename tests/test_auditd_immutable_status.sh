@@ -63,7 +63,7 @@ assert_state() {
   WARNINGS=0
   output="$(legacy_audit_rules_check 2>&1)" || fail "la comprobación falló con enabled=$state"
   printf '%s\n' "$output" | grep -Fq -- "$expected" ||
-    fail "enabled=$state no mostró el mensaje esperado: $expected"
+    fail "enabled=$state no mostró el mensaje esperado: $expected. Salida capturada: $output"
   if [ -n "$forbidden" ] && printf '%s\n' "$output" | grep -Fq -- "$forbidden"; then
     fail "enabled=$state mostró un estado incompatible: $forbidden"
   fi
@@ -84,7 +84,7 @@ assert_state() {
     fail "configure_audit_immutable sumó una advertencia duplicada con enabled=$state"
   modern_output="$(cat "$TMP_DIR/modern-output")"
   printf '%s\n' "$modern_output" | grep -Fq -- "$expected" ||
-    fail "la ruta moderna no mostró el estado esperado para enabled=$state: $expected"
+    fail "la ruta moderna no mostró el estado esperado para enabled=$state: $expected. Salida capturada: $modern_output"
   if printf '%s\n' "$modern_output" | grep -Eq 'auditd no está en modo inmutable|auditd ya está en modo inmutable'; then
     fail "la ruta moderna duplicó el estado auditd para enabled=$state"
   fi
@@ -142,6 +142,8 @@ pass "--fix respalda y prepara la recuperación cuando enabled=2 y faltan reglas
 # Recuperar las funciones reales después de las sustituciones usadas para probar main().
 # El source no ejecuta main(); PATH conserva el auditctl simulado.
 source "$AUDITD"
+# El segundo source restaura la función productiva; reimponer el stub para no consultar el auditctl real.
+get_auditctl_path() { command -v auditctl; }
 
 # Prueba real de staging con rutas aisladas: no modifica /etc/audit ni carga reglas al kernel.
 AUTO_FIX=true
