@@ -124,7 +124,7 @@ make_backup() {
 configure_profile() {
   echo -e "\n${BLUE}[*] Configurando perfil de Bash y prompt...${NC}"
 
-  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Eq "^[[:space:]]*export HISTSIZE=100000$" "$PROFILE_D" && grep -Eq "^[[:space:]]*export HISTFILESIZE=100000$" "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D" && grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$PROFILE_D"; then
+  if [ -f "$PROFILE_D" ] && grep -q "OrangeBox" "$PROFILE_D" 2>/dev/null && grep -Fq 'orangebox_set_history_limits() {' "$PROFILE_D" && grep -Fq 'HISTSIZE=-1' "$PROFILE_D" && grep -Fq 'HISTSIZE=100000' "$PROFILE_D" && grep -Fq 'HISTFILESIZE=-1' "$PROFILE_D" && grep -Fq 'HISTFILESIZE=100000' "$PROFILE_D" && ! grep -Eq "readonly[[:space:]]+HISTFILE" "$PROFILE_D" && grep -Fq 'beginning-of-line' "$PROFILE_D" && grep -Fq 'end-of-line' "$PROFILE_D" && grep -Fq 'hostname -f' "$PROFILE_D" && grep -Fq 'orangebox_set_prompt' "$PROFILE_D" && grep -Fq 'history() {' "$PROFILE_D" && grep -Fq 'history -c/-d/-w' "$PROFILE_D" && grep -Fq 'ORANGEBOX_SESSION_DISPLAY=external-motd' "$PROFILE_D"; then
     echo -e "${GREEN}[✓] Profile ya configurado${NC}"
     return 0
   fi
@@ -159,10 +159,22 @@ orangebox_set_prompt() {
 }
 orangebox_set_prompt
 
-# Historial con fecha y hora; límite compatible de 100000 comandos.
+# Historial con fecha y hora; límites adaptados a la versión de Bash.
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=100000
-export HISTFILESIZE=100000
+orangebox_set_history_limits() {
+    # Bash 4.3 introduced negative HISTSIZE/HISTFILESIZE as unlimited.
+    # RHEL 6 (Bash 4.1) and RHEL 7 (Bash 4.2) use a safe high limit.
+    if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+       { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+        HISTSIZE=-1
+        HISTFILESIZE=-1
+    else
+        HISTSIZE=100000
+        HISTFILESIZE=100000
+    fi
+    export HISTSIZE HISTFILESIZE
+}
+orangebox_set_history_limits
 export HISTCONTROL=
 if [ -z "${HISTFILE:-}" ] || [ "${HISTFILE}" = /dev/null ] || [ "${HISTFILE}" = /dev/zero ]; then
     export HISTFILE="$HOME/.bash_history"
@@ -199,8 +211,7 @@ history() {
 
 orangebox_history_guard() {
     set -o history
-    HISTSIZE=100000
-    HISTFILESIZE=100000
+    orangebox_set_history_limits
     case "${HISTFILE:-}" in
         ""|/dev/null|/dev/zero|/var/log/bash_history/*) HISTFILE="$HOME/.bash_history" ;;
     esac
@@ -256,7 +267,7 @@ fi
 # Umask segura
 umask 027
 
-# Historial habilitado; límite compatible de 100000 comandos revalidado por sesión.
+# Historial con -1 en Bash 4.3+ y fallback a 100000 comandos en Bash anterior a 4.3.
 EOF
     echo -e "${GREEN}[✓] Profile creado en $PROFILE_D${NC}"
     FIXED=$((FIXED + 1))
@@ -539,7 +550,7 @@ EOF
 configure_root_bashrc() {
   echo -e "\n${BLUE}[*] Configurando /root/.bashrc...${NC}"
 
-  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V5 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
+  if grep -Fq '# ORANGEBOX BASH ROOT CONFIG V6 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
     if grep -Fq '# ORANGEBOX HISTORY PROMPT MIGRATION V1 BEGIN' "$BASHRC_ROOT" 2>/dev/null; then
       echo -e "${GREEN}[✓] /root/.bashrc ya configurado; migración de historial verificada${NC}"
       return 0
@@ -567,8 +578,8 @@ configure_root_bashrc() {
     if [ -f "$BASHRC_ROOT" ]; then
       tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /root/.bashrc${NC}"; return; }
       awk '
-        /^# ORANGEBOX BASH ROOT CONFIG V[234] BEGIN$/ { skip_v2=1; next }
-        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V[234] END$/ { skip_v2=0; next }
+        /^# ORANGEBOX BASH ROOT CONFIG V[2345] BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH ROOT CONFIG V[2345] END$/ { skip_v2=0; next }
         skip_v2 { next }
         /^export PROMPT_COMMAND="history -a; history -c; history -r;/ { next }
         /^PROMPT_COMMAND="orangebox_history_guard; / { next }
@@ -586,7 +597,7 @@ configure_root_bashrc() {
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH ROOT CONFIG V5 BEGIN
+# ORANGEBOX BASH ROOT CONFIG V6 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -613,10 +624,22 @@ history() {
     builtin history "$@"
 }
 
-# Historial mejorado (compatible con Bash 4.1+)
+# Historial mejorado; política ilimitada desde Bash 4.3 y fallback en Bash antiguo.
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=100000
-export HISTFILESIZE=100000
+orangebox_set_history_limits() {
+    # Bash 4.3 introduced negative HISTSIZE/HISTFILESIZE as unlimited.
+    # RHEL 6 (Bash 4.1) and RHEL 7 (Bash 4.2) use a safe high limit.
+    if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+       { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+        HISTSIZE=-1
+        HISTFILESIZE=-1
+    else
+        HISTSIZE=100000
+        HISTFILESIZE=100000
+    fi
+    export HISTSIZE HISTFILESIZE
+}
+orangebox_set_history_limits
 export HISTCONTROL=
 export HISTFILE="$HOME/.bash_history"
 unset HISTIGNORE
@@ -629,7 +652,7 @@ bind '"\C-a": beginning-of-line' 2>/dev/null || true
 bind '"\C-e": end-of-line' 2>/dev/null || true
 
 
-# Historial habilitado con límite compatible de 100000 comandos.
+# Historial con límites adaptados a la versión efectiva de Bash.
 
 # Prompt personalizado para root (en rojo)
 ORANGEBOX_PROMPT_HOST="${ORANGEBOX_PROMPT_HOST:-$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)}"
@@ -651,7 +674,7 @@ alias mv='mv -i'
 alias vi='vim'
 alias reboot='echo "Use shutdown -r now to reboot"'
 alias poweroff='echo "Use shutdown -h now to poweroff"'
-# ORANGEBOX BASH ROOT CONFIG V5 END
+# ORANGEBOX BASH ROOT CONFIG V6 END
 EOF
     if ! install_root_history_prompt_migration; then
       echo -e "${RED}[ERROR] No se pudo instalar la migración del historial en /root/.bashrc${NC}" >&2
@@ -690,7 +713,7 @@ show_reboot_warning() {
 configure_skel() {
   echo -e "\n${BLUE}[*] Configurando /etc/skel para nuevos usuarios...${NC}"
 
-  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V5 BEGIN' "$SKEL_BASHRC"; then
+  if [ -f "$SKEL_BASHRC" ] && grep -Fq '# ORANGEBOX BASH DEFAULTS V6 BEGIN' "$SKEL_BASHRC"; then
     echo -e "${GREEN}[✓] /etc/skel/.bashrc ya configurado${NC}"
     return 0
   fi
@@ -698,12 +721,12 @@ configure_skel() {
   echo -e "${RED}[!] /etc/skel/.bashrc NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
-    # Remove only the previous OrangeBox-managed block before installing V5.
+    # Remove only the previous OrangeBox-managed block before installing V6.
     if [ -f "$SKEL_BASHRC" ]; then
       tmp=$(mktemp) || { echo -e "${YELLOW}[!] No se pudo normalizar /etc/skel/.bashrc${NC}"; return; }
       awk '
-        /^# ORANGEBOX BASH DEFAULTS V[234] BEGIN$/ { skip_v2=1; next }
-        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V[234] END$/ { skip_v2=0; next }
+        /^# ORANGEBOX BASH DEFAULTS V[2345] BEGIN$/ { skip_v2=1; next }
+        skip_v2 && /^# ORANGEBOX BASH DEFAULTS V[2345] END$/ { skip_v2=0; next }
         skip_v2 { next }
         { print }
       ' "$SKEL_BASHRC" > "$tmp" || { rm -f "$tmp"; echo -e "${YELLOW}[!] No se pudo leer /etc/skel/.bashrc${NC}"; return; }
@@ -716,7 +739,7 @@ configure_skel() {
 # ==============================================
 # Hardening Bash - OrangeBox Labs
 # ==============================================
-# ORANGEBOX BASH DEFAULTS V5 BEGIN
+# ORANGEBOX BASH DEFAULTS V6 BEGIN
 
 # Protección de mejor esfuerzo contra borrado/sobrescritura de historial.
 # No impide el uso explícito de "builtin history" ni la edición directa del archivo.
@@ -744,8 +767,20 @@ history() {
 }
 
 export HISTTIMEFORMAT="%F %T "
-export HISTSIZE=100000
-export HISTFILESIZE=100000
+orangebox_set_history_limits() {
+    # Bash 4.3 introduced negative HISTSIZE/HISTFILESIZE as unlimited.
+    # RHEL 6 (Bash 4.1) and RHEL 7 (Bash 4.2) use a safe high limit.
+    if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] ||
+       { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+        HISTSIZE=-1
+        HISTFILESIZE=-1
+    else
+        HISTSIZE=100000
+        HISTFILESIZE=100000
+    fi
+    export HISTSIZE HISTFILESIZE
+}
+orangebox_set_history_limits
 export HISTCONTROL=
 export HISTFILE="$HOME/.bash_history"
 unset HISTIGNORE
@@ -770,7 +805,7 @@ umask 027
 alias rm='rm -i'
 alias cp='cp -i'
 alias mv='mv -i'
-# ORANGEBOX BASH DEFAULTS V5 END
+# ORANGEBOX BASH DEFAULTS V6 END
 EOF
     echo -e "${GREEN}[✓] /etc/skel/.bashrc actualizado${NC}"
     FIXED=$((FIXED + 1))
