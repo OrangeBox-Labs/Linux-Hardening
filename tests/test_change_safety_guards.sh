@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 NETWORK="$ROOT_DIR/network-hardening.sh"
 AUDITD="$ROOT_DIR/auditd-hardening.sh"
 RSYSLOG="$ROOT_DIR/rsyslog-hardening.sh"
