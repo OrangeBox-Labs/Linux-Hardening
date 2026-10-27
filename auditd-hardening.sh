@@ -254,13 +254,23 @@ configure_auditd_param() {
 # 4.1.1.1 - ENSURE AUDITD IS INSTALLED
 # ==============================================
 check_auditd_installed() {
-  echo -e "\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd instalado... ${NC}"
-  local package="" reason="" os_version="" installed=false
+  echo -e "\\n${BLUE}[*] CIS 4.1.1.1 - Verificando auditd y las herramientas de reglas... ${NC}"
+  local package="" reason="" os_version="" package_installed=false tool_installed=false install_cmd=""
+
+  # audit-rules es un paquete requerido en EL10. No basta con que auditd
+  # esté activo: el administrador necesita auditctl/augenrules para validar
+  # y cargar reglas. En EL7-9 se conserva el paquete histórico audit-tools.
+  os_version="$(get_os_version)"
+  if [[ "$os_version" =~ ^[0-9]+$ ]] && [ "$os_version" -ge 10 ]; then
+    package="audit-rules"
+  else
+    package="audit-tools"
+  fi
 
   if rpm -q audit >/dev/null 2>&1; then
     echo -e "${GREEN}[✓] audit instalado${NC}"
   else
-    reason="Instala el demonio de auditoría y puede iniciar la generación de eventos y consumo de disco/CPU. Se instalará desde los repositorios configurados."
+    reason="Instala el demonio de auditoría; puede aumentar eventos registrados y consumo de disco/CPU. Se instalará desde los repositorios configurados."
     if [ "$AUTO_FIX" != true ] || ! ob_confirm_hardening_change "instalar audit" "no instalado" "dnf/yum install audit" "$reason"; then
       WARNINGS=$((WARNINGS + 1))
     else
@@ -279,7 +289,7 @@ check_auditd_installed() {
   if rpm -q audit-libs >/dev/null 2>&1; then
     echo -e "${GREEN}[✓] audit-libs instalado${NC}"
   else
-    reason="Instala bibliotecas de auditoría usadas por herramientas del sistema. Puede incorporar dependencias de paquetes; no habilita el servicio por sí sola."
+    reason="Instala bibliotecas usadas por herramientas de auditoría. Puede incorporar dependencias; no habilita auditd por sí solo."
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar audit-libs" "no instalado" "dnf/yum install audit-libs" "$reason"; then
       if command -v dnf >/dev/null 2>&1; then dnf install audit-libs -y
       else yum install audit-libs -y; fi
@@ -289,23 +299,68 @@ check_auditd_installed() {
     fi
   fi
 
-  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then
-    echo -e "${GREEN}[✓] auditctl disponible${NC}"
-    return
+  if [ "$package" = "audit-rules" ]; then
+    rpm -q audit-rules >/dev/null 2>&1 && package_installed=true
+  elif rpm -q "$package" >/dev/null 2>&1; then
+    package_installed=true
+  fi
+  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then tool_installed=true; fi
+
+  if [ "$package_installed" = true ] && [ "$tool_installed" = true ]; then
+    echo -e "${GREEN}[✓] $package instalado y auditctl disponible${NC}"
+    if [ "$package" = "audit-rules" ] && ! { command -v augenrules >/dev/null 2>&1 || [ -x /usr/sbin/augenrules ]; }; then
+      echo -e "${YELLOW}[WARN] audit-rules está instalado, pero augenrules no está disponible; verificar integridad del paquete.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
   fi
 
-  os_version="$(get_os_version)"
-  if [[ "$os_version" =~ ^[0-9]+$ ]] && [ "$os_version" -ge 10 ]; then
-    package="audit-rules"
+  if [ "$package" = "audit-rules" ]; then
+    reason="Instala audit-rules, el paquete de AlmaLinux/RHEL 10 que proporciona auditctl y augenrules. Sin estas herramientas, el hardening no puede comprobar ni cargar las reglas persistentes de auditd."
   else
-    package="audit-tools"
+    reason="Instala audit-tools para administrar las reglas de auditd; sin auditctl no se pueden comprobar ni cargar las reglas persistentes."
   fi
-  reason="Instala auditctl y utilidades de administración de reglas. El gestor de paquetes puede actualizar dependencias y el repositorio debe estar disponible."
-  if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "instalar $package" "auditctl no disponible" "dnf/yum install $package" "$reason"; then
-    if command -v dnf >/dev/null 2>&1; then dnf install "$package" -y
-    else yum install "$package" -y; fi
-    if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then FIXED=$((FIXED + 1)); else WARNINGS=$((WARNINGS + 1)); fi
+  echo -e "${YELLOW}[WARN] Falta el paquete requerido '$package' o auditctl no está disponible.${NC}"
+  echo "Qué hace/riesgo: $reason"
+  if [ "$AUTO_FIX" != true ]; then
+    echo "[INFO] En modo --fix se solicitará confirmación individual para instalar $package."
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+  if ! ob_confirm_hardening_change "instalar $package" "paquete ausente o herramientas no disponibles" "dnf/yum install $package" "$reason"; then
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    if [ "$package_installed" = true ]; then
+      dnf reinstall "$package" -y
+    else
+      dnf install "$package" -y
+    fi
   else
+    if [ "$package_installed" = true ]; then
+      yum reinstall "$package" -y
+    else
+      yum install "$package" -y
+    fi
+  fi
+
+  package_installed=false
+  tool_installed=false
+  if rpm -q "$package" >/dev/null 2>&1; then package_installed=true; fi
+  if command -v auditctl >/dev/null 2>&1 || [ -x /usr/sbin/auditctl ]; then tool_installed=true; fi
+  if [ "$package_installed" = true ] && [ "$tool_installed" = true ]; then
+    if [ "$package" = "audit-rules" ] &&
+       ! { command -v augenrules >/dev/null 2>&1 || [ -x /usr/sbin/augenrules ]; }; then
+      echo -e "${RED}[!] audit-rules figura instalado, pero augenrules sigue ausente; revisar el paquete antes de cargar reglas.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    else
+      echo -e "${GREEN}[✓] $package instalado y las herramientas de reglas están disponibles${NC}"
+      FIXED=$((FIXED + 1))
+    fi
+  else
+    echo -e "${RED}[!] No se pudo verificar la instalación de $package y auditctl; no se cargarán reglas a ciegas.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
