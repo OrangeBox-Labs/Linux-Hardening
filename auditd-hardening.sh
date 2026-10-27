@@ -449,7 +449,7 @@ add_audit_rules() {
     "modules:Eventos de módulos del kernel"
   )
 
-  if [ ! -d "$AUDIT_RULES_DIR" ] || [ ! -s "$AUDIT_RULES" ] || { [ "$AUTO_FIX" = true ] && ! audit_rules_ready; }; then
+  if [ ! -d "$AUDIT_RULES_DIR" ] || { [ "$AUTO_FIX" = true ] && ! persistent_audit_rules_ready; } || { [ "$AUTO_FIX" != true ] && [ ! -s "$AUDIT_RULES" ]; }; then
     effect="Crea un conjunto de reglas persistentes para registrar cambios de identidad, tiempo, red, permisos, accesos fallidos, montajes, borrado de archivos, sudo y módulos del kernel. Puede aumentar el volumen de /var/log/audit y la carga de I/O; no se sobrescribirá un archivo de reglas existente que tenga contenido."
     if [ "$AUTO_FIX" = true ] && ob_confirm_hardening_change "crear conjunto de reglas auditd" "directorio/archivo ausente o vacío" "$AUDIT_RULES" "$effect"; then
       mkdir -p "$AUDIT_RULES_DIR" || { WARNINGS=$((WARNINGS + 1)); return 1; }
@@ -591,6 +591,29 @@ restart_auditd() {
     echo -e "${YELLOW}[WARN] No se pudo iniciar auditd; revisar el servicio antes de continuar.${NC}"
     WARNINGS=$((WARNINGS+1))
   fi
+}
+
+# Comprueba que las reglas persistentes ya cubren las categorías requeridas.
+# Evita duplicar un ruleset válido del administrador solo porque el kernel
+# está inmutable o las reglas no se encuentran cargadas en esta sesión.
+persistent_audit_rules_ready() {
+  local key file found=false
+  local files=()
+  [ -d "$AUDIT_RULES_DIR" ] || return 1
+  for file in "$AUDIT_RULES_DIR"/*.rules; do
+    [ -f "$file" ] || continue
+    files+=("$file")
+  done
+  [ "${#files[@]}" -gt 0 ] || return 1
+  local required_keys=(time-change identity system-locale logins session perm_mod access mounts delete scope modules)
+  for key in "${required_keys[@]}"; do
+    found=false
+    for file in "${files[@]}"; do
+      if grep -qF -- "-k $key" "$file"; then found=true; break; fi
+    done
+    [ "$found" = true ] || return 1
+  done
+  return 0
 }
 
 audit_rules_ready() {
