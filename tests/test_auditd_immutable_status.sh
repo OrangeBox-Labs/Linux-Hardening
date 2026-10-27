@@ -55,7 +55,8 @@ export PATH
 # shellcheck source=../auditd-hardening.sh
 source "$AUDITD"
 # Force every test path to use the fake auditctl from PATH, never the host binary.
-get_auditctl_path() { printf '%s\n' "$TMP_DIR/bin/auditctl"; }
+auditctl() { bash "$TMP_DIR/bin/auditctl" "$@"; }
+get_auditctl_path() { printf 'auditctl\n'; }
 
 assert_state() {
   local state="$1" expected="$2" forbidden="$3" output=""
