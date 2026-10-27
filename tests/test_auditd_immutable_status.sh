@@ -16,7 +16,7 @@ set -eu
 case "${1:-}" in
   -l)
     if [ "${AUDITCTL_TEST_NO_RULES:-0}" = "1" ]; then
-      printf '%s\\n' 'No rules'
+      printf '%s\n' 'No rules'
       exit 0
     fi
     printf '%s\n' \
@@ -102,16 +102,16 @@ WARNINGS=0
 report_auditd_immutable_status auditctl >"$TMP_DIR/no-rules-output" 2>&1 ||
   fail "el reporte immutable sin reglas falló"
 output="$(cat "$TMP_DIR/no-rules-output")"
-printf '%s\\n' "$output" | grep -Fq "auditd está inmutable (enabled 2), pero faltan reglas requeridas en memoria" ||
+printf '%s\n' "$output" | grep -Fq "auditd está inmutable (enabled 2), pero faltan reglas requeridas en memoria" ||
   fail "enabled=2 con No rules debe generar una advertencia explícita"
 [ "$WARNINGS" -gt 0 ] || fail "enabled=2 con No rules debe incrementar advertencias"
 pass "enabled=2 con No rules no se reporta como configuración correcta"
 
 # --fix must stop before creating backups or editing persistent files in this state.
 backup_called="$TMP_DIR/backup-called"
-get_os_version() { printf '10\\n'; }
-get_auditctl_path() { printf 'auditctl\\n'; }
-get_auditd_enabled_state() { printf '2\\n'; }
+get_os_version() { printf '10\n'; }
+get_auditctl_path() { printf 'auditctl\n'; }
+get_auditd_enabled_state() { printf '2\n'; }
 audit_rules_ready() { return 1; }
 make_backup() { : > "$backup_called"; return 0; }
 show_summary() { :; }
