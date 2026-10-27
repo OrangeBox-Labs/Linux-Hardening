@@ -106,7 +106,13 @@ report_auditd_immutable_status() {
 
   case "$enabled_state" in
     2)
-      echo -e "${GREEN}[✓] Configuración de auditd inmutable - OK (enabled 2)${NC}"
+      if audit_rules_ready; then
+        echo -e "${GREEN}[✓] auditd inmutable (enabled 2) y reglas requeridas cargadas en memoria${NC}"
+        return 0
+      fi
+      echo -e "${YELLOW}[!] auditd está inmutable (enabled 2), pero faltan reglas requeridas en memoria. enabled 2 no demuestra que la auditoría esté configurada correctamente.${NC}"
+      echo -e "${YELLOW}[INFO] No intente cargar o borrar reglas en caliente: prepare y valide la configuración persistente y planifique una recuperación con reinicio controlado.${NC}"
+      WARNINGS=$((WARNINGS + 1))
       return 0
       ;;
     1)
@@ -593,8 +599,13 @@ configure_audit_immutable() {
   fi
 
   if [ "$enabled_state" = "2" ]; then
-    echo -e "${GREEN}[✓] auditd ya está en modo inmutable (enabled 2)${NC}"
-    return 0
+    if audit_rules_ready; then
+      echo -e "${GREEN}[✓] auditd ya está en modo inmutable y las reglas requeridas están cargadas${NC}"
+      return 0
+    fi
+    echo -e "${RED}[ERROR] auditd está inmutable, pero faltan reglas requeridas en memoria; no se puede corregir en caliente.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 1
   fi
   echo -e "${YELLOW}[!] auditd no está en modo inmutable (enabled ${enabled_state:-desconocido})${NC}"
   if ! audit_rules_ready; then
@@ -733,7 +744,7 @@ main() {
     exit 0
   fi
 
-  local os_major
+  local os_major auditctl="" enabled_state=""
   os_major="$(get_os_version)"
   if [[ "$os_major" =~ ^[0-9]+$ ]] && [ "$os_major" -lt 7 ]; then
     if [ "$1" = "--fix" ] || [ "$1" = "-f" ]; then
@@ -751,6 +762,17 @@ main() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
     ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
+
+    # Guard: an immutable kernel with no verified rules cannot be repaired live.
+    # Abort before backups or persistent edits so --fix does not imply success.
+    auditctl="$(get_auditctl_path)"
+    enabled_state="$(get_auditd_enabled_state "$auditctl" 2>/dev/null)" || enabled_state=""
+    if [ "$enabled_state" = "2" ] && ! audit_rules_ready; then
+      echo -e "${RED}[ERROR] auditd reporta enabled 2 pero no tiene las reglas requeridas cargadas. No se modificó la configuración; la inmutabilidad exige recuperar/validar reglas persistentes y planificar un reinicio controlado.${NC}" >&2
+      WARNINGS=$((WARNINGS + 1))
+      show_summary
+      return 3
+    fi
     if ! make_backup; then
       echo -e "${RED}[ERROR] Backup fallido; se aborta antes de modificar auditd.${NC}" >&2
       exit 1
