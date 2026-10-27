@@ -284,6 +284,45 @@ ssh_setting_description() {
     *) echo "Control de configuración SSH; revisar el valor efectivo antes de modificarlo." ;;
   esac
 }
+
+# These settings are optional because they can interrupt access or established workflows.
+# Safe baseline settings are proposed with their effect/risk and applied by --fix;
+# these sensitive settings are only applied after a per-directive explicit confirmation.
+ssh_setting_requires_confirmation() {
+  case "$1" in
+    hostbasedauthentication|permituserenvironment|permitrootlogin|x11forwarding|allowtcpforwarding|allowagentforwarding|maxauthtries|logingracetime|clientaliveinterval|clientalivecountmax)
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+confirm_ssh_optional_setting() {
+  local directive="$1" description="$2" answer=""
+  printf '\\n[OPCIONAL] SSH: %s\\n' "$directive"
+  printf 'Qué hace/riesgo: %s\\n' "$description"
+  case "$directive" in
+    "PermitRootLogin no")
+      printf '%s\\n' "Antes de aceptar: confirma otra cuenta administrativa funcional y sudo. Mantén esta sesión abierta y prueba una segunda conexión SSH."
+      ;;
+    "AllowTcpForwarding no"|"AllowAgentForwarding no"|"X11Forwarding no")
+      printf '%s\\n' "Puede romper túneles, bastiones, reenvío de agente o sesiones gráficas. Confirma que ningún flujo depende de ello."
+      ;;
+    "ClientAliveInterval 300"|"ClientAliveCountMax 2")
+      printf '%s\\n' "Puede cerrar sesiones inactivas o desconectadas tras los intervalos configurados; valida redes de alta latencia."
+      ;;
+  esac
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    printf '%s\\n' "[WARN] No hay terminal interactiva; se omite este parámetro opcional."
+    return 1
+  fi
+  IFS= read -r -p "¿Aplicar '$directive'? [s/N]: " answer </dev/tty || return 1
+  case "$answer" in
+    s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;;
+    *) printf '[INFO] Se omite %s; la configuración actual se conserva.\\n' "$directive"; return 1 ;;
+  esac
+}
+
 SSH_PENDING_DIRECTIVES=()
 
 # Return codes: 0 = compliant; 1 = settings differ; 2 = cannot verify safely.
@@ -430,6 +469,61 @@ ssh_restore_failed_change() {
       ;;
     *) return 1 ;;
   esac
+}
+
+ssh_apply_pending_settings_with_consent() {
+  local directive="" key="" description="" setting rest desired name rejected_directive found rc=0
+  local -a original_pending=() approved=() rejected=() original_expected=() filtered_expected=()
+  original_pending=("${SSH_PENDING_DIRECTIVES[@]}")
+
+  for directive in "${original_pending[@]}"; do
+    key="${directive%% *}"
+    key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    description="$(ssh_setting_description "$key")"
+    printf '\\n[CAMBIO PROPUESTO] SSH %s\\n' "$directive"
+    printf 'Qué hace/riesgo: %s\\n' "$description"
+    if ssh_setting_requires_confirmation "$key"; then
+      if confirm_ssh_optional_setting "$directive" "$description"; then
+        approved+=("$directive")
+      else
+        rejected+=("$directive")
+      fi
+    else
+      printf '[INFO] Control base: se aplicará con --fix tras validar sintaxis/valores efectivos.\\n'
+      approved+=("$directive")
+    fi
+  done
+
+  if [ "${#approved[@]}" -eq 0 ]; then
+    SSH_PENDING_DIRECTIVES=("${original_pending[@]}")
+    info "No se aprobó ningún parámetro SSH opcional; no se modifica SSH."
+    ssh_state_status apply || true
+    return 0
+  fi
+
+  original_expected=("${SSH_EXPECTED_SETTINGS[@]}")
+  for setting in "${original_expected[@]}"; do
+    key="${setting%%|*}"
+    rest="${setting#*|}"
+    desired="${rest%%|*}"
+    name="${rest#*|}"
+    directive="$name $desired"
+    found=false
+    for rejected_directive in "${rejected[@]}"; do
+      [ "$directive" = "$rejected_directive" ] && found=true && break
+    done
+    [ "$found" = true ] || filtered_expected+=("$setting")
+  done
+
+  SSH_PENDING_DIRECTIVES=("${approved[@]}")
+  SSH_EXPECTED_SETTINGS=("${filtered_expected[@]}")
+  if ssh_apply_pending_settings; then rc=0; else rc=$?; fi
+  SSH_EXPECTED_SETTINGS=("${original_expected[@]}")
+
+  # Show any optional settings the operator declined as still pending, but never
+  # include them in the generated SSH block or roll back approved safe settings.
+  ssh_state_status apply || true
+  return "$rc"
 }
 
 ssh_apply_pending_settings() {
@@ -595,7 +689,7 @@ ssh_module() {
   if $AUTO_FIX; then
     case "$ssh_status" in
       0) ok "Los controles SSH ya cumplen los objetivos efectivos; no se modifica la configuración" ;;
-      1) ssh_apply_pending_settings ;;
+      1) ssh_apply_pending_settings_with_consent ;;
       2)
         reason="$(ssh_module_apply_block_reason || true)"
         warn "No se modificó SSH porque no se pudo verificar la configuración efectiva: ${reason:-motivo no identificado}"
@@ -1917,7 +2011,7 @@ internal_module_requires_risk() {
 
 risk_description() {
   case "$1" in
-    ssh) echo "aplica controles SSH pendientes, incluyendo PermitRootLogin=no, X11Forwarding=no y desactivación de TCP/agent forwarding. Puede impedir el acceso directo como root, cortar túneles o GUI remotas; confirma una cuenta admin/sudo funcional, conserva esta sesión abierta y prueba una segunda conexión." ;;
+    ssh) echo "aplica los controles SSH base con validación/rollback; PermitRootLogin, forwarding, variables de entorno, límites de autenticación y timeouts se muestran como opcionales y requieren confirmación individual por su posible impacto. Mantén esta sesión abierta y prueba una segunda conexión." ;;
     bash-full) echo "configura perfiles, timeout de shells, historial y logging de comandos; TMOUT puede cerrar shells inactivas y el logging puede registrar argumentos sensibles. Puede afectar scripts/automatizaciones." ;;
     cpu-full) echo "comprueba mitigaciones de CPU y parámetros de memoria; algunos ajustes pueden afectar depuración o aplicaciones antiguas." ;;
     auditd-full) echo "configura reglas y límites de auditd; puede incrementar el uso de disco/logs y las reglas inmutables pueden requerir reinicio para cambiarlas." ;;
@@ -1985,19 +2079,15 @@ run_internal_module_with_confirmation() {
   if [ "$AUTO_FIX" = true ] && internal_module_requires_risk "$name"; then
     case "$name" in
       ssh)
-        # Show every SSH control and its impact before asking for authorization.
+        # SSH owns parameter-level consent: low-risk baseline controls are proposed
+        # with an explanation and applied automatically; risky options prompt separately.
         ssh_state_status audit
         ssh_state_status preflight
         ssh_status=$?
         if [ "$ssh_status" -eq 0 ]; then
-          info "Los controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes."
+          info "Los controles SSH ya cumplen los objetivos efectivos; se omite cualquier confirmación."
         elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then
-          if ! confirm_risky_change "$name"; then
-            AUTO_FIX=false
-            run_module "$name"
-            AUTO_FIX="$previous_fix"
-            return 0
-          fi
+          info "SSH se aplicará con validación y rollback; cada parámetro sensible tendrá una confirmación individual."
         else
           reason="$(ssh_module_apply_block_reason || true)"
           if [ "$ssh_status" -eq 1 ]; then
@@ -2125,7 +2215,7 @@ run_companion_module() {
     gui-remove) script="remove-gui-hardening.sh"; risky=true; audit_arg="--check" ;;
     xinetd-remove) script="remove-xinetd.sh"; risky=true ;;
     rsyslog-full) script="rsyslog-hardening.sh"; risky=true ;;
-    selinux-setup) script="selinux-secure-setup.sh"; fix_arg="--fix"; risky=false ;;
+    selinux-setup) script="selinux-secure-setup.sh"; audit_only=true; fix_arg=""; risky=false ;;
     ssh-cis) script="ssh-hardening.sh"; risky=true ;;
     ssh-complete) script="ssh-hardening-complete.sh"; risky=true ;;
     sudo-full) script="sudo-hardening.sh"; risky=true ;;
