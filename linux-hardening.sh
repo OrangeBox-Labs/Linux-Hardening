@@ -303,17 +303,17 @@ confirm_ssh_optional_setting() {
   printf 'Qué hace/riesgo: %s\n' "$description"
   case "$directive" in
     "PermitRootLogin no")
-      printf '%s\\n' "Antes de aceptar: confirma otra cuenta administrativa funcional y sudo. Mantén esta sesión abierta y prueba una segunda conexión SSH."
+      printf '%s\n' "Antes de aceptar: confirma otra cuenta administrativa funcional y sudo. Mantén esta sesión abierta y prueba una segunda conexión SSH."
       ;;
     "AllowTcpForwarding no"|"AllowAgentForwarding no"|"X11Forwarding no")
-      printf '%s\\n' "Puede romper túneles, bastiones, reenvío de agente o sesiones gráficas. Confirma que ningún flujo depende de ello."
+      printf '%s\n' "Puede romper túneles, bastiones, reenvío de agente o sesiones gráficas. Confirma que ningún flujo depende de ello."
       ;;
     "ClientAliveInterval 300"|"ClientAliveCountMax 2")
-      printf '%s\\n' "Puede cerrar sesiones inactivas o desconectadas tras los intervalos configurados; valida redes de alta latencia."
+      printf '%s\n' "Puede cerrar sesiones inactivas o desconectadas tras los intervalos configurados; valida redes de alta latencia."
       ;;
   esac
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-    printf '%s\\n' "[WARN] No hay terminal interactiva; se omite este parámetro opcional."
+    printf '%s\n' "[WARN] No hay terminal interactiva; se omite este parámetro opcional."
     return 1
   fi
   IFS= read -r -p "¿Aplicar '$directive'? [s/N]: " answer </dev/tty || return 1
@@ -2023,7 +2023,7 @@ risk_description() {
     sudo-full) echo "endurece sudo; use_pty requiere confirmación específica y puede afectar automatizaciones sin terminal, mientras que cambios de timeout modifican la duración de credenciales cacheadas." ;;
     grub-full) echo "modifica parámetros de arranque y regenera grub.cfg; un error puede impedir arrancar y varios cambios requieren reinicio. Garantiza consola de recuperación/backup antes de aceptar." ;;
     usb-storage) echo "bloquea módulos de almacenamiento USB; puede afectar discos USB, medios de recuperación y backups conectados por USB." ;;
-    selinux-setup) echo "solo cambia SELinux a Enforcing y/o persiste ese modo tras una confirmación específica; aplicaciones sin políticas/contextos adecuados pueden quedar bloqueadas. No habilita SELinux si está Disabled." ;;
+    selinux-setup) echo "solo audita el modo runtime y la configuración persistente de SELinux; nunca modifica el estado, políticas, contextos ni provoca reinicios." ;;
     time-sync) echo "puede modificar ntpd/chronyd o ajustar el reloj; puede afectar Kerberos/Samba AD, certificados y correlación de logs. El baseline general lo audita, pero no cambia NTP automáticamente." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "audita y propone deshabilitar forwarding IPv4/IPv6 solo con confirmación individual. Puede interrumpir routing, NAT, VPN y redes de contenedores; si se conserva IPv4 forwarding, usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
