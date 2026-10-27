@@ -107,22 +107,34 @@ printf '%s\n' "$output" | grep -Fq "auditd está inmutable (enabled 2), pero fal
 [ "$WARNINGS" -gt 0 ] || fail "enabled=2 con No rules debe incrementar advertencias"
 pass "enabled=2 con No rules no se reporta como configuración correcta"
 
-# --fix must stop before creating backups or editing persistent files in this state.
+# enabled=2 + reglas ausentes debe activar la ruta de recuperación planificada.
+# Se sustituyen las funciones de sistema para que la prueba no toque /etc ni servicios.
 backup_called="$TMP_DIR/backup-called"
 get_os_version() { printf '10\n'; }
 get_auditctl_path() { printf 'auditctl\n'; }
 get_auditd_enabled_state() { printf '2\n'; }
 audit_rules_ready() { return 1; }
 make_backup() { : > "$backup_called"; return 0; }
+check_auditd_installed() { :; }
+check_auditd_enabled() { :; }
+check_log_storage() { :; }
+check_log_retention() { :; }
+check_full_action() { :; }
+add_audit_rules() { :; }
+restart_auditd() { :; }
+configure_audit_immutable() { :; }
 show_summary() { :; }
+AUDITD_REBOOT_REQUIRED=false
 set +e
 main --fix >"$TMP_DIR/fix-output" 2>&1
 fix_rc=$?
 set -e
-[ "$fix_rc" -eq 3 ] || fail "--fix debería abortar con código 3 si enabled=2 y faltan reglas"
-[ ! -e "$backup_called" ] || fail "--fix no debió continuar hasta el backup en un estado irreparable en caliente"
-grep -Fq "No se modificó la configuración" "$TMP_DIR/fix-output" ||
-  fail "--fix debe informar que no modificó la configuración"
-pass "--fix se detiene sin modificar archivos si auditd es inmutable y no hay reglas"
+[ "$fix_rc" -eq 3 ] || fail "--fix debe devolver código 3 si queda pendiente el reinicio controlado"
+[ -e "$backup_called" ] || fail "--fix debe respaldar antes de preparar la recuperación"
+grep -Fq "preparará la configuración persistente para el siguiente arranque" "$TMP_DIR/fix-output" ||
+  fail "--fix debe explicar que prepara reglas persistentes para el siguiente arranque"
+grep -Fq "No se ejecutó reboot automáticamente" "$TMP_DIR/fix-output" ||
+  fail "--fix no debe reiniciar el host automáticamente"
+pass "--fix respalda y prepara la recuperación cuando enabled=2 y faltan reglas"
 
 pass "la interpretación de enabled se prueba con auditctl simulado y sin cambios en el sistema"
