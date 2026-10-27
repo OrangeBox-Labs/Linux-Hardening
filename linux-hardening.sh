@@ -192,6 +192,14 @@ set_sysctl(){
     return 0
   fi
   file="$(orangebox_sysctl_persistence_target)"
+  if [ "$key" = "kernel.unprivileged_bpf_disabled" ]; then
+    if sysctl_safe_apply_bpf_policy "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
+      [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
+    else
+      WARNINGS=$((WARNINGS+1))
+    fi
+    return 0
+  fi
   if sysctl_safe_apply "$key" "$value" "$(sysctl_safe_description "$key")" "$file" "$BACKUP_DIR" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED+1))
   else
