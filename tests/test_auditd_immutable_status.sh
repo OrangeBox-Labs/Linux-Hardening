@@ -55,7 +55,7 @@ export PATH
 # shellcheck source=../auditd-hardening.sh
 source "$AUDITD"
 # Force every test path to use the fake auditctl from PATH, never the host binary.
-get_auditctl_path() { command -v auditctl; }
+get_auditctl_path() { printf '%s\n' "$TMP_DIR/bin/auditctl"; }
 
 assert_state() {
   local state="$1" expected="$2" forbidden="$3" output=""
@@ -113,7 +113,7 @@ pass "enabled=2 con No rules no se reporta como configuración correcta"
 # Se sustituyen las funciones de sistema para que la prueba no toque /etc ni servicios.
 backup_called="$TMP_DIR/backup-called"
 get_os_version() { printf '10\n'; }
-get_auditctl_path() { printf 'auditctl\n'; }
+get_auditctl_path() { printf '%s\n' "$TMP_DIR/bin/auditctl"; }
 get_auditd_enabled_state() { printf '2\n'; }
 audit_rules_ready() { return 1; }
 make_backup() { : > "$backup_called"; return 0; }
@@ -143,7 +143,7 @@ pass "--fix respalda y prepara la recuperación cuando enabled=2 y faltan reglas
 # El source no ejecuta main(); PATH conserva el auditctl simulado.
 source "$AUDITD"
 # El segundo source restaura la función productiva; reimponer el stub para no consultar el auditctl real.
-get_auditctl_path() { command -v auditctl; }
+get_auditctl_path() { printf '%s\n' "$TMP_DIR/bin/auditctl"; }
 
 # Prueba real de staging con rutas aisladas: no modifica /etc/audit ni carga reglas al kernel.
 AUTO_FIX=true
