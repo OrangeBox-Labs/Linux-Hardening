@@ -101,8 +101,8 @@ grep -Fq 'FIX_REQUESTED=true' "$SELINUX" || fail "SELinux --fix must remain a co
 grep -Fq 'OrangeBox SELinux - auditoría estrictamente de solo lectura' "$SELINUX" || fail "SELinux is not declared audit-only"
 ! grep -Eq '^[[:space:]]*setenforce[[:space:]]' "$SELINUX" || fail "SELinux module must not change runtime state"
 ! grep -Eq '^[[:space:]]*(mv|sed[[:space:]]+-i|cp)[[:space:]].*/etc/selinux/config' "$SELINUX" || fail "SELinux module must not modify persistent config"
-grep -Fq 'Disabled);' "$SELINUX" || fail "SELinux Disabled state is not reported"
-grep -Fq 'OrangeBox no cambia el estado' "$SELINUX" || fail "SELinux warning must state that it will not change mode"
+grep -Fq '      Disabled)' "$SELINUX" || fail "SELinux Disabled state is not reported"
+grep -Fq 'OrangeBox no lo cambiará' "$SELINUX" || fail "SELinux warning must state that it will not change mode"
 pass "SELinux remains check-and-warning only, including explicit --fix calls"
 
 # Kernel LPE mitigation must not overstate the user-namespace control or infer patch state from changelog text.
