@@ -241,7 +241,9 @@ printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP externa:" "$OB_RESET" "$OB_EXTERNAL_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP interna:" "$OB_RESET" "$OB_SERVER_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "IP del cliente:" "$OB_RESET" "$OB_CLIENT_IP"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Uptime:" "$OB_RESET" "$OB_UPTIME"
-printf '  %s%-15s%s %s | RAM usada: %s | Swap usada: %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD" "$OB_RAM_USAGE" "$OB_SWAP_USAGE"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Load:" "$OB_RESET" "$OB_LOAD"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "RAM usada:" "$OB_RESET" "$OB_RAM_USAGE"
+printf '  %s%-15s%s %s\n' "$OB_CYAN" "Swap usada:" "$OB_RESET" "$OB_SWAP_USAGE"
 printf '  %s%-15s%s %s\n' "$OB_CYAN" "Usuario:" "$OB_RESET" "$OB_USERNAME"
 printf '\n'
 ORANGEBOX_SESSION_MOTD
