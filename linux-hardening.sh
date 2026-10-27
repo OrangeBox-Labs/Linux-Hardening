@@ -36,6 +36,7 @@ WARNINGS=0
 ERRORS=0
 COMPANION_MODULES_RUN=0
 COMPANION_MODULES_FAILED=0
+COMPANION_MODULES_REBOOT_REQUIRED=0
 PENDING_ONLY_AUDIT=false
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 section(){ echo -e "\n$BLUE============================================================$NC"; echo -e "$BLUE [MÓDULO] $1 $NC"; echo -e "$BLUE============================================================$NC"; }
@@ -2303,6 +2304,10 @@ run_companion_module() {
     child_rc=$?
     COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
     COMPANION_MODULES_FAILED=$((COMPANION_MODULES_FAILED + 1))
+    if [ "$child_rc" -eq 3 ]; then
+      COMPANION_MODULES_REBOOT_REQUIRED=1
+      echo "[ACTION REQUIRED] El módulo $name necesita una acción de mantenimiento/reinicio controlado."
+    fi
     echo "[WARN] Módulo $name finalizó con código $child_rc; revisar su salida."
   fi
 }
@@ -2427,6 +2432,10 @@ main() {
     if [ "$AUTO_FIX" = true ]; then echo "Backup: $BACKUP_DIR"; else echo "Backup: no creado (modo auditoría)"; fi
   fi
   echo -e "$GREEN============================================================$NC"
+  # Preserve the special pending-maintenance status from companion modules.
+  # In particular, auditd recovery must not look successful after its code 3
+  # has been absorbed by the orchestrator.
+  if [ "$COMPANION_MODULES_REBOOT_REQUIRED" -eq 1 ]; then return 3; fi
 }
 
 # Dispatch the CLI when executed directly; do not start an audit if sourced.
