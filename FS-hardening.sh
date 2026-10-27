@@ -328,7 +328,13 @@ check_mount_options() {
         case "$opt" in
           nodev) effect="impide interpretar nodos de dispositivo en este montaje; puede afectar herramientas que dependan de dispositivos especiales." ;;
           nosuid) effect="ignora bits SUID/SGID en este montaje; normalmente reduce riesgo, pero programas que dependan de esos bits dejarán de elevar privilegios." ;;
-          noexec) effect="impide ejecutar directamente binarios desde este montaje; puede romper instaladores, scripts de aplicaciones, agentes o herramientas que ejecuten desde $mount_point." ;;
+          noexec)
+            effect="impide ejecutar directamente binarios desde este montaje; puede romper instaladores, scripts de aplicaciones, agentes o herramientas que ejecuten desde $mount_point."
+            if [ "$mount_point" = "/var" ] &&
+               { [ ! -e /var/ossec ] || [ "$(findmnt -rn -T /var/ossec -o TARGET 2>/dev/null || true)" != "/var/ossec" ]; }; then
+              effect="$effect IMPORTANTE: /var/ossec no es un montaje independiente de /var. Si el agente Wazuh se instala en /var/ossec, heredará noexec y sus binarios no podrán ejecutarse. No apruebes noexec para /var hasta montar /var/ossec por separado sin noexec o decidir excluir esta opción."
+            fi
+            ;;
           *) effect="restringe una capacidad del montaje; valida las aplicaciones que usen $mount_point." ;;
         esac
         echo -e "${YELLOW}[WARN] $mount_point necesita opción $opt.${NC}"
