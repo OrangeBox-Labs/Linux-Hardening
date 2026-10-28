@@ -567,7 +567,13 @@ EOF
       WARNINGS=$((WARNINGS+1))
     fi
   elif [ -s "$AUDIT_RULES" ]; then
-    echo -e "${GREEN}[✓] Archivo de reglas existente conservado: $AUDIT_RULES${NC}"
+    if [ "$AUTO_FIX" != true ] && orangebox_rules_need_repair; then
+      echo -e "${YELLOW}[!] El baseline OrangeBox requiere reparación: contiene una syscall obsoleta o watches sobre rutas inexistentes.${NC}"
+      echo -e "${YELLOW}[INFO] En modo verificación no se modifica el archivo. Revise el backup y ejecute --fix solo después de validar el plan de cambios.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    else
+      echo -e "${GREEN}[✓] Archivo de reglas existente conservado: $AUDIT_RULES${NC}"
+    fi
   fi
 
   echo -e "\n${BLUE}[*] Verificando reglas cargadas en memoria... ${NC}"
