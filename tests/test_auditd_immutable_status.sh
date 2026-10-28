@@ -256,7 +256,7 @@ if add_audit_rules >"$TMP_DIR/write-failure-output" 2>&1; then
   fail "add_audit_rules debe fallar si falla la escritura del staging"
 fi
 unset -f cat
-cmp -s "$AUDIT_RULES" "$TMP_DIR/baseline-before-write-failure" ||
+[ "$(cat "$AUDIT_RULES")" = "$(cat "$TMP_DIR/baseline-before-write-failure")" ] ||
   fail "un fallo de escritura no debe modificar el baseline anterior"
 grep -Fq 'No se pudo escribir el staging de reglas' "$TMP_DIR/write-failure-output" ||
   fail "el fallo de escritura debe generar un diagnóstico explícito"
@@ -269,7 +269,7 @@ validate_staged_audit_rules() { echo "[TEST] fallo de validación simulado" >&2;
 if add_audit_rules >"$TMP_DIR/validation-failure-output" 2>&1; then
   fail "add_audit_rules debe fallar si falla la validación del staging"
 fi
-cmp -s "$AUDIT_RULES" "$TMP_DIR/baseline-before-validation-failure" ||
+[ "$(cat "$AUDIT_RULES")" = "$(cat "$TMP_DIR/baseline-before-validation-failure")" ] ||
   fail "un fallo de validación no debe reemplazar el baseline anterior"
 eval "$validator_definition"
 grep -Fq 'validación estática del baseline falló' "$TMP_DIR/validation-failure-output" ||
