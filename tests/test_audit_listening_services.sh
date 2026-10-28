@@ -77,11 +77,7 @@ udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd
 OUT
 MOCK
 chmod +x "$mockbin/ss" "$mockbin/netstat"
-fallback_output="$(
-  export PATH="$mockbin:$PATH"
-  hash -r
-  audit_listening_ports
-)" || fail "empty ss did not recover netstat"
+fallback_output="$(PATH="$mockbin:$PATH" bash -c 'source "$1"; audit_listening_ports' _ "$ROOT_DIR/audit-listening-services.sh")" || fail "empty ss did not recover netstat"
 printf '%s\n' "$fallback_output" | grep -Fq 'Fuente: netstat (compatibilidad legacy)' || fail "netstat source not reported"
 printf '%s\n' "$fallback_output" | grep -Fq 'Sockets procesados: 2' || fail "netstat fallback did not process both sockets"
 pass "fallback to netstat when ss exists but returns empty output"
