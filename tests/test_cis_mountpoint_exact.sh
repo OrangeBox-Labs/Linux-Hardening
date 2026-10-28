@@ -19,14 +19,14 @@ sed -n \
 mkdir -p "$TMP_DIR/bin"
 cat > "$TMP_DIR/bin/findmnt" <<'FAKE_FINDMNT'
 #!/usr/bin/env bash
-case "$*" in
-  *"TARGET,OPTIONS"*)
+case "${3:-}" in
+  TARGET,OPTIONS)
     printf '%s\n' \
       '/ rw,relatime' \
       '/dev/shm rw,nosuid,nodev,noexec' \
       '/home rw,nosuid,nodev'
     ;;
-  *"TARGET"*)
+  TARGET)
     printf '%s\n' '/' '/dev/shm' '/home'
     ;;
   *)
