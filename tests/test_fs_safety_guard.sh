@@ -15,6 +15,8 @@ grep -Fq 'mount -o remount "$mount_point"' "$FS" || fail "el remount debe leer l
 ! grep -Fq 'mount -o remount,"$new_opts"' "$FS" || fail "no debe aplicar opciones manuales al remount"
 grep -Fq 'if [ "$mount_point" = "/dev/shm" ] && [ -n "$spec" ]; then' "$FS" || fail "/dev/shm debe usar persistencia canónica especial"
 grep -Fq 'echo "[✓] /etc/fstab normalizado para /dev/shm: $spec"' "$FS" || fail "debe confirmar la normalización de /dev/shm"
+grep -Fq 'old_opts="$(awk -v mp="$mount_point"' "$FS" || fail "/dev/shm debe preservar opciones existentes de FSTAB"
+grep -Fq 'merged_opts="$old_opts"' "$FS" || fail "/dev/shm debe fusionar opciones previas en vez de reemplazarlas por defaults"
 helper="$(sed -n '/^apply_mount_options_from_fstab()/,/^}/p' "$FS")"
 persist_line="$(printf '%s\n' "$helper" | grep -nF 'persist_mount_options "$mount_point"' | head -1 | cut -d: -f1)"
 reload_line="$(printf '%s\n' "$helper" | grep -nF 'systemctl daemon-reload' | head -1 | cut -d: -f1)"
