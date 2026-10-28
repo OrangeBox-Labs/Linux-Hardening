@@ -36,8 +36,8 @@ export MOCK_ENABLED=1 MOCK_ACTIVE=1
 # make command discovery depend on the invocation context.
 export PATH="$mockbin:$PATH"
 hash -r
-command -v chkconfig | grep -F "$mockbin/chkconfig" >/dev/null || fail "no se está usando el mock chkconfig"
-command -v service | grep -F "$mockbin/service" >/dev/null || fail "no se está usando el mock service"
+[ "$(type -P chkconfig)" = "$mockbin/chkconfig" ] || { printf "[DEBUG] chkconfig resuelto: %s; PATH=%s\n" "$(type -P chkconfig)" "$PATH" >&2; fail "no se está usando el mock chkconfig"; }
+[ "$(type -P service)" = "$mockbin/service" ] || { printf "[DEBUG] service resuelto: %s; PATH=%s\n" "$(type -P service)" "$PATH" >&2; fail "no se está usando el mock service"; }
 
 ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
 ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
