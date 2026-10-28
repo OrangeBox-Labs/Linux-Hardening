@@ -2047,7 +2047,7 @@ risk_description() {
     time-sync) echo "puede modificar ntpd/chronyd o ajustar el reloj; puede afectar Kerberos/Samba AD, certificados y correlación de logs. El baseline general lo audita, pero no cambia NTP automáticamente." ;;
     sudo) echo "revisa controles de sudo; use_pty solo se considera en servidores sin cPanel y requiere una confirmación específica." ;;
     kernel) echo "audita y propone deshabilitar forwarding IPv4/IPv6 solo con confirmación individual. Puede interrumpir routing, NAT, VPN y redes de contenedores; si se conserva IPv4 forwarding, usa rp_filter=2 (loose) para reducir el riesgo de descartar tráfico asimétrico." ;;
-    synflood) echo "comprueba SYN cookies y backlog TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
+    synflood) echo "comprueba SYN cookies, colas TCP y reintentos TCP; solo propone cambios si falta algún valor activo o persistente. No cambia net.ipv4.ip_forward." ;;
     rsyslog|rsyslog-full) echo "Configura persistencia de journald y valida el logging. Riesgo: mayor uso de disco; revisa los límites de retención." ;;
     logrotate-full) echo "Activa compresión y limita la rotación a 5 archivos. Riesgo: cambia retención de logs en el sistema." ;;
     network-full) echo "Ajusta sysctl de red y bloquea módulos de kernel no usados; puede afectar VPN, routing y protocolos especializados." ;;
@@ -2126,11 +2126,11 @@ run_internal_module_with_confirmation() {
         info "Se comprobarán los parámetros del kernel uno por uno; --fix aplica automáticamente solo los que falten o difieran."
         ;;
       synflood)
-        # The same rule applies to SYN cookies/backlog: ask per setting only.
+        # The same rule applies to SYN cookies, TCP backlogs and TCP retries: reconcile each setting independently.
         if synflood_state_compliant; then
-          info "SYN cookies/backlog ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
+          info "Los cinco controles SYN/TCP ya cumplen los objetivos activos y persistentes; no hay cambios pendientes."
         else
-          info "SYN cookies/backlog: se revisa cada parámetro; --fix aplica automáticamente solo los que falten o difieran."
+          info "SYN/TCP: se revisa cada parámetro; --fix aplica automáticamente solo los que falten o difieran."
         fi
         ;;
       rsyslog)
