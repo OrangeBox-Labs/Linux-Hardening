@@ -219,13 +219,13 @@ set_kptr_restrict_policy(){
 }
 
 SYNFLOOD_FILE=/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf
-SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn"
-SYNFLOOD_VALUES=(1 4096 4096)
+SYNFLOOD_KEYS="net.ipv4.tcp_syncookies net.ipv4.tcp_max_syn_backlog net.core.somaxconn net.ipv4.tcp_synack_retries net.ipv4.tcp_syn_retries"
+SYNFLOOD_VALUES=(1 4096 4096 2 2)
 synflood_select_persistence_target() {
   SYNFLOOD_FILE="$(orangebox_sysctl_persistence_target)"
 }
 synflood_module(){
-  section "SYN FLOOD / TCP BACKLOG"
+  section "SYN FLOOD / TCP BACKLOG / TCP RETRIES"
   synflood_select_persistence_target
   if [ "$SYNFLOOD_FILE" = /etc/sysctl.conf ]; then
     info "CentOS/RHEL 6: se usa /etc/sysctl.conf; no se crea /etc/sysctl.d."
@@ -236,7 +236,7 @@ synflood_module(){
     set_sysctl "$key" "$desired"
     idx=$((idx+1))
   done
-  info "Los valores externos de sysctl se conservan. Los valores distintos solo se imponen con confirmación individual."
+  info "Se auditan y gestionan SYN cookies, colas TCP y reintentos TCP con los valores del baseline. --fix conserva preflight y backup; los valores activos/persistentes distintos se reconcilian según la política del helper."
 }
 
 synflood_state_compliant() {
