@@ -35,8 +35,9 @@ export MOCK_ENABLED=1 MOCK_ACTIVE=1
 # individual shell-function calls can behave differently across shells and
 # make command discovery depend on the invocation context.
 export PATH="$mockbin:$PATH"
-command -v chkconfig >/dev/null || fail "no se está usando el mock chkconfig"
-command -v service >/dev/null || fail "no se está usando el mock service"
+hash -r
+command -v chkconfig | grep -F "$mockbin/chkconfig" >/dev/null || fail "no se está usando el mock chkconfig"
+command -v service | grep -F "$mockbin/service" >/dev/null || fail "no se está usando el mock service"
 
 ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
 ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
