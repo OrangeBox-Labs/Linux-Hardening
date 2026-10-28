@@ -5,8 +5,8 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 # shellcheck source=../audit-listening-services.sh
 source "$ROOT_DIR/audit-listening-services.sh"
 
-fail() { printf '[FAIL] %s\\n' "$*" >&2; exit 1; }
-pass() { printf '[PASS] %s\\n' "$*"; }
+fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
+pass() { printf '[PASS] %s\n' "$*"; }
 
 assert_socket() {
   local fixture="$1" ep="$2" eport="$3" eaddr="$4" eproc="$5" eclass="$6" escope="$7"
@@ -77,7 +77,11 @@ udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd
 OUT
 MOCK
 chmod +x "$mockbin/ss" "$mockbin/netstat"
-fallback_output="$(\n  export PATH="$mockbin:$PATH"\n  hash -r\n  audit_listening_ports\n)" || fail "empty ss did not recover netstat"
+fallback_output="$(
+  export PATH="$mockbin:$PATH"
+  hash -r
+  audit_listening_ports
+)" || fail "empty ss did not recover netstat"
 printf '%s\n' "$fallback_output" | grep -Fq 'Fuente: netstat (compatibilidad legacy)' || fail "netstat source not reported"
 printf '%s\n' "$fallback_output" | grep -Fq 'Sockets procesados: 2' || fail "netstat fallback did not process both sockets"
 pass "fallback to netstat when ss exists but returns empty output"
