@@ -465,18 +465,24 @@ validate_staged_audit_rules() {
   fi
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+)[[:space:]]+-p[[:space:]]+([rwxa]+)[[:space:]]+-k[[:space:]]+([[:alnum:]_.-]+)[[:space:]]*$ ]]; then
+    if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+) ]]; then
       path="${BASH_REMATCH[1]}"
+      [[ "$line" == *" -p "* && "$line" == *" -k "* ]] || {
+        echo "[ERROR] Watch incompleto en staging: $line" >&2
+        return 1
+      }
       [ -e "$path" ] || {
         echo "[ERROR] Watch sobre ruta inexistente en staging: $path" >&2
         return 1
       }
       continue
     fi
-    if [[ "$line" =~ ^[[:space:]]*-a[[:space:]]+always,exit[[:space:]] ]] &&
-       [[ "$line" =~ -F[[:space:]]+arch=(b32|b64)([[:space:]]|$) ]] &&
-       [[ "$line" =~ -S[[:space:]]+[[:alnum:]_]+ ]] &&
-       [[ "$line" =~ -k[[:space:]]+[[:alnum:]_.-]+([[:space:]]|$) ]]; then
+    if [[ "$line" =~ ^[[:space:]]*-a[[:space:]]+always,exit([[:space:]]|$) ]]; then
+      [[ "$line" == *"arch=b32"* || "$line" == *"arch=b64"* ]] &&
+        [[ "$line" == *" -S "* && "$line" == *" -k "* ]] || {
+          echo "[ERROR] Regla syscall incompleta o sin arquitectura en staging: $line" >&2
+          return 1
+        }
       continue
     fi
     echo "[ERROR] Directiva o formato no reconocido en staging: $line" >&2
