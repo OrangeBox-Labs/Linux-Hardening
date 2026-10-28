@@ -3,9 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CIS="$ROOT_DIR/cis-benchmark-check.sh"
-TEST_TMP_BASE="${HOME:-/root}/.cache/linux-hardening-tests"
-mkdir -p "$TEST_TMP_BASE"
-TMP_DIR="$(mktemp -d "$TEST_TMP_BASE/mountpoint.XXXXXX")"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.test-mountpoint-exact.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
