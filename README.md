@@ -118,7 +118,7 @@ net.ipv4.tcp_max_syn_backlog
 net.core.somaxconn
 ```
 
-El baseline no modifica automáticamente `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`, porque esos parámetros dependen de latencia, pérdida, aplicaciones y política operacional.
+El baseline aplica `net.ipv4.tcp_synack_retries=2` y `net.ipv4.tcp_syn_retries=2` junto con `tcp_syncookies=1`, `tcp_max_syn_backlog=4096` y `somaxconn=4096` en todas las distribuciones compatibles que expongan esos sysctls. Los reintentos más bajos pueden hacer que conexiones con pérdida de paquetes o alta latencia fallen antes; valida el comportamiento de la carga tras aplicar el cambio.
 
 El hardening también audita `net.ipv6.conf.{all,default}.accept_redirects`. Ignorar redirects ICMPv6 reduce cambios de ruta inducidos por terceros, pero puede afectar redes que dependan de ellos. `--fix` aplica automáticamente las propuestas; si el kernel no expone IPv6, se informa N/A.
 
