@@ -6,6 +6,8 @@ CORE="$ROOT_DIR/linux-hardening.sh"
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 grep -Fq 'confirm_aide_change()' "$AIDE" || fail "AIDE no tiene consentimiento por acción"
+! grep -Fq '[ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]' "$AIDE" || fail "AIDE permite que --fix global omita el consentimiento explícito"
+! grep -Fq 'AUTO_FIX=true; ORANGEBOX_ASSUME_YES=1' "$AIDE" || fail "el --fix del módulo AIDE activa autorización automática"
 grep -Fq 'confirm_aide_change "inicializar base de datos AIDE"' "$AIDE" || fail "aide --init no requiere consentimiento"
 grep -Fq 'confirm_aide_change "programar comprobación diaria de AIDE"' "$AIDE" || fail "el crontab no requiere consentimiento"
 grep -Fq 'root.crontab.before' "$AIDE" || fail "no se respalda el crontab root antes de modificarlo"
