@@ -38,7 +38,7 @@ chmod +x "$TMP_DIR/bin/findmnt"
 PATH="$TMP_DIR/bin:$PATH"
 export PATH
 hash -r
-command -v findmnt | grep -F "$TMP_DIR/bin/findmnt" >/dev/null || fail "no se está usando el mock findmnt"
+[ "$(type -P findmnt)" = "$TMP_DIR/bin/findmnt" ] || { printf "[DEBUG] findmnt resuelto: %s; PATH=%s\n" "$(type -P findmnt)" "$PATH" >&2; fail "no se está usando el mock findmnt"; }
 # shellcheck source=/dev/null
 source "$TMP_DIR/mount-helpers.sh"
 
