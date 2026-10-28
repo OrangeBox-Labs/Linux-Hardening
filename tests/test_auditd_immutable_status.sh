@@ -284,7 +284,7 @@ pass "la interpretación de enabled se prueba con auditctl simulado y sin cambio
 # Si add_audit_rules falla, main debe detenerse antes de recargar auditd o tocar inmutabilidad.
 main_test_dir="$TMP_DIR/main-preparation-failure"
 mkdir -p "$main_test_dir"
-get_os_version() { printf '10\\n'; }
+get_os_version() { echo 10; }
 get_auditctl_path() { echo "$TMP_DIR/bin/auditctl"; }
 get_auditd_enabled_state() { echo 1; }
 make_backup() { :; }
