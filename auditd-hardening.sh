@@ -465,7 +465,7 @@ validate_staged_audit_rules() {
   fi
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+)[[:space:]]+-p[[:space:]]+([rwa]+)[[:space:]]+-k[[:space:]]+([[:alnum:]_.-]+)[[:space:]]*$ ]]; then
+    if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+)[[:space:]]+-p[[:space:]]+([rwxa]+)[[:space:]]+-k[[:space:]]+([[:alnum:]_.-]+)[[:space:]]*$ ]]; then
       path="${BASH_REMATCH[1]}"
       [ -e "$path" ] || {
         echo "[ERROR] Watch sobre ruta inexistente en staging: $path" >&2
