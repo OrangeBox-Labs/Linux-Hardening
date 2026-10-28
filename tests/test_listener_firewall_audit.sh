@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pruebas unitarias del auditor de cobertura INPUT: solo fixtures, sin tocar el host.
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 # shellcheck source=../lib/listener-firewall-audit.sh
 source "$ROOT_DIR/lib/listener-firewall-audit.sh"
 
