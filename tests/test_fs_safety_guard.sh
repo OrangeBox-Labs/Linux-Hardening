@@ -9,6 +9,7 @@ grep -Fq '["/home"]="noexec,nosuid,nodev"' "$FS" || fail "/home debe incluir noe
 grep -Fq '["/dev/shm"]="noexec,nosuid,nodev"' "$FS" || fail "/dev/shm debe exigir siempre noexec,nosuid,nodev"
 grep -Fq 'local -a required=("noexec" "nosuid" "nodev") approved_array=()' "$FS" || fail "/dev/shm debe verificar las tres opciones obligatorias"
 grep -Fq 'persist_mount_options /dev/shm true' "$FS" || fail "las opciones de /dev/shm deben persistirse"
+grep -Fq 'persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0"' "$FS" || fail "la entrada fstab nueva de /dev/shm debe persistir las tres opciones obligatorias"
 ! grep -Fq '["/proc"]="hidepid=2"' "$FS" || fail "/proc no debe aplicar hidepid=2"
 ! grep -Fq 'configure_proc()' "$FS" || fail "no debe existir el control hidepid"
 grep -Fq 'ORANGEBOX_ASSUME_YES' "$FS" || fail "--fix debe ser automático"
