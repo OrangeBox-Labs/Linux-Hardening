@@ -43,7 +43,7 @@ PATH="$TMP_DIR/bin:$PATH"
 hash -r
 FAKE_SYSTEMD_CONFIG="$TMP_DIR/coredump-effective.conf"
 export PATH FAKE_SYSTEMD_CONFIG
-command -v systemd-analyze | grep -F "$TMP_DIR/bin/systemd-analyze" >/dev/null || fail "no se está usando el mock systemd-analyze"
+[ "$(type -P systemd-analyze)" = "$TMP_DIR/bin/systemd-analyze" ] || { printf "[DEBUG] systemd-analyze resuelto: %s; PATH=%s\n" "$(type -P systemd-analyze)" "$PATH" >&2; fail "no se está usando el mock systemd-analyze"; }
 # shellcheck source=/dev/null
 source "$TMP_DIR/effective-config-helpers.sh"
 
