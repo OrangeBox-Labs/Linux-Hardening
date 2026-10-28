@@ -500,7 +500,7 @@ configure_dev_shm() {
     return 1
   fi
   IFS=' ' read -r -a approved_array <<< "$approved_opts"
-  if ! persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,$approved_opts 0 0" "${approved_array[@]}"; then
+  if ! persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" "${approved_array[@]}"; then
     echo -e "${YELLOW}[WARN] /dev/shm está corregido en runtime, pero no se pudo persistir la configuración.${NC}"
     WARNINGS=$((WARNINGS+1))
   fi
