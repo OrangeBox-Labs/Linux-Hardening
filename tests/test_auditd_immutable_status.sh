@@ -146,6 +146,24 @@ source "$AUDITD"
 # El segundo source restaura la función productiva; reimponer el stub para no consultar el auditctl real.
 get_auditctl_path() { printf '%s\n' "$TMP_DIR/bin/auditctl"; }
 
+# En modo verificación debe avisar si el baseline OrangeBox existente está obsoleto,
+# sin modificarlo ni intentar cargar reglas en el kernel.
+AUTO_FIX=false
+FIXED=0
+WARNINGS=0
+AUDIT_RULES_DIR="$TMP_DIR/verify-rules"
+AUDIT_RULES="$AUDIT_RULES_DIR/98-orangebox-baseline.rules"
+mkdir -p "$AUDIT_RULES_DIR"
+printf '%s\n' '# OrangeBox hardening audit rules' '-a always,exit -F arch=b32 -S stime -k time-change' > "$AUDIT_RULES"
+add_audit_rules >"$TMP_DIR/verify-output" 2>&1 ||
+  fail "la verificación del baseline obsoleto no debe fallar"
+grep -Fq 'El baseline OrangeBox requiere reparación' "$TMP_DIR/verify-output" ||
+  fail "el modo verificación debe advertir que el baseline contiene reglas obsoletas"
+grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$AUDIT_RULES" ||
+  fail "el modo verificación no debe modificar el baseline"
+[ "$WARNINGS" -gt 0 ] || fail "el baseline obsoleto debe incrementar las advertencias"
+pass "modo verificación detecta baseline obsoleto sin modificarlo"
+
 # Prueba real de staging con rutas aisladas: no modifica /etc/audit ni carga reglas al kernel.
 AUTO_FIX=true
 FIXED=0
