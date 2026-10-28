@@ -30,6 +30,7 @@ MODULE=all
 RUN_ID="$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 BACKUP_DIR=/var/backups/orangebox-linux-hardening/$RUN_ID
 FIXED=0
+NETWORK_FIXED=0
 OK_COUNT=0
 NOT_APPLICABLE_COUNT=0
 WARNINGS=0
@@ -2193,6 +2194,27 @@ run_companion_script() {
   fi
 }
 
+# Extract the network module's own correction count so the global --fix summary
+# does not report zero when network-hardening.sh changed sysctl values.
+# This intentionally counts only the dedicated NETWORK HARDENING summary,
+# not arbitrary "Correcciones" lines printed by other sections.
+network_module_reported_fixes() {
+  local output_file="$1"
+  awk '
+    /NETWORK HARDENING/ { in_network=1 }
+    /MODULOS DESHABILITADOS/ { if (in_network) in_network=0 }
+    in_network && /Correcciones aplicadas:/ {
+      line=$0
+      gsub(/\033\\[[0-9;]*[[:alpha:]]/, "", line)
+      if (match(line, /Correcciones aplicadas:[[:space:]]*[0-9]+/)) {
+        value=substr(line, RSTART, RLENGTH)
+        sub(/^.*:[[:space:]]*/, "", value)
+      }
+    }
+    END { if (value ~ /^[0-9]+$/) print value }
+  ' "$output_file"
+}
+
 run_companion_module() {
   local name="$1" script="" fix_arg="--fix" audit_arg="" fix_extra_arg="" risky=false audit_only=false block_fix=false interactive=false
   local apply_fix="$AUTO_FIX" child_rc=0
@@ -2298,12 +2320,42 @@ run_companion_module() {
   if [ "$name" = "network-full" ]; then
     fix_arg=--fix
   fi
-  if run_companion_script "$SCRIPT_DIR/$script" "$fix_arg" "$fix_extra_arg"; then
-    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
-    echo "[OK] Módulo $name finalizado."
+  if [ "$name" = "network-full" ]; then
+    local network_output network_fixes
+    network_output="$(mktemp "${TMPDIR:-/tmp}/orangebox-network-hardening.XXXXXX")" || {
+      warn "No se pudo crear un archivo temporal para contabilizar las correcciones de network-full."
+      network_output=""
+    }
+    if [ -n "$network_output" ]; then
+      if (set -o pipefail; run_companion_script "$SCRIPT_DIR/$script" "$fix_arg" "$fix_extra_arg" 2>&1 | tee "$network_output"); then
+        child_rc=0
+      else
+        child_rc=$?
+      fi
+      network_fixes="$(network_module_reported_fixes "$network_output")"
+      if [[ "$network_fixes" =~ ^[0-9]+$ ]]; then
+        NETWORK_FIXED=$((NETWORK_FIXED + network_fixes))
+        FIXED=$((FIXED + network_fixes))
+        if [ "$network_fixes" -gt 0 ]; then
+          echo "[INFO] Contabilizadas $network_fixes corrección(es) reportada(s) por network-full."
+        fi
+      else
+        warn "No se pudo leer el contador de correcciones del resumen de network-full."
+      fi
+      rm -f -- "$network_output"
+    else
+      if run_companion_script "$SCRIPT_DIR/$script" "$fix_arg" "$fix_extra_arg"; then child_rc=0; else child_rc=$?; fi
+    fi
+  elif run_companion_script "$SCRIPT_DIR/$script" "$fix_arg" "$fix_extra_arg"; then
+    child_rc=0
   else
     child_rc=$?
-    COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+  fi
+
+  COMPANION_MODULES_RUN=$((COMPANION_MODULES_RUN + 1))
+  if [ "$child_rc" -eq 0 ]; then
+    echo "[OK] Módulo $name finalizado."
+  else
     COMPANION_MODULES_FAILED=$((COMPANION_MODULES_FAILED + 1))
     if [ "$child_rc" -eq 3 ]; then
       COMPANION_MODULES_REBOOT_REQUIRED=1
@@ -2425,7 +2477,9 @@ main() {
       echo "Ejecuta ./linux-hardening.sh --fix para revisar auditorías y confirmar los cambios deseados."
     fi
   else
-    echo "Correcciones: $FIXED"
+    echo "Correcciones: $FIXED (incluye baseline interno y network-full)"
+    echo "  - Correcciones reportadas por network-full: $NETWORK_FIXED"
+    echo "  - Otros módulos complementarios conservan sus propios contadores en sus resúmenes."
     echo "Advertencias: $WARNINGS"
     echo "Errores: $ERRORS"
     echo "Módulos complementarios ejecutados: $COMPANION_MODULES_RUN"
