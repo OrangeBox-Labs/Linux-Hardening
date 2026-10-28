@@ -177,7 +177,7 @@ cis_stream_has_kernel_argument() {
     {
       line=$0
       sub(/[[:space:]]+#.*/, "", line)
-      n=split(line, tokens, /[[:space:]\",]+/)
+      n=split(line, tokens, /[[:space:],"]+/)
       for (i=1; i<=n; i++) if (tokens[i] == wanted) found=1
     }
     END { exit(found ? 0 : 1) }
