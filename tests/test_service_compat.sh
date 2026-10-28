@@ -31,13 +31,15 @@ esac
 MOCK
 chmod +x "$mockbin/chkconfig" "$mockbin/service"
 export MOCK_ENABLED=1 MOCK_ACTIVE=1
+# Export the mock PATH for the entire test process. Prefix assignments on
+# individual shell-function calls can behave differently across shells and
+# make command discovery depend on the invocation context.
+export PATH="$mockbin:$PATH"
+command -v chkconfig >/dev/null || fail "no se está usando el mock chkconfig"
+command -v service >/dev/null || fail "no se está usando el mock service"
 
-PATH="$mockbin:$PATH" ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
-PATH="$mockbin:$PATH" ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
-if PATH="$mockbin:$PATH" MOCK_ENABLED=0 ob_service_is_enabled_sysv fake-service; then
-  fail "SysV disabled service was reported enabled"
-fi
-if PATH="$mockbin:$PATH" MOCK_ACTIVE=0 ob_service_is_active_sysv fake-service; then
-  fail "SysV stopped service was reported active"
-fi
+ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
+ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
+MOCK_ENABLED=0 ob_service_is_enabled_sysv fake-service && fail "SysV disabled service was reported enabled"
+MOCK_ACTIVE=0 ob_service_is_active_sysv fake-service && fail "SysV stopped service was reported active"
 pass "SysV chkconfig/service state checks"
