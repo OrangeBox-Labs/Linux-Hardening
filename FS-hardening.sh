@@ -32,7 +32,7 @@ show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo auditoría (solo lectura; valor predeterminado)"
   echo "  $0 --check    - Modo auditoría explícito (solo lectura)"
-  echo "  $0 --fix      - Aplicar las propuestas automáticamente, sin preguntas"
+  echo "  $0 --fix      - Aplicar propuestas con confirmación individual"
   echo "  $0 -c         - Modo auditoría (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
@@ -550,7 +550,8 @@ main() {
     --help|-h) show_usage; exit 0 ;;
     --fix|-f)
       AUTO_FIX=true
-    ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
+      # El módulo standalone exige confirmación por cambio. El orquestador puede
+      # exportar ORANGEBOX_ASSUME_YES=1 explícitamente para su modo --fix automático.
       CHECK_MODE=false
       echo -e "${YELLOW}MODO FIX: se solicitará confirmación individual antes de cada cambio sensible.${NC}"
       ;;
