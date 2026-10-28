@@ -1074,8 +1074,9 @@ kernel_module(){
   set_sysctl net.ipv4.conf.default.accept_source_route 0
   set_sysctl net.ipv4.conf.all.secure_redirects 0
   set_sysctl net.ipv4.conf.default.secure_redirects 0
-  set_sysctl net.ipv4.conf.all.log_martians 1
-  set_sysctl net.ipv4.conf.default.log_martians 1
+  # OrangeBox policy: keep martian logging disabled to avoid excessive kernel log volume.
+  set_sysctl net.ipv4.conf.all.log_martians 0
+  set_sysctl net.ipv4.conf.default.log_martians 0
   set_sysctl net.ipv4.icmp_echo_ignore_broadcasts 1
   set_sysctl net.ipv4.icmp_ignore_bogus_error_responses 1
   set_sysctl net.ipv4.conf.all.rp_filter "$rp_filter"
