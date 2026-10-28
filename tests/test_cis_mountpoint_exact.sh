@@ -37,8 +37,13 @@ FAKE_FINDMNT
 chmod +x "$TMP_DIR/bin/findmnt"
 PATH="$TMP_DIR/bin:$PATH"
 export PATH
+hash -r
+command -v findmnt | grep -F "$TMP_DIR/bin/findmnt" >/dev/null || fail "no se está usando el mock findmnt"
 # shellcheck source=/dev/null
 source "$TMP_DIR/mount-helpers.sh"
+
+mount_list="$(findmnt -rn -o TARGET)" || fail "el mock findmnt no pudo listar TARGET"
+printf '%s\n' "$mount_list" | grep -Fx /tmp >/dev/null && fail "el mock findmnt incluye /tmp inesperadamente"
 
 cis_mount_is_exact "/" || fail "el root filesystem debería reconocerse como mountpoint"
 cis_mount_is_exact "/dev/shm" || fail "/dev/shm debería reconocerse como mountpoint exacto"
