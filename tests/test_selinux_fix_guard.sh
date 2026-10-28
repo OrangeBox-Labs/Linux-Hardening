@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SELINUX="$ROOT_DIR/selinux-secure-setup.sh"
-fail(){ printf '[FAIL] %s\n' "$*" >&2; exit 1; }
-pass(){ printf '[PASS] %s\n' "$*"; }
-grep -Fq 'AUTO_FIX=false' "$SELINUX" || fail "el modo por defecto no es auditoría"
-grep -Fq 'confirm_selinux_change' "$SELINUX" || fail "falta confirmación interactiva"
-grep -Fq 'setenforce 1' "$SELINUX" || fail "falta transición runtime desde Permissive"
-grep -Fq 'SELINUX=enforcing' "$SELINUX" || fail "falta el cambio persistente"
-grep -Fq 'No se habilita automáticamente' "$SELINUX" || fail "no se protege el modo Disabled"
-grep -Fq '/var/backups/orangebox-selinux-hardening-' "$SELINUX" || fail "falta backup antes de cambiar SELinux"
-! grep -Eq '^[[:space:]]*(restorecon|semanage|reboot)[[:space:]]' "$SELINUX" || fail "no debe ejecutar relabel, semanage o reboot"
-pass "SELinux audit-only by default; --fix requires consent and preserves Disabled"
+CORE="$ROOT_DIR/linux-hardening.sh"
+GRUB="$ROOT_DIR/grub-hardening.sh"
+fail(){ echo "[FAIL] $*" >&2; exit 1; }
+pass(){ echo "[PASS] $*"; }
+grep -Fq 'report_selinux_state()' "$CORE" || fail "baseline no informa SELinux"
+! grep -Fq 'selinux-secure-setup.sh' "$CORE" || fail "baseline no debe invocar script SELinux"
+! grep -Fq 'selinux-setup' "$CORE" || fail "SELinux no debe ser módulo del baseline"
+grep -Fq 'SELINUX=permissive' "$SELINUX" || fail "script dedicado debe persistir Permissive"
+grep -Fq 'setenforce 0' "$SELINUX" || fail "script dedicado debe admitir cambio runtime"
+grep -Fq 'confirm_change()' "$SELINUX" || fail "cambio explícito exige confirmación"
+grep -Fq 'Backup:' "$SELINUX" || fail "script dedicado debe respaldar config"
+! grep -Eiq 'selinux=0|enforcing=0|selinux' "$GRUB" || fail "GRUB no debe tocar ni auditar SELinux"
+pass "SELinux solo se informa en el baseline y se cambia mediante la utilidad exclusiva"

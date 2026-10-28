@@ -32,19 +32,20 @@ show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo auditoría (solo lectura; valor predeterminado)"
   echo "  $0 --check    - Modo auditoría explícito (solo lectura)"
-  echo "  $0 --fix      - Aplicar cambios, con confirmación individual por parámetro"
+  echo "  $0 --fix      - Aplicar propuestas con confirmación individual"
   echo "  $0 -c         - Modo auditoría (version corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
   echo "  # Revisar el estado sin modificar el servidor"
   echo "  ./FS-hardening.sh"
   echo ""
-  echo "  # Aplicar correcciones, confirmando los parámetros sensibles"
+  echo "  # Aplicar correcciones con confirmación individual por cambio"
   echo "  ./FS-hardening.sh --fix"
   echo ""
 }
 
 confirm_fs_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s\n" "${1:-cambio}"; return 0; fi
   local description="$1" effect="$2" answer=""
   printf '\n[WARN] Cambio de filesystem: %s\n' "$description"
   printf 'Qué hace/riesgo: %s\n' "$effect"
@@ -79,6 +80,55 @@ persist_mount_options() {
   local entry="" current="" merged="" opt="" tmp="" has_entry=false
   local -a existing=()
   [ -f /etc/fstab ] || { echo "[ERROR] /etc/fstab no existe."; return 1; }
+
+  # /dev/shm debe tener una única entrada canónica, conservando opciones
+  # preexistentes como mode=1777 o size=..., incluso si la línea estaba mal formada.
+  if [ "$mount_point" = "/dev/shm" ] && [ -n "$spec" ]; then
+    local old_opts="" requested_opts="" merged_opts="" base_spec=""
+    old_opts="$(awk -v mp="$mount_point" '$0 !~ /^[[:space:]]*#/ && NF>=4 && $2==mp {print $4; exit}' /etc/fstab)"
+    requested_opts="$(printf '%s\n' "$spec" | awk '{print $4}')"
+    base_spec="$(printf '%s\n' "$spec" | awk '{print $1, $2, $3}')"
+    merged_opts="$old_opts"
+    # Limpiar comas sobrantes de entradas dañadas y preservar opciones previas.
+    merged_opts="${merged_opts#,}"
+    merged_opts="${merged_opts%,}"
+    for opt in $(printf '%s' "$requested_opts" | tr ',' ' '); do
+      case ",$merged_opts," in
+        *",$opt,"*) ;;
+        *) if [ -n "$merged_opts" ]; then merged_opts+=",${opt}"; else merged_opts="$opt"; fi ;;
+      esac
+    done
+    [ -n "$merged_opts" ] || merged_opts="defaults"
+    spec="$base_spec $merged_opts 0 0"
+
+    tmp="$(mktemp /etc/.fstab.orangebox.XXXXXX)" || return 1
+    awk -v mp="$mount_point" -v spec="$spec" '
+      /^[[:space:]]*#/ {print; next}
+      NF>=2 && $2==mp {
+        if (!done) print spec
+        done=1
+        next
+      }
+      {print}
+      END {
+        if (!done) {
+          print ""
+          print "# OrangeBox filesystem hardening: /dev/shm"
+          print spec
+        }
+      }
+    ' /etc/fstab > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod --reference=/etc/fstab "$tmp" 2>/dev/null || chmod 644 "$tmp"
+    chown --reference=/etc/fstab "$tmp" 2>/dev/null || chown root:root "$tmp"
+    if ! mv "$tmp" /etc/fstab; then
+      rm -f "$tmp"
+      echo "[ERROR] No se pudo actualizar /etc/fstab para /dev/shm."
+      return 1
+    fi
+    echo "[✓] /etc/fstab normalizado para /dev/shm: $spec"
+    return 0
+  fi
+
   entry="$(awk -v mp="$mount_point" '$0 !~ /^[[:space:]]*#/ && NF>=4 && $2==mp {print; exit}' /etc/fstab)"
   if [ -n "$entry" ]; then
     has_entry=true
@@ -106,6 +156,71 @@ persist_mount_options() {
   if ! mv "$tmp" /etc/fstab; then rm -f "$tmp"; echo "[ERROR] No se pudo actualizar /etc/fstab."; return 1; fi
   echo "[✓] /etc/fstab actualizado para $mount_point"
 }
+
+# Actualiza FSTAB primero y usa el montaje sin opciones adicionales como validación.
+# Si algo falla, restaura FSTAB y recarga systemd; nunca deja el cambio solo en runtime.
+apply_mount_options_from_fstab() {
+  local mount_point="$1" add_if_missing="$2" spec="$3"
+  shift 3
+  local rollback="" restore_tmp="" opt="" active_opts="" restore_failed=false
+  local -a approved=("$@")
+
+  backup_fs_file /etc/fstab || return 1
+  rollback="$(mktemp /etc/.fstab.orangebox.rollback.XXXXXX)" || return 1
+  if ! cp -p /etc/fstab "$rollback"; then
+    rm -f "$rollback"
+    echo "[ERROR] No se pudo preparar rollback de /etc/fstab."
+    return 1
+  fi
+
+  if ! persist_mount_options "$mount_point" "$add_if_missing" "$spec" "${approved[@]}"; then
+    rm -f "$rollback"
+    echo "[ERROR] No se pudo persistir las opciones de $mount_point; no se intenta el remount."
+    return 1
+  fi
+
+  if ! systemctl daemon-reload; then
+    echo "[ERROR] systemctl daemon-reload falló; se restaura /etc/fstab."
+    restore_failed=true
+  elif ! mount -o remount "$mount_point"; then
+    echo "[ERROR] mount -o remount $mount_point falló usando las opciones de FSTAB."
+    restore_failed=true
+  else
+    active_opts="$(findmnt -n -o OPTIONS "$mount_point" 2>/dev/null || true)"
+    for opt in "${approved[@]}"; do
+      case ",$active_opts," in
+        *",$opt,"*) ;;
+        *)
+          echo "[ERROR] $mount_point no refleja la opción aprobada '$opt' tras el remount."
+          restore_failed=true
+          break
+          ;;
+      esac
+    done
+  fi
+
+  if [ "$restore_failed" = true ]; then
+    restore_tmp="$(mktemp /etc/.fstab.orangebox.restore.XXXXXX)" || {
+      echo "[CRITICAL] No se pudo crear archivo para restaurar /etc/fstab; respaldo temporal: $rollback"
+      return 1
+    }
+    if cp -p "$rollback" "$restore_tmp" && mv -f "$restore_tmp" /etc/fstab; then
+      systemctl daemon-reload || echo "[WARN] No se pudo recargar systemd tras restaurar /etc/fstab."
+      mount -o remount "$mount_point" || echo "[WARN] No se pudo reestablecer el montaje anterior de $mount_point."
+    else
+      rm -f "$restore_tmp"
+      echo "[CRITICAL] Falló la restauración automática de /etc/fstab. Conservado respaldo temporal: $rollback"
+      return 1
+    fi
+    rm -f "$rollback"
+    return 1
+  fi
+
+  rm -f "$rollback"
+  echo "[✓] systemd recargado y $mount_point validado mediante mount -o remount sin opciones adicionales."
+  return 0
+}
+
 # ==============================================
 # DEFINICION DE PUNTOS DE MONTAJE CRITICOS
 # ==============================================
@@ -130,13 +245,12 @@ declare -A MOUNT_REQUIREMENTS=(
   ["/tmp"]="noexec,nosuid,nodev"
   ["/opt"]="nosuid,nodev"
   ["/boot"]="nodev,nosuid,noexec"
-  ["/home"]="nosuid,nodev"
+  ["/home"]="noexec,nosuid,nodev"
   ["/var/log"]="noexec,nosuid,nodev"
   ["/var/tmp"]="noexec,nosuid,nodev"
   ["/var/log/audit"]="noexec,nosuid,nodev"
   ["/var/ossec"]="nosuid,nodev"
   ["/dev/shm"]="noexec,nosuid,nodev"
-  ["/proc"]="hidepid=2"
 )
 
 # ==============================================
@@ -308,8 +422,8 @@ check_separated_partitions() {
 # FUNCION PARA VERIFICAR OPCIONES DE MONTAJE
 # ==============================================
 check_mount_options() {
-  local mount_point="$1" required_opts="$2" current_opts="" opt="" missing_opts="" approved_opts="" new_opts="" effect=""
-  local -a required_array=()
+  local mount_point="$1" required_opts="$2" current_opts="" opt="" missing_opts="" approved_opts="" effect=""
+  local -a required_array=() approved_array=()
   echo -e "\n${BLUE}[*] Verificando opciones de montaje de $mount_point...${NC}"
 
   if ! findmnt -n "$mount_point" >/dev/null 2>&1; then
@@ -326,9 +440,9 @@ check_mount_options() {
         missing_opts="$missing_opts $opt"
         effect=""
         case "$opt" in
-          nodev) effect="impide interpretar nodos de dispositivo en este montaje; puede afectar herramientas que dependan de dispositivos especiales." ;;
-          nosuid) effect="ignora bits SUID/SGID en este montaje; normalmente reduce riesgo, pero programas que dependan de esos bits dejarán de elevar privilegios." ;;
-          noexec) effect="impide ejecutar directamente binarios desde este montaje; puede romper instaladores, scripts de aplicaciones, agentes o herramientas que ejecuten desde $mount_point." ;;
+          nodev) effect="Qué hace: impide usar nodos de dispositivo en este montaje. Riesgo: puede afectar herramientas que los necesiten." ;;
+          nosuid) effect="Qué hace: ignora bits SUID/SGID en este montaje. Riesgo: programas que dependan de estos bits no podrán elevar privilegios." ;;
+          noexec) effect="Qué hace: bloquea la ejecución directa de binarios en $mount_point. Riesgo: puede impedir ejecutar aplicaciones o scripts legítimos desde ese montaje." ;;
           *) effect="restringe una capacidad del montaje; valida las aplicaciones que usen $mount_point." ;;
         esac
         echo -e "${YELLOW}[WARN] $mount_point necesita opción $opt.${NC}"
@@ -352,26 +466,15 @@ check_mount_options() {
   fi
   [ -n "$approved_opts" ] || { echo "[INFO] No se aprobaron cambios para $mount_point."; return 0; }
 
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS + 1)); return 1; }
-  new_opts="$current_opts"
-  for opt in $approved_opts; do
-    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
-  done
-  if mount -o remount,"$new_opts" "$mount_point"; then
-    echo -e "${GREEN}[✓] $mount_point remontado con opciones aprobadas: $approved_opts${NC}"
-    local -a approved_array=()
-    IFS=' ' read -r -a approved_array <<< "$approved_opts"
-    if ! persist_mount_options "$mount_point" false "" "${approved_array[@]}"; then
-      echo -e "${YELLOW}[WARN] El montaje está protegido en runtime, pero no se pudo hacer persistente en /etc/fstab; revise manualmente.${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+  IFS=' ' read -r -a approved_array <<< "$approved_opts"
+  if apply_mount_options_from_fstab "$mount_point" false "" "${approved_array[@]}"; then
+    echo -e "${GREEN}[✓] $mount_point actualizado desde /etc/fstab con opciones aprobadas: $approved_opts${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${RED}[ERROR] No se pudo remontar $mount_point; no se modificó fstab.${NC}"
+    echo -e "${RED}[ERROR] No se pudo aplicar de forma persistente la configuración de $mount_point.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
-
 # ==============================================
 # APLICAR STICKY BIT
 # ==============================================
@@ -466,7 +569,7 @@ configure_dev_shm() {
     return 0
   fi
 
-  local current_opts="" opt="" approved_opts="" new_opts="" effect
+  local current_opts="" opt="" approved_opts="" effect="" spec_opts="defaults" shm_spec=""
   local -a required=("noexec" "nosuid" "nodev") approved_array=()
   current_opts="$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null | tr ',' '\n' | sort -u | paste -sd, -)"
   for opt in "${required[@]}"; do
@@ -489,66 +592,28 @@ configure_dev_shm() {
     esac
   done
   [ -n "$approved_opts" ] || return 0
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
-  new_opts="$current_opts"
-  for opt in $approved_opts; do
-    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
-  done
-  if ! mount -o remount,"$new_opts" /dev/shm; then
-    echo -e "${RED}[ERROR] No se pudo remontar /dev/shm.${NC}"
-    WARNINGS=$((WARNINGS+1))
-    return 1
-  fi
+
   IFS=' ' read -r -a approved_array <<< "$approved_opts"
-  if ! persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,$approved_opts 0 0" "${approved_array[@]}"; then
-    echo -e "${YELLOW}[WARN] /dev/shm está corregido en runtime, pero no se pudo persistir la configuración.${NC}"
+  # Conserva las opciones de seguridad ya activas y agrega únicamente las aprobadas.
+  for opt in "${required[@]}"; do
+    case ",$current_opts," in
+      *",$opt,"*) spec_opts+=",${opt}" ;;
+      *)
+        case " $approved_opts " in *" $opt "*) spec_opts+=",${opt}" ;; esac
+        ;;
+    esac
+  done
+  shm_spec="tmpfs /dev/shm tmpfs $spec_opts 0 0"
+  if apply_mount_options_from_fstab /dev/shm true "$shm_spec" "${approved_array[@]}"; then
+    echo -e "${GREEN}[✓] /dev/shm actualizado desde /etc/fstab con opciones aprobadas: $approved_opts${NC}"
+    FIXED=$((FIXED+1))
+  else
+    echo -e "${RED}[ERROR] No se pudo aplicar de forma persistente la configuración de /dev/shm.${NC}"
     WARNINGS=$((WARNINGS+1))
   fi
-  echo -e "${GREEN}[✓] /dev/shm actualizado con opciones aprobadas: $approved_opts${NC}"
-  FIXED=$((FIXED+1))
 }
-
 # ==============================================
-# CONFIGURAR /PROC CON HIDEPID
 # ==============================================
-configure_proc() {
-  echo -e "\n${BLUE}[*] Verificando /proc hidepid...${NC}"
-  if ! findmnt -n /proc >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARN] /proc no está montado; no se modifica.${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  local current_opts="" effect="" answer_opts="" approved_array=()
-  current_opts="$(findmnt -n -o OPTIONS /proc 2>/dev/null)"
-  if [[ ",$current_opts," == *",hidepid=2,"* ]] || [[ ",$current_opts," == *",hidepid=invisible,"* ]]; then
-    echo -e "${GREEN}[✓] /proc ya usa hidepid=2${NC}"
-    return 0
-  fi
-  effect="oculta procesos de otros usuarios en /proc para reducir reconocimiento local. Puede romper o limitar agentes de monitoreo, herramientas de soporte, supervisores y aplicaciones que inspeccionan procesos de otros usuarios."
-  echo -e "${YELLOW}[WARN] /proc no tiene hidepid=2; opciones actuales: $current_opts${NC}"
-  echo "Qué hace/riesgo: $effect"
-  if [ "$AUTO_FIX" != true ] || [ "$CHECK_MODE" = true ]; then
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  if ! confirm_fs_change "/proc: hidepid=2" "$effect"; then
-    WARNINGS=$((WARNINGS + 1))
-    return 0
-  fi
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
-  if ! mount -o remount,hidepid=2 /proc; then
-    echo -e "${RED}[ERROR] No se pudo remontar /proc con hidepid=2.${NC}"
-    WARNINGS=$((WARNINGS+1))
-    return 1
-  fi
-  if ! persist_mount_options /proc true "proc /proc proc defaults,hidepid=2 0 0" "hidepid=2"; then
-    echo -e "${YELLOW}[WARN] /proc tiene hidepid=2 en runtime, pero no se pudo persistir en /etc/fstab.${NC}"
-    WARNINGS=$((WARNINGS+1))
-  fi
-  echo -e "${GREEN}[✓] /proc actualizado con hidepid=2${NC}"
-  FIXED=$((FIXED+1))
-}
-
 # ==============================================
 # MOSTRAR RESUMEN FINAL
 # ==============================================
@@ -589,6 +654,8 @@ main() {
     --help|-h) show_usage; exit 0 ;;
     --fix|-f)
       AUTO_FIX=true
+      # El módulo standalone exige confirmación por cambio. El orquestador puede
+      # exportar ORANGEBOX_ASSUME_YES=1 explícitamente para su modo --fix automático.
       CHECK_MODE=false
       echo -e "${YELLOW}MODO FIX: se solicitará confirmación individual antes de cada cambio sensible.${NC}"
       ;;
@@ -616,7 +683,7 @@ main() {
   done
 
   configure_dev_shm
-  configure_proc
+  echo -e "${BLUE}[INFO] /proc se conserva sin hidepid=2 para no interferir con agentes de monitorización como Zabbix.${NC}"
   apply_sticky_bit
   disable_autofs
 

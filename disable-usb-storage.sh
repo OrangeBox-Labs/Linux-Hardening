@@ -32,6 +32,7 @@ module_blacklisted() {
 }
 
 confirm_usb_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] USB storage %s\n" "${1:-cambio}"; return 0; fi
   local current="$1" proposed="$2" effect="$3" answer=""
   echo -e "${YELLOW}[WARN] Cambio de hardening USB pendiente${NC}"
   echo "Estado actual: $current"
@@ -181,7 +182,7 @@ main() {
   if [ "$EUID" -ne 0 ]; then fail "Ejecuta como root."; exit 1; fi
   case "${1:-}" in
     "") AUTO_FIX=false ;;
-    --fix|-f) AUTO_FIX=true ;;
+    --fix|-f) AUTO_FIX=true; ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES ;;
     --help|-h)
       echo "Uso: $0 [--fix]"
       echo "Sin opciones: auditoría de solo lectura."

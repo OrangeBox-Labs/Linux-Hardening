@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CIS="$ROOT_DIR/cis-benchmark-check.sh"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.test-effective-config.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
@@ -40,10 +40,15 @@ ProcessSizeMax=2G
 COREDUMP_CONFIG
 
 PATH="$TMP_DIR/bin:$PATH"
+hash -r
 FAKE_SYSTEMD_CONFIG="$TMP_DIR/coredump-effective.conf"
 export PATH FAKE_SYSTEMD_CONFIG
+[ "$(type -P systemd-analyze)" = "$TMP_DIR/bin/systemd-analyze" ] || { printf "[DEBUG] systemd-analyze resuelto: %s; PATH=%s\n" "$(type -P systemd-analyze)" "$PATH" >&2; fail "no se está usando el mock systemd-analyze"; }
 # shellcheck source=/dev/null
 source "$TMP_DIR/effective-config-helpers.sh"
+
+mock_output="$(systemd-analyze cat-config systemd/coredump.conf)" || fail "el mock systemd-analyze falló"
+[ "$mock_output" = "$(cat "$FAKE_SYSTEMD_CONFIG")" ] || fail "el mock systemd-analyze no devolvió la configuración esperada"
 
 actual="$(cis_systemd_config_value systemd/coredump.conf /etc/systemd/coredump.conf Coredump Storage)" || fail "no se pudo calcular Storage efectivo"
 [ "$actual" = "external" ] || fail "se ignoró el override de Storage (actual=$actual)"

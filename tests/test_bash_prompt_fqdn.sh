@@ -2,7 +2,7 @@
 # Test the prompt FQDN and Readline mode in isolated interactive shells.
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/.orangebox-prompt-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 MOCK_BIN="$TMP_DIR/bin"

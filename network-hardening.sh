@@ -7,7 +7,6 @@
 # Email: froman@orangebox.cl
 # Descripcion: Hardening de red - CIS 3.1.x, 3.2.x, 3.3.x, 3.4.x
 #              Aplica sysctl, deshabilita modulos peligrosos
-#              NO cambia reglas de firewall existentes
 # ==============================================
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -28,7 +27,6 @@ NC='\033[0m'
 FIXED=0
 WARNINGS=0
 AUTO_FIX=false
-ALLOW_SHOREWALL=false
 
 SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
 SYSCTL_LEGACY_FILE="/etc/sysctl.d/99-network-hardening.conf"
@@ -111,6 +109,7 @@ set_sysctl() {
 # FUNCION PARA DESHABILITAR MODULO (maneja comentados)
 # ==============================================
 confirm_module_disable() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] Bloquear futuras cargas de %s\n" "${1:-módulo}"; return 0; fi
   local module="$1" description="$2" answer
   [ "$AUTO_FIX" = true ] || return 1
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
@@ -216,18 +215,6 @@ disable_module() {
 }
 
 # ==============================================
-# GUARD DE SEGURIDAD PARA CAMBIOS DE RED CON SHOREWALL
-# ==============================================
-shorewall_is_active() {
-  command -v shorewall >/dev/null 2>&1 || return 1
-  systemctl is-active --quiet shorewall 2>/dev/null && return 0
-  local status
-  status="$(shorewall status 2>&1 || true)"
-  printf '%s\n' "$status" | grep -Eiq 'stopped|not running|inactive|is down' && return 1
-  printf '%s\n' "$status" | grep -Eiq 'running|started|active'
-}
-
-# ==============================================
 # FUNCION PARA FLUSH ROUTES
 # ==============================================
 flush_routes() {
@@ -327,13 +314,11 @@ disable_secure_redirects() {
 # 3.3.4 - LOG SUSPICIOUS PACKETS (MARTIANS)
 # ==============================================
 log_martians() {
-  echo -e "\n${BLUE}[*] CIS 3.3.4 - Habilitando logging de paquetes sospechosos${NC}"
-  echo -e "${YELLOW}    Registra paquetes con direcciones origen no enrutables (martians)${NC}"
-  echo -e "${RED}    NOTA: Esto puede llenar logs rapidamente en entornos con mucho trafico${NC}"
+  echo -e "\n${BLUE}[*] CIS 3.3.4 - Política de logging de paquetes sospechosos${NC}"
+  echo -e "${YELLOW}    Política OrangeBox: mantener log_martians=0 para evitar volumen excesivo de logs.${NC}"
 
-  set_sysctl "net.ipv4.conf.all.log_martians" "1" "net.ipv4.conf.all.log_martians"
-  set_sysctl "net.ipv4.conf.default.log_martians" "1" "net.ipv4.conf.default.log_martians"
-  flush_routes
+  set_sysctl "net.ipv4.conf.all.log_martians" "0" "net.ipv4.conf.all.log_martians"
+  set_sysctl "net.ipv4.conf.default.log_martians" "0" "net.ipv4.conf.default.log_martians"
 }
 
 # ==============================================
@@ -370,7 +355,7 @@ enable_rp_filter() {
   forwarding=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)
   rp_filter=1
   if [ "$forwarding" = 1 ]; then
-    # En routers/firewalls, strict mode puede descartar rutas asimétricas válidas.
+    # En hosts con múltiples rutas, el modo estricto puede descartar tráfico asimétrico válido.
     rp_filter=2
     echo -e "${GREEN}[✓] IP forwarding=1: usando rp_filter=2 (loose) para evitar descartar tráfico asimétrico${NC}"
   fi
@@ -389,8 +374,8 @@ enable_syncookies() {
   set_sysctl "net.ipv4.tcp_syncookies" "1" "net.ipv4.tcp_syncookies"
   set_sysctl "net.ipv4.tcp_max_syn_backlog" "4096" "net.ipv4.tcp_max_syn_backlog"
   set_sysctl "net.core.somaxconn" "4096" "net.core.somaxconn"
-  # TCP retry counts are workload/provider tuning, not universal SYN-cookie controls.
-  # Preserve existing OS, cPanel and CloudLinux policy; tune these separately if needed.
+  set_sysctl "net.ipv4.tcp_synack_retries" "2" "net.ipv4.tcp_synack_retries"
+  set_sysctl "net.ipv4.tcp_syn_retries" "2" "net.ipv4.tcp_syn_retries"
   flush_routes
 }
 
@@ -459,18 +444,13 @@ main() {
       --help|-h) show_usage; exit 0 ;;
       --fix|-f) AUTO_FIX=true ;;
       --check) AUTO_FIX=false ;;
-      --allow-shorewall) ALLOW_SHOREWALL=true ;;
       *) echo -e "${RED}[!] Opción desconocida: $1${NC}"; show_usage; exit 2 ;;
     esac
     shift
   done
 
   if [ "$AUTO_FIX" = true ]; then
-    if shorewall_is_active && [ "$ALLOW_SHOREWALL" != true ]; then
-      echo -e "${RED}[ERROR] Shorewall está activo; no se aplicarán cambios de red sin --allow-shorewall.${NC}"
-      echo "No se han modificado sysctl ni módulos del kernel."
-      exit 2
-    fi
+    export ORANGEBOX_ASSUME_YES=1
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     if ! make_backup; then
@@ -507,11 +487,7 @@ main() {
   show_summary
 
   if [ "$AUTO_FIX" = false ] && [ $WARNINGS -gt 0 ]; then
-    if shorewall_is_active; then
-      echo -e "\n${BLUE}Shorewall está activo. Para aplicar cambios, revise primero el impacto y use --fix --allow-shorewall.${NC}"
-    else
-      echo -e "\n${BLUE}Para aplicar correcciones revisadas, ejecute --fix. La auditoría actual no modificó el sistema.${NC}"
-    fi
+    echo -e "\n${BLUE}Para aplicar los cambios, ejecute --fix. La auditoría actual no modificó el sistema.${NC}"
   fi
 }
 if [ "$EUID" -ne 0 ]; then

@@ -2,7 +2,7 @@
 # Regression tests for the history() protection embedded in the hardening scripts.
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/.orangebox-history-test.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 

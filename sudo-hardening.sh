@@ -62,6 +62,7 @@ make_backup() {
 }
 
 confirm_sudo_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] sudo %s\n" "${1:-cambio}"; return 0; fi
   local title="$1" current="$2" proposed="$3" effect="$4" answer=""
   echo -e "${YELLOW}[WARN] Cambio sudo pendiente: $title${NC}"
   echo "Estado actual: ${current:-no definido}"
@@ -290,17 +291,21 @@ check_sudo_pty() {
   echo -e "${YELLOW}[WARN] sudo no tiene Defaults use_pty configurado.${NC}"
   echo "Qué hace/riesgo: $effect"
   if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 1; fi
-  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-    echo -e "${YELLOW}[WARN] No hay terminal para confirmar; use_pty no se modificará.${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" != "1" ]; then
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+      echo -e "${YELLOW}[WARN] No hay terminal para confirmar; use_pty no se modificará.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+    local answer
+    read -r -p "¿Habilitar Defaults use_pty? Puede afectar automatizaciones sin TTY. [s/N]: " answer </dev/tty
+    case "$answer" in
+      s|S|si|SI|Si|sí|Sí|SÍ) ;;
+      *) echo -e "${YELLOW}[INFO] use_pty rechazado; se conserva la configuración actual.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1 ;;
+    esac
+  else
+    echo "[AUTO-YES] sudo Defaults use_pty"
   fi
-  local answer
-  read -r -p "¿Habilitar Defaults use_pty? Puede afectar automatizaciones sin TTY. [s/N]: " answer </dev/tty
-  case "$answer" in
-    s|S|si|SI|Si|sí|Sí|SÍ) ;;
-    *) echo -e "${YELLOW}[INFO] use_pty rechazado; se conserva la configuración actual.${NC}"; WARNINGS=$((WARNINGS + 1)); return 1 ;;
-  esac
   if append_sudoers_line_safely 'Defaults[[:space:]]+use_pty([,[:space:]]|$)' 'Defaults use_pty'; then
     echo -e "${GREEN}[✓] Configuración agregada y validada: Defaults use_pty${NC}"
     FIXED=$((FIXED + 1))
@@ -428,6 +433,7 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
+    export ORANGEBOX_ASSUME_YES=1
     if ! make_backup; then
       echo -e "${RED}[!] Backup fallido; no se aplicarán cambios de sudo.${NC}"
       exit 1

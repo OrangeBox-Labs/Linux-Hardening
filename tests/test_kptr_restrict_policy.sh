@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests the OrangeBox policy for kernel.kptr_restrict without changing host sysctls.
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck source=../lib/sysctl-safe.sh
 source "$ROOT_DIR/lib/sysctl-safe.sh"
 

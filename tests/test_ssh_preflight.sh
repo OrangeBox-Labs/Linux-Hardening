@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression tests for SSH preflight, visible audit state, and safe remediation.
 set -eu
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 ORCHESTRATOR="$ROOT_DIR/linux-hardening.sh"
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
@@ -11,6 +11,10 @@ grep -Fq 'SSH_EXPECTED_SETTINGS=(' "$ORCHESTRATOR" || fail "falta la lista de pa
 for setting in \
   'ignorerhosts|yes|IgnoreRhosts' \
   'hostbasedauthentication|no|HostbasedAuthentication' \
+  'permitrootlogin|no|PermitRootLogin' \
+  'x11forwarding|no|X11Forwarding' \
+  'allowtcpforwarding|no|AllowTcpForwarding' \
+  'allowagentforwarding|no|AllowAgentForwarding' \
   'permituserenvironment|no|PermitUserEnvironment' \
   'permitemptypasswords|no|PermitEmptyPasswords' \
   'maxauthtries|6|MaxAuthTries' \
@@ -26,13 +30,20 @@ grep -Fq 'ssh_report_unverifiable_settings()' "$ORCHESTRATOR" || fail "el audit 
 grep -Fq '      --audit) AUDIT_MODE=true ;;' "$ORCHESTRATOR" || fail "falta opción explícita de auditoría"
 grep -Fq '      --audit) AUDIT_MODE=true ;;' "$ORCHESTRATOR" || fail "falta opción explícita de auditoría"
 grep -Fq 'elif [ "$ssh_status" -eq 1 ] && ssh_module_can_apply; then' "$ORCHESTRATOR" || fail "la confirmación no está limitada a diferencias verificadas y aplicables"
-grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; se omite la confirmación porque no hay cambios pendientes.' "$ORCHESTRATOR" || fail "falta omitir la pregunta cuando SSH ya cumple"
+grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; se omite cualquier confirmación.' "$ORCHESTRATOR" || fail "falta omitir la pregunta cuando SSH ya cumple"
 grep -Fq 'Los controles SSH ya cumplen los objetivos efectivos; no se modifica la configuración' "$ORCHESTRATOR" || fail "falta confirmar que no se reescribe SSH conforme"
 grep -Fq 'SSH_PENDING_DIRECTIVES+=("$directive $desired")' "$ORCHESTRATOR" || fail "no se registra cada directiva pendiente"
 grep -Fq 'for directive in "${SSH_PENDING_DIRECTIVES[@]}"' "$ORCHESTRATOR" || fail "la remediación no muestra las directivas pendientes"
 grep -Fq 'ok "SSH $directive=$actual. Qué hace:' "$ORCHESTRATOR" || fail "no se informa cuando un parámetro SSH ya está conforme"
 grep -Fq 'ssh_module_apply_block_reason' "$ORCHESTRATOR" || fail "no se explica por qué se bloquea la aplicación de SSH"
 grep -Fq 'ssh_apply_pending_settings' "$ORCHESTRATOR" || fail "falta el flujo de aplicación segura SSH"
+grep -Fq 'ssh_setting_requires_confirmation()' "$ORCHESTRATOR" || fail "no se clasifican los parámetros SSH con riesgo operativo"
+grep -Fq 'confirm_ssh_optional_setting' "$ORCHESTRATOR" || fail "los parámetros SSH de riesgo no solicitan confirmación individual"
+grep -Fq 'ssh_apply_pending_settings_with_consent' "$ORCHESTRATOR" || fail "no existe la ruta de aplicación de controles SSH por parámetro"
+grep -Fq 'Control base: se aplicará con --fix tras validar sintaxis/valores efectivos.' "$ORCHESTRATOR" || fail "los controles base no se explican antes de aplicarse"
+if sed -n '/^      ssh)$/,/^        ;;$/p' "$ORCHESTRATOR" | grep -Fq 'confirm_risky_change "$name"'; then
+  fail "SSH todavía pide autorización genérica para todo el módulo en vez de confirmar parámetros sensibles individualmente"
+fi
 grep -Fq 'sshd -t -f "$main"' "$ORCHESTRATOR" || fail "no se valida la configuración completa de SSH antes de recargar"
 grep -Fq 'ssh_state_status quiet' "$ORCHESTRATOR" || fail "no se verifican los valores efectivos antes de recargar"
 grep -Fq 'ssh_reload_service' "$ORCHESTRATOR" || fail "no se recarga sshd después de validar cambios"

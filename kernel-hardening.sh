@@ -128,6 +128,14 @@ kernel_write_limit() {
 check_sysctl_param() {
   local param="$1" expected="$2" description="$3"
   local SYSCTL_FILE="/etc/sysctl.d/zzzzzzzz-orangebox-sysctl-overrides.conf"
+  if [ "$param" = "kernel.unprivileged_bpf_disabled" ]; then
+    if sysctl_safe_apply_bpf_policy "$SYSCTL_FILE" "/var/backups/orangebox-kernel-hardening" "$AUTO_FIX" "" ""; then
+      [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
+    else
+      WARNINGS=$((WARNINGS + 1))
+    fi
+    return 0
+  fi
   if sysctl_safe_apply "$param" "$expected" "$description" "$SYSCTL_FILE" "/var/backups/orangebox-kernel-hardening" "$AUTO_FIX" "" ""; then
     [ "$SYSCTL_SAFE_CHANGED" = true ] && FIXED=$((FIXED + 1))
   else
@@ -160,19 +168,19 @@ check_limits_param() {
   ' "${limits_files[@]}" 2>/dev/null)"
   case "$item" in
     core)
-      effect="impide core dumps para usuarios y reduce la exposición de secretos, pero limita el diagnóstico post-mortem."
+      effect="Qué hace: desactiva volcados de memoria. Riesgo: limita el análisis post-mortem."
       [ "$current" = "0" ] && compliant=true
       ;;
     nofile)
-      effect="establece el máximo de descriptores abiertos por sesión; 65536 permite cargas altas, pero límites pequeños pueden agotar conexiones/archivos."
+      effect="Qué hace: limita archivos y sockets abiertos por sesión. Riesgo: valores bajos pueden agotar conexiones o archivos."
       if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -ge "$expected" ]; then compliant=true; fi
       ;;
     maxlogins)
-      effect="limita sesiones simultáneas por usuario; puede impedir sesiones administrativas o automatizaciones si resulta demasiado restrictivo."
+      effect="Qué hace: limita sesiones simultáneas por usuario. Riesgo: puede impedir sesiones administrativas o automatizaciones."
       if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -le "$expected" ]; then compliant=true; fi
       ;;
     nproc)
-      effect="limita el número máximo de procesos por usuario. Un tope muy bajo puede impedir iniciar servicios, workers PHP, procesos de hosting, sesiones SSH o tareas cron; un tope excesivo reduce la protección ante agotamiento de procesos."
+      effect="Qué hace: limita procesos por usuario. Riesgo: puede impedir iniciar servicios, workers PHP, SSH o tareas cron."
       if [[ "$current" =~ ^[0-9]+$ ]] && [ "$current" -ge 1024 ] && [ "$current" -le "$expected" ]; then compliant=true; fi
       ;;
     *) effect="ajusta un límite de recursos; un valor restrictivo puede afectar aplicaciones." ;;
@@ -214,7 +222,7 @@ check_systemd_coredump() {
     return 0
   fi
   echo "${YELLOW}[WARN] systemd-coredump no está limitado a Storage=none; valor efectivo: ${effective:-default/no verificable}.${NC}"
-  local effect="evita guardar volcados de memoria que pueden contener secretos; puede dificultar el diagnóstico post-mortem."
+  local effect="Qué hace: evita guardar volcados que pueden contener secretos. Riesgo: dificulta el diagnóstico post-mortem."
   echo "Qué hace/riesgo: $effect"
   if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
   if ! kernel_confirm_change "systemd-coredump Storage=none" "$effect"; then WARNINGS=$((WARNINGS + 1)); return 0; fi
@@ -333,7 +341,7 @@ memory_security() {
   echo -e "\n${BLUE}[*] Configurando seguridad de memoria y superficies locales...${NC}"
   check_sysctl_param "kernel.randomize_va_space" "2" "ASLR (kernel.randomize_va_space)"
   check_sysctl_param "vm.mmap_min_addr" "65536" "vm.mmap_min_addr"
-  check_sysctl_param "kernel.unprivileged_bpf_disabled" "1" "kernel.unprivileged_bpf_disabled"
+  check_sysctl_param "kernel.unprivileged_bpf_disabled" "2" "kernel.unprivileged_bpf_disabled"
   check_sysctl_param "user.max_user_namespaces" "0" "user.max_user_namespaces"
 }
 
@@ -381,6 +389,7 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
+    export ORANGEBOX_ASSUME_YES=1
   fi
 
   # Ejecutar todas las verificaciones/correcciones

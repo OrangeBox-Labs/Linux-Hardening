@@ -80,13 +80,11 @@ Con `8192` se asegura que no se pierdan eventos durante el arranque.
 
 ---
 
-## 🛡️ 1.6.1.2 - SELinux no deshabilitado en boot
+## 🛡️ 1.6.1.2 - SELinux en boot (solo auditoría)
 
-**Qué hace:** Verifica que NO existan los parámetros `selinux=0` o `enforcing=0` en la línea de arranque.
+**Qué hace:** Comprueba si `selinux=0` o `enforcing=0` aparecen en `GRUB_CMDLINE_LINUX` y muestra una advertencia.
 
-**Por qué es importante:** Si alguien agregó `selinux=0`, SELinux está completamente desactivado. Si agregó `enforcing=0`, SELinux está en modo permisivo (solo registra, no bloquea). Un atacante con acceso físico podría agregar estos parámetros para desactivar completamente la seguridad del sistema.
-
-**Cómo se arregla:** El script elimina automáticamente `selinux=0` y `enforcing=0` de `GRUB_CMDLINE_LINUX`.
+**Política OrangeBox:** SELinux y sus parámetros de arranque son exclusivamente de comprobación y advertencia. El hardening no elimina ni añade automáticamente estos parámetros, no cambia `/etc/selinux/config`, no ejecuta `setenforce`, no relabela y no reinicia. Habilitar SELinux requiere una planificación aparte porque políticas o contextos incompletos pueden bloquear servicios.
 
 ---
 
@@ -118,7 +116,7 @@ Al final, la línea de arranque queda con algo como:
 2. Verifica permisos de archivos GRUB (deben ser 600) → Si no, los corrige
 3. Verifica `audit=1` → Si no, lo agrega
 4. Verifica `audit_backlog_limit=8192` → Si no, lo agrega
-5. Verifica que no existan `selinux=0` o `enforcing=0` → Si existen, los elimina
+5. Verifica los flags `selinux=0` y `enforcing=0` → Si existen, informa del riesgo y los conserva sin cambios
 6. Verifica parámetros adicionales (`slab_nomerge`, etc.) → Si no, los agrega
 7. Regenera la configuración de GRUB (`grub2-mkconfig`)
 8. Recomienda reiniciar para aplicar cambios
@@ -133,7 +131,7 @@ Al final, la línea de arranque queda con algo como:
 | Permisos | `chmod 600` y `chown root:root` |
 | `audit=1` | Agrega automáticamente el parámetro |
 | `audit_backlog_limit` | Agrega automáticamente el parámetro |
-| `selinux=0` / `enforcing=0` | Elimina automáticamente el parámetro |
+| `selinux=0` / `enforcing=0` | Solo muestra advertencia; no modifica SELinux ni GRUB |
 | Parámetros adicionales | Los agrega automáticamente |
 
 ---

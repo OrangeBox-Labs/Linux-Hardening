@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 # shellcheck source=../lib/service-compat.sh
 . "$ROOT_DIR/lib/service-compat.sh"
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 
-mockbin="$(mktemp -d)"
+mockbin="$(mktemp -d "$ROOT_DIR/.test-service-compat.XXXXXX")"
 trap 'rm -rf "$mockbin"' EXIT
 cat >"$mockbin/chkconfig" <<'MOCK'
 #!/bin/sh
@@ -31,13 +31,16 @@ esac
 MOCK
 chmod +x "$mockbin/chkconfig" "$mockbin/service"
 export MOCK_ENABLED=1 MOCK_ACTIVE=1
+# Export the mock PATH for the entire test process. Prefix assignments on
+# individual shell-function calls can behave differently across shells and
+# make command discovery depend on the invocation context.
+export PATH="$mockbin:$PATH"
+hash -r
+[ "$(type -P chkconfig)" = "$mockbin/chkconfig" ] || { printf "[DEBUG] chkconfig resuelto: %s; PATH=%s\n" "$(type -P chkconfig)" "$PATH" >&2; fail "no se está usando el mock chkconfig"; }
+[ "$(type -P service)" = "$mockbin/service" ] || { printf "[DEBUG] service resuelto: %s; PATH=%s\n" "$(type -P service)" "$PATH" >&2; fail "no se está usando el mock service"; }
 
-PATH="$mockbin:$PATH" ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
-PATH="$mockbin:$PATH" ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
-if PATH="$mockbin:$PATH" MOCK_ENABLED=0 ob_service_is_enabled_sysv fake-service; then
-  fail "SysV disabled service was reported enabled"
-fi
-if PATH="$mockbin:$PATH" MOCK_ACTIVE=0 ob_service_is_active_sysv fake-service; then
-  fail "SysV stopped service was reported active"
-fi
+ob_service_is_enabled_sysv fake-service || fail "SysV enabled on runlevel 3 was not detected"
+ob_service_is_active_sysv fake-service || fail "SysV running service was not detected"
+MOCK_ENABLED=0 ob_service_is_enabled_sysv fake-service && fail "SysV disabled service was reported enabled"
+MOCK_ACTIVE=0 ob_service_is_active_sysv fake-service && fail "SysV stopped service was reported active"
 pass "SysV chkconfig/service state checks"

@@ -17,6 +17,8 @@ AIDE_NEW_DB="/var/lib/aide/aide.db.new.gz"
 BACKUP_DIR="/root/aide-backup-$(date +%Y%m%d-%H%M%S)"
 
 confirm_aide_change() {
+  # AIDE siempre requiere consentimiento interactivo para instalar, inicializar o programar.
+  # ORANGEBOX_ASSUME_YES del --fix global nunca autoriza estas acciones opcionales.
   local title="$1" current="$2" proposed="$3" effect="$4" answer=""
   echo -e "\n${YELLOW}[WARN] Acción AIDE pendiente: $title${NC}"
   echo "Estado actual: $current"

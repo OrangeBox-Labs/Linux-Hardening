@@ -1,120 +1,171 @@
 #!/usr/bin/env bash
-# OrangeBox SELinux audit and carefully gated transition to Enforcing.
-# Disabled SELinux is never enabled automatically: that requires a planned relabel/reboot.
+# Herramienta exclusiva para cambiar SELinux a Permissive.
+# Este script no forma parte de linux-hardening.sh ni se invoca desde el baseline.
 set -u
 
-ACTION="${1:-}"
+ACTION="\${1:---check}"
+FIX=false
 case "$ACTION" in
-  ""|--check|-c) AUTO_FIX=false ;;
-  --fix|-f) AUTO_FIX=true ;;
+  ""|--check|-c) FIX=false ;;
+  --fix|-f) FIX=true ;;
   --help|-h)
     cat <<'EOF'
 Uso:
   ./selinux-secure-setup.sh          Auditoría de solo lectura
   ./selinux-secure-setup.sh --check  Auditoría de solo lectura
-  ./selinux-secure-setup.sh --fix    Cambiar a Enforcing solo tras confirmación
+  ./selinux-secure-setup.sh --fix    Solicita confirmación y cambia SELinux a Permissive
 
-El modo --fix no instala paquetes, no cambia contextos y no reinicia.
-Nunca habilita automáticamente SELinux cuando el estado runtime/configurado es Disabled.
+El modo --fix respalda /etc/selinux/config, cambia SELINUX=permissive
+y, si SELinux está activo, aplica setenforce 0. No reinicia ni relabela.
+Si SELinux está Disabled o el kernel usa selinux=0, puede requerirse
+planificar un cambio de arranque y reinicio por separado.
 EOF
     exit 0
     ;;
   *) echo "[ERROR] Opción desconocida: $ACTION" >&2; exit 2 ;;
 esac
 
-confirm_selinux_change() {
-  local effect="$1" answer=""
-  printf '\n[WARN] Cambio SELinux propuesto: %s\n' "$effect"
-  printf '%s\n' "Qué hace: SELinux Enforcing aplica las políticas MAC."
-  printf '%s\n' "Riesgo: aplicaciones sin política/contextos adecuados pueden quedar bloqueadas; confirme consola de recuperación y acceso alternativo."
-  printf '%s' "¿Confirmas este cambio? [s/N]: "
+CONFIG="/etc/selinux/config"
+BLUE='\033[0;34m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
+
+runtime_state() {
+  if command -v getenforce >/dev/null 2>&1; then
+    getenforce 2>/dev/null || printf '%s' "Unknown"
+  else
+    printf '%s' "Unknown"
+  fi
+}
+
+configured_state() {
+  [ -r "$CONFIG" ] || { printf '%s' "no definido"; return; }
+  awk -F= '/^[[:space:]]*SELINUX[[:space:]]*=/ {gsub(/[[:space:]]/, "", $2); value=tolower($2)} END {if (value=="") print "no definido"; else print value}' "$CONFIG"
+}
+
+report_state() {
+  local runtime configured
+  runtime="$(runtime_state)"
+  configured="$(configured_state)"
+  echo -e "\n\${BLUE}[MÓDULO] SELinux independiente | Auditoría / cambio explícito\${NC}"
+  echo "Estado runtime: $runtime"
+  echo "Configuración persistente: SELINUX=$configured"
+  if [ "$runtime" = "Permissive" ] && [ "$configured" = "permissive" ]; then
+    echo -e "\${GREEN}[OK] SELinux ya está en Permissive y queda persistido.\${NC}"
+  elif [ "$runtime" = "Enforcing" ]; then
+    echo -e "\${YELLOW}[INFO] SELinux aplica políticas ahora; pasar a Permissive dejará de bloquear accesos, aunque seguirá registrando denegaciones.\${NC}"
+  elif [ "$runtime" = "Disabled" ]; then
+    echo -e "\${YELLOW}[WARN] SELinux está Disabled: cambiar la configuración no activa el estado runtime hasta un arranque planificado.\${NC}"
+  fi
+}
+
+confirm_change() {
+  local answer=""
+  echo
+  echo "Qué hace: SELinux Permissive registra las denegaciones, pero no bloquea las operaciones."
+  echo "Riesgo: las políticas dejan de impedir accesos; aumenta la exposición hasta volver a Enforcing."
+  printf '¿Cambiar SELinux a Permissive? [s/N]: '
   if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
-    printf '\n[WARN] No hay terminal interactiva; se omite el cambio por seguridad.\n'
+    echo
+    echo "[WARN] No hay terminal interactiva; se omite el cambio."
     return 1
   fi
   IFS= read -r answer </dev/tty || return 1
-  case "$answer" in s|S|si|SI|sí|Sí|SÍ) return 0 ;; *) printf '[INFO] No se aplicó el cambio SELinux.\n'; return 1 ;; esac
+  case "$answer" in s|S|si|SI|Si|sí|Sí|SÍ) return 0 ;; *) echo "[INFO] Cambio rechazado."; return 1 ;; esac
 }
 
-audit_selinux() {
-  local mode="desconocido" configured="no definido"
-  if command -v getenforce >/dev/null 2>&1; then
-    mode="$(getenforce 2>/dev/null || printf '%s' 'desconocido')"
-    case "$mode" in
-      Enforcing) printf '[OK] SELinux está %s en runtime.\n' "$mode" ;;
-      Permissive) printf '[WARN] SELinux está Permissive; las denegaciones se registran, pero no se aplican.\n' ;;
-      Disabled) printf '[WARN] SELinux está Disabled; habilitarlo requiere planificación de relabel y reinicio. No se hará automáticamente.\n' ;;
-      *) printf '[WARN] No se pudo determinar el modo runtime de SELinux.\n' ;;
-    esac
-  else printf '[WARN] getenforce no está disponible; no se instala ningún paquete.\n'; fi
-  if [ -r /etc/selinux/config ]; then
-    configured="$(awk -F= '/^[[:space:]]*SELINUX[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' /etc/selinux/config)"
-    configured="${configured:-no definido}"
-    if [ "$configured" = "enforcing" ]; then printf '[OK] SELINUX=enforcing configurado persistentemente.\n'
-    else printf '[WARN] SELINUX configurado en /etc/selinux/config: %s.\n' "$configured"; fi
-  else printf '[WARN] /etc/selinux/config no está disponible; no se crea ni modifica.\n'; fi
-}
-
-apply_selinux_fix() {
-  local mode="desconocido" configured="" backup_dir="" backup_file="" tmp=""
-  command -v getenforce >/dev/null 2>&1 || { echo '[WARN] getenforce no disponible; no se cambia SELinux.'; return 1; }
-  [ -r /etc/selinux/config ] && [ -f /etc/selinux/config ] && [ ! -L /etc/selinux/config ] || {
-    echo '[WARN] /etc/selinux/config no es un archivo regular legible; no se modifica.'
+main() {
+  report_state
+  [ "$FIX" = true ] || return 0
+  [ "$EUID" -eq 0 ] || { echo "[ERROR] Ejecuta --fix como root." >&2; return 1; }
+  [ -f "$CONFIG" ] && [ ! -L "$CONFIG" ] || {
+    echo "[ERROR] $CONFIG no existe, no es un archivo regular o es un enlace simbólico; no se modifica."
     return 1
   }
-  mode="$(getenforce 2>/dev/null || printf '%s' 'desconocido')"
-  configured="$(awk -F= '/^[[:space:]]*SELINUX[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' /etc/selinux/config)"
-  configured="${configured:-no definido}"
-  if [ "$mode" = "Disabled" ] || [ "$configured" = "disabled" ]; then
-    echo '[WARN] SELinux está Disabled o configurado como disabled. No se habilita automáticamente: requiere planificar relabel, reinicio y consola de recuperación.'
-    return 0
+  local runtime configured backup tmp mode owner_group before after
+  runtime="$(runtime_state)"
+  configured="$(configured_state)"
+  if [ "$configured" = "permissive" ]; then
+    case "$runtime" in
+      Permissive) echo "[OK] No hay cambios pendientes."; return 0 ;;
+      Disabled|Unknown)
+        echo "[INFO] SELINUX=permissive ya está persistido; runtime=$runtime. No se modifica sin planificar el arranque."
+        if [ -r /proc/cmdline ] && grep -qw "selinux=0" /proc/cmdline; then
+          echo "[WARN] selinux=0 sigue deshabilitando SELinux desde el kernel."
+        fi
+        return 0
+        ;;
+    esac
   fi
-  if [ "$mode" != "Enforcing" ] && [ "$mode" != "Permissive" ]; then
-    echo "[WARN] Estado SELinux '$mode' no reconocido; no se aplica ningún cambio."
+  confirm_change || return 0
+
+  backup="/root/selinux-backup-$(date +%Y%m%d-%H%M%S)-$BASHPID"
+  if ! cp -p "$CONFIG" "$backup"; then
+    echo "[ERROR] No se pudo respaldar $CONFIG; se aborta."
     return 1
   fi
-  if [ "$mode" = "Enforcing" ] && [ "$configured" = "enforcing" ]; then
-    echo '[OK] SELinux ya está Enforcing en runtime y configuración persistente.'
-    return 0
+  chmod 600 "$backup" || { rm -f "$backup"; echo "[ERROR] No se pudo proteger el backup."; return 1; }
+  before="$(sha256sum "$CONFIG" 2>/dev/null | awk '{print $1}')"
+  after="$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')"
+  if [ -z "$before" ] || [ "$before" != "$after" ]; then
+    rm -f "$backup"
+    echo "[ERROR] El backup no coincide con el archivo original; no se modifica."
+    return 1
   fi
-  local effect=""
-  if [ "$mode" = "Permissive" ] && [ "$configured" != "enforcing" ]; then effect="establecer SELINUX=enforcing persistentemente y ejecutar setenforce 1 ahora"
-  elif [ "$mode" = "Permissive" ]; then effect="ejecutar setenforce 1 ahora (SELINUX ya está configurado como enforcing)"
-  else effect="cambiar /etc/selinux/config a SELINUX=enforcing para el próximo reinicio"; fi
-  confirm_selinux_change "$effect" || return 0
 
-  if [ "$configured" != "enforcing" ]; then
-    backup_dir="/var/backups/orangebox-selinux-hardening-$(date +%Y%m%d-%H%M%S)-$$"
-    if ! mkdir -p "$backup_dir" || ! chmod 700 "$backup_dir" || ! cp -p /etc/selinux/config "$backup_dir/selinux.config"; then
-      echo '[ERROR] No se pudo respaldar /etc/selinux/config; no se modifica.'
-      return 1
-    fi
-    backup_file="$backup_dir/selinux.config"
-    tmp="$(mktemp /etc/selinux/config.orangebox.XXXXXX)" || { echo '[ERROR] No se pudo crear temporal para la configuración.'; return 1; }
-    if ! awk '
-      /^[[:space:]]*SELINUX[[:space:]]*=/ { if (!done) print "SELINUX=enforcing"; done=1; next }
-      { print }
-      END { if (!done) print "SELINUX=enforcing" }
-    ' /etc/selinux/config > "$tmp"; then rm -f "$tmp"; echo '[ERROR] No se pudo preparar la configuración SELinux.'; return 1; fi
-    chmod --reference=/etc/selinux/config "$tmp" 2>/dev/null || chmod 644 "$tmp"
-    chown --reference=/etc/selinux/config "$tmp" 2>/dev/null || chown root:root "$tmp"
-    if ! mv "$tmp" /etc/selinux/config; then rm -f "$tmp"; echo '[ERROR] No se pudo instalar la configuración.'; return 1; fi
-    echo "[OK] SELINUX=enforcing configurado persistentemente. Backup: $backup_file"
+  tmp="$(mktemp /etc/selinux/.config.orangebox.XXXXXX)" || {
+    echo "[ERROR] No se pudo crear archivo temporal; no se modifica SELinux."
+    return 1
+  }
+  if ! awk '
+    BEGIN { updated=0 }
+    /^[[:space:]]*#/ { print; next }
+    /^[[:space:]]*SELINUX[[:space:]]*=/ {
+      if (!updated) print "SELINUX=permissive"
+      updated=1
+      next
+    }
+    { print }
+    END { if (!updated) print "SELINUX=permissive" }
+  ' "$CONFIG" > "$tmp"; then
+    rm -f "$tmp"
+    echo "[ERROR] No se pudo preparar SELINUX=permissive."
+    return 1
   fi
-  if [ "$mode" = "Permissive" ]; then
-    if ! setenforce 1 || [ "$(getenforce 2>/dev/null)" != "Enforcing" ]; then
-      echo '[ERROR] No se pudo verificar SELinux Enforcing tras setenforce; se intentará restaurar el estado anterior.'
-      setenforce 0 >/dev/null 2>&1 || true
-      if [ -n "$backup_file" ]; then cp -p "$backup_file" /etc/selinux/config; fi
-      return 1
-    fi
-    echo '[OK] SELinux cambió a Enforcing en runtime.'
+
+  mode="$(stat -c '%a' "$CONFIG" 2>/dev/null || echo 644)"
+  owner_group="$(stat -c '%u:%g' "$CONFIG" 2>/dev/null || echo 0:0)"
+  if ! chmod "$mode" "$tmp" || ! chown "$owner_group" "$tmp" || ! mv -f "$tmp" "$CONFIG"; then
+    rm -f "$tmp"
+    echo "[ERROR] No se pudo actualizar $CONFIG; se conserva el estado runtime."
+    return 1
   fi
-  echo '[INFO] No se instalaron paquetes, no se modificaron contextos y no se reinició el sistema.'
-  return 0
+  if [ "$(configured_state)" != "permissive" ]; then
+    cp -p "$backup" "$CONFIG"
+    echo "[ERROR] La configuración no quedó en permissive; se restauró el backup."
+    return 1
+  fi
+  echo "[OK] SELINUX=permissive persistido. Backup: $backup"
+
+  case "$runtime" in
+    Enforcing)
+      if command -v setenforce >/dev/null 2>&1 && setenforce 0 && [ "$(runtime_state)" = "Permissive" ]; then
+        echo "[OK] Estado runtime cambiado a Permissive."
+      else
+        cp -p "$backup" "$CONFIG"
+        setenforce 1 >/dev/null 2>&1 || true
+        echo "[ERROR] No se pudo verificar Permissive; se restauró la configuración. Revisa el estado manualmente."
+        return 1
+      fi
+      ;;
+    Permissive)
+      echo "[OK] Runtime ya estaba Permissive; se actualizó la persistencia."
+      ;;
+    Disabled|*)
+      echo "[WARN] Runtime no está activo como SELinux; no se ejecuta setenforce. Puede requerir un arranque planificado."
+      if [ -r /proc/cmdline ] && grep -qw 'selinux=0' /proc/cmdline; then
+        echo "[WARN] Se detectó selinux=0 en /proc/cmdline; la configuración SELINUX=permissive no anulará ese parámetro."
+      fi
+      ;;
+  esac
 }
 
-echo 'OrangeBox SELinux - auditoría y remediación con confirmación'
-audit_selinux
-if [ "$AUTO_FIX" = true ]; then apply_selinux_fix; fi
-exit 0
+main "$@"

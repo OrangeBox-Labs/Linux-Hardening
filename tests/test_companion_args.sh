@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -44,12 +44,12 @@ printf '%s\n' "$output" | grep -Fqx 'argc=1' ||
 printf '%s\n' "$output" | grep -Fqx 'arg1=--check' ||
   fail "el argumento --check no se conservó"
 
-output="$(run_companion_script "$TMP_DIR/child.sh" "--fix" "--allow-shorewall")"
+output="$(run_companion_script "$TMP_DIR/child.sh" "--fix" "--custom-flag")"
 printf '%s\n' "$output" | grep -Fqx 'argc=2' ||
   fail "dos argumentos opcionales deben producir argc=2"
 printf '%s\n' "$output" | grep -Fqx 'arg1=--fix' ||
   fail "no se conservó --fix"
-printf '%s\n' "$output" | grep -Fqx 'arg2=--allow-shorewall' ||
-  fail "no se conservó --allow-shorewall"
+printf '%s\n' "$output" | grep -Fqx 'arg2=--custom-flag' ||
+  fail "no se conservó --custom-flag"
 
 pass "la invocación de módulos admite cero, uno o dos argumentos bajo set -u"

@@ -177,7 +177,7 @@ cis_stream_has_kernel_argument() {
     {
       line=$0
       sub(/[[:space:]]+#.*/, "", line)
-      n=split(line, tokens, /[[:space:]\",]+/)
+      n=split(line, tokens, /[[:space:],"]+/)
       for (i=1; i<=n; i++) if (tokens[i] == wanted) found=1
     }
     END { exit(found ? 0 : 1) }
@@ -193,11 +193,14 @@ cis_file_has_kernel_argument() {
 # Read the effective systemd config including drop-ins when systemd-analyze supports it.
 # If drop-ins exist but effective ordering cannot be resolved, return "unverifiable".
 cis_systemd_config_dump() {
-  local unit="$1" base_file="$2" candidate
-  if command -v systemd-analyze >/dev/null 2>&1 &&
-     systemd-analyze cat-config "$unit" >/dev/null 2>&1; then
-    systemd-analyze cat-config "$unit" 2>/dev/null
-    return $?
+  local unit="$1" base_file="$2" candidate effective=""
+  # Capture the effective dump once. Besides avoiding a second invocation,
+  # this preserves the exact output whose exit status was validated.
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    if effective="$(systemd-analyze cat-config "$unit" 2>/dev/null)"; then
+      printf '%s\n' "$effective"
+      return 0
+    fi
   fi
 
   for candidate in \

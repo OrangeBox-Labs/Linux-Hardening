@@ -56,10 +56,10 @@ systemctl status auditd
 ## Este script configura
 
 - Tamaño maximo de logs: 50 MB
-- No borrar logs automaticamente
-- Detener sistema si se llena el disco de logs
-- Reglas para registrar eventos criticos
-- Proteger las reglas para que no se puedan modificar
+- Rotar los logs al alcanzar el tamaño configurado; la retención se controla aparte
+- Registrar avisos de espacio bajo y suspender la escritura al alcanzar el umbral administrativo crítico
+- Reglas persistentes OrangeBox para registrar eventos críticos
+- Aplicar la inmutabilidad (`-e 2`) solamente después de validar las reglas cargadas
 
 ## Que NO hace auditd
 
@@ -78,11 +78,11 @@ Configura auditd para iniciar automaticamente y asegura que este corriendo
 ### 4.1.1.3 - Tamaño de logs
 Configura max_log_file = 50 MB
 
-### 4.1.1.4 - Retencion de logs
-Configura max_log_file_action = keep_logs (no elimina automaticamente)
+### 4.1.1.4 - Rotación de logs
+Configura `max_log_file_action = ROTATE`. La retención se administra con la política operativa del servidor.
 
-### 4.1.1.5 - Accion cuando logs estan llenos
-Configura admin_space_left_action = halt (detiene sistema cuando esta lleno)
+### 4.1.1.5 - Acciones por falta de espacio
+Configura `space_left_action = SYSLOG` y `admin_space_left_action = SUSPEND`; no apaga el host automáticamente.
 
 ### Reglas de auditoria (4.1.2.x)
 
@@ -110,6 +110,22 @@ chmod +x auditd-hardening.sh
 ./auditd-hardening.sh
 
 ./auditd-hardening.sh --fix
+
+## Recuperación de reglas inmutables
+
+En RHEL/AlmaLinux/Rocky/CentOS 7–10, `--fix` respalda primero la configuración y comprueba las reglas cargadas en memoria. Si el kernel ya está en `enabled 2` y faltan reglas, prepara `/etc/audit/rules.d/98-orangebox-baseline.rules` y devuelve código `3` para indicar que se requiere un reinicio controlado. No reinicia el servidor automáticamente. En la ventana de mantenimiento, revise los archivos `*.rules`, confirme que `-e 2` quede al final y reinicie.
+
+Después del arranque, valide:
+
+```bash
+auditctl -s
+auditctl -l
+systemctl --no-pager --full status auditd
+ausearch -ts recent
+aureport -ts today
+```
+
+El código `3` significa que hay una acción de mantenimiento pendiente; no debe interpretarse como hardening completado.
 
 ## Verificacion
 

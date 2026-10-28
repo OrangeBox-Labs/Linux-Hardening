@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CIS="$ROOT_DIR/cis-benchmark-check.sh"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.test-mountpoint-exact.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
@@ -19,14 +19,14 @@ sed -n \
 mkdir -p "$TMP_DIR/bin"
 cat > "$TMP_DIR/bin/findmnt" <<'FAKE_FINDMNT'
 #!/usr/bin/env bash
-case "$*" in
-  *"TARGET,OPTIONS"*)
+case "${3:-}" in
+  TARGET,OPTIONS)
     printf '%s\n' \
       '/ rw,relatime' \
       '/dev/shm rw,nosuid,nodev,noexec' \
       '/home rw,nosuid,nodev'
     ;;
-  *"TARGET"*)
+  TARGET)
     printf '%s\n' '/' '/dev/shm' '/home'
     ;;
   *)
@@ -37,8 +37,13 @@ FAKE_FINDMNT
 chmod +x "$TMP_DIR/bin/findmnt"
 PATH="$TMP_DIR/bin:$PATH"
 export PATH
+hash -r
+[ "$(type -P findmnt)" = "$TMP_DIR/bin/findmnt" ] || { printf "[DEBUG] findmnt resuelto: %s; PATH=%s\n" "$(type -P findmnt)" "$PATH" >&2; fail "no se está usando el mock findmnt"; }
 # shellcheck source=/dev/null
 source "$TMP_DIR/mount-helpers.sh"
+
+mount_list="$(findmnt -rn -o TARGET)" || fail "el mock findmnt no pudo listar TARGET"
+printf '%s\n' "$mount_list" | grep -Fx /tmp >/dev/null && fail "el mock findmnt incluye /tmp inesperadamente"
 
 cis_mount_is_exact "/" || fail "el root filesystem debería reconocerse como mountpoint"
 cis_mount_is_exact "/dev/shm" || fail "/dev/shm debería reconocerse como mountpoint exacto"

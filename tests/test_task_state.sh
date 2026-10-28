@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 STATE="$ROOT_DIR/.task-status.md"
 JOURNAL="$ROOT_DIR/.task-journal.md"
 PROTOCOL="$ROOT_DIR/.github/TASK-RESUMPTION-PROTOCOL.md"

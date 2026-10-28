@@ -25,6 +25,7 @@ jobs:
       - name: Verify executable bits on entrypoint scripts
         run: |
           test -x ./linux-hardening.sh
+          test -x ./logrotate-hardening.sh
           test -x ./audit-firewall-listeners.sh
           test -x ./kernel-lpe-2026-mitigation.sh
           test -x ./configure-login-banners.sh
@@ -36,6 +37,7 @@ jobs:
         run: bash tests/test_os_detection_legacy.sh
       - name: Test legacy auditd and GRUB coverage
         run: bash tests/test_legacy_audit_modules.sh
+      # Includes enabled=2 recovery planning and persistent-rule staging in isolated paths, including non-root CI.
       - name: Test auditd immutable state interpretation
         run: bash tests/test_auditd_immutable_status.sh
       - name: Test legacy ntpd periodic refresh guard
@@ -74,6 +76,8 @@ jobs:
         run: bash tests/test_policy_guards.sh
       - name: Test filesystem fix safety
         run: bash tests/test_fs_safety_guard.sh
+      - name: Test automatic logrotate policy
+        run: bash tests/test_logrotate_hardening.sh
       - name: Test companion module consent routing
         run: bash tests/test_companion_consent_routing.sh
       - name: Test optional companion script arguments under nounset
@@ -96,6 +100,8 @@ jobs:
         run: bash tests/test_selinux_fix_guard.sh
       - name: Test kernel.kptr_restrict policy
         run: bash tests/test_kptr_restrict_policy.sh
+      - name: Test kernel.unprivileged_bpf_disabled policy
+        run: bash tests/test_bpf_policy.sh
 
   # Syntax/tests on representative RPM-family generations. CentOS 6/7 cover
   # legacy Bash releases; AlmaLinux 8/9/10 cover modern RHEL-compatible userspace.
@@ -160,6 +166,7 @@ jobs:
               /bin/bash tests/test_idempotent_baseline.sh
               /bin/bash tests/test_kptr_restrict_policy.sh
               /bin/bash tests/test_selinux_fix_guard.sh
+              /bin/bash tests/test_logrotate_hardening.sh
               /bin/bash tests/test_companion_consent_routing.sh
               /bin/bash tests/test_companion_args.sh
               /bin/bash tests/test_sudo_consent.sh

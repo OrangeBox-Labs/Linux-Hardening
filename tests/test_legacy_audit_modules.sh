@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 AUDITD="$ROOT_DIR/auditd-hardening.sh"
 GRUB="$ROOT_DIR/grub-hardening.sh"
 AGGREGATOR="$ROOT_DIR/linux-hardening-audit.sh"

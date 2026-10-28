@@ -99,7 +99,7 @@ sudo ./bash-hardening.sh
 - Delega el logo y la ficha de sesión al MOTD dinámico `/etc/profile.d/99-orangebox-motd.sh` para evitar duplicados
 - Configura prompt personalizado con formato [HH:MM] usuario@hostname directorio $
 - Activa HISTTIMEFORMAT para historial con fecha/hora
-- Configura timeout de sesión inactiva (15 minutos / 10 minutos para root)
+- Configura timeout de sesión inactiva de 10 minutos (600 segundos) para usuarios regulares y root donde aplica
 - Establece umask segura (027)
 - Selecciona el límite según Bash: `HISTSIZE=-1` y `HISTFILESIZE=-1` en Bash 4.3+, o 100000 en versiones anteriores (fallback para RHEL 6/7); no marca `HISTFILE` como `readonly`
 
@@ -143,7 +143,7 @@ sudo ./bash-hardening.sh
 ### 6. Configuración para Nuevos Usuarios (/etc/skel/.bashrc)
 
 - Todos los nuevos usuarios heredan la configuración de hardening
-- Timeout de 15 minutos para usuarios regulares
+- Timeout de 10 minutos para usuarios regulares
 - Umask 027 por defecto
 
 ### 7. Deshabilitar Ctrl+Alt+Del
@@ -211,7 +211,7 @@ RSYSLOG_CONF="/etc/rsyslog.d/30-bash.conf"
 
 ### Timeouts configurables
 
-Para usuarios regulares: TMOUT=900 (15 minutos)
+Para usuarios regulares: TMOUT=600 (10 minutos)
 Para usuario root: TMOUT=600 (10 minutos)
 
 ### Tamaños de historial

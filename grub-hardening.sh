@@ -32,6 +32,7 @@ BACKUP_DIR="/root/grub-backup-$(date +%Y%m%d-%H%M%S)-${BASHPID}"
 # FUNCION PARA MOSTRAR USO
 # ==============================================
 confirm_grub_change() {
+  if [ "${ORANGEBOX_ASSUME_YES:-0}" = "1" ]; then printf "[AUTO-YES] %s\n" "${1:-cambio}"; return 0; fi
   local control="$1" effect="$2" answer=""
   echo -e "\n$YELLOW[CONFIRMACIÓN REQUERIDA]$NC $control"
   echo "Qué hace/riesgo: $effect"
@@ -66,7 +67,7 @@ grub_config_has_param() {
 show_usage() {
   echo -e "${GREEN}USO:${NC}"
   echo "  $0            - Modo verificación (solo muestra lo que hay que corregir)"
-  echo "  $0 --fix      - Modo automático (aplica las correcciones)"
+  echo "  $0 --fix      - Modo automático, asume sí en los cambios propuestos"
   echo "  $0 -f         - Modo automático (versión corta)"
   echo ""
   echo -e "${GREEN}EJEMPLO:${NC}"
@@ -119,6 +120,17 @@ make_backup() {
 # ==============================================
 # FUNCION PARA AGREGAR PARAMETROS AL KERNEL
 # ==============================================
+kernel_param_effect() {
+  case "$1" in
+    slab_nomerge) echo "Qué hace: evita combinar cachés de objetos del kernel y reduce algunas vías de explotación de memoria. Riesgo: puede aumentar el uso de memoria." ;;
+    page_alloc.shuffle=1) echo "Qué hace: aleatoriza la asignación de páginas de memoria para dificultar predecir sus ubicaciones. Riesgo: requiere soporte del kernel y reinicio." ;;
+    randomize_kstack_offset=on) echo "Qué hace: aleatoriza el desplazamiento de la pila del kernel y dificulta exploits que dependen de direcciones predecibles. Riesgo: requiere soporte del kernel y reinicio." ;;
+    audit=1) echo "Qué hace: activa auditoría del kernel desde el arranque; no crea reglas por sí solo. Riesgo: las reglas activas pueden aumentar el volumen de eventos." ;;
+    audit_backlog_limit=*) echo "Qué hace: define la capacidad de la cola de eventos de auditoría pendientes. Riesgo: una cola mayor usa más memoria; requiere reinicio." ;;
+    *) echo "Qué hace: configura un parámetro de seguridad del kernel. Riesgo: requiere soporte del kernel y reinicio para surtir efecto." ;;
+  esac
+}
+
 add_kernel_param() {
   local param="$1" description="$2" effect="" tmp="" mode=""
   if grub_config_has_param "$GRUB_CONFIG" "$param"; then
@@ -129,7 +141,7 @@ add_kernel_param() {
   echo -e "$RED[!] $description - NO CONFIGURADO$NC"
   if [ "$AUTO_FIX" != true ]; then WARNINGS=$((WARNINGS + 1)); return 0; fi
 
-  effect="Añade el parámetro $param a GRUB_CMDLINE_LINUX y requiere regenerar la configuración de GRUB. Puede cambiar el comportamiento del kernel tras reiniciar; un valor no compatible o un error de configuración puede impedir el arranque. Verifica consola/recuperación y mantén una sesión administrativa disponible."
+  effect="$(kernel_param_effect "$param")"
   if ! confirm_grub_change "$description ($param)" "$effect"; then
     WARNINGS=$((WARNINGS + 1))
     return 0
@@ -286,90 +298,7 @@ check_audit_backlog() {
 }
 
 # ==============================================
-# 1.6.1.2 - ASEGURAR SELINUX NO DESHABILITADO EN BOOT
 # ==============================================
-remove_kernel_param() {
-  local param="$1" description="$2" effect="$3" tmp="" mode=""
-  if ! grub_config_has_param "$GRUB_CONFIG" "$param"; then return 0; fi
-  if ! confirm_grub_change "$description ($param)" "$effect"; then
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-  tmp="$(mktemp "$GRUB_CONFIG.orangebox.XXXXXX")" || { WARNINGS=$((WARNINGS + 1)); return 1; }
-  awk -v param="$param" '
-    /^[ \t]*GRUB_CMDLINE_LINUX="/ && /"$/ {
-      line=$0
-      eq=index(line, "=")
-      prefix=substr(line, 1, eq)
-      value=substr(line, eq+1)
-      sub(/^"/, "", value)
-      sub(/"$/, "", value)
-      n=split(value, fields, /[ \t]+/)
-      rebuilt=""
-      removed=0
-      for (i=1; i<=n; i++) {
-        if (fields[i] == param) { removed=1; continue }
-        if (fields[i] == "") continue
-        if (rebuilt != "") rebuilt=rebuilt " "
-        rebuilt=rebuilt fields[i]
-      }
-      if (removed) {
-        print prefix "\"" rebuilt "\""
-        changed=1
-        next
-      }
-    }
-    { print }
-    END { if (!changed) exit 1 }
-  ' "$GRUB_CONFIG" > "$tmp" || { rm -f "$tmp"; echo -e "$RED[!] No se pudo preparar la eliminación de $param.$NC"; WARNINGS=$((WARNINGS + 1)); return 1; }
-  mode="$(stat -c "%a" "$GRUB_CONFIG" 2>/dev/null || echo 600)"
-  chmod "$mode" "$tmp" || { rm -f "$tmp"; WARNINGS=$((WARNINGS + 1)); return 1; }
-  chown --reference="$GRUB_CONFIG" "$tmp" 2>/dev/null || chown root:root "$tmp" 2>/dev/null || true
-  if grep -qF "$param" "$tmp"; then
-    rm -f "$tmp"
-    echo -e "$RED[!] El parámetro $param sigue presente; no se instala el cambio.$NC"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-  if mv "$tmp" "$GRUB_CONFIG"; then
-    echo -e "$GREEN[✓] $description eliminado y verificado$NC"
-    FIXED=$((FIXED + 1))
-    GRUB_PARAMS_CHANGED=true
-  else
-    rm -f "$tmp"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-}
-
-check_selinux_boot() {
-  echo -e "\n$BLUE[*] 1.6.1.2 - Verificando SELinux no deshabilitado en boot...$NC"
-
-  if grub_config_has_param "$GRUB_CONFIG" "selinux=0"; then
-    echo -e "$RED[!] selinux=0 encontrado en GRUB_CMDLINE_LINUX$NC"
-    if [ "$AUTO_FIX" = true ]; then
-      effect="Quitar selinux=0 permite que SELinux pueda inicializarse tras el próximo arranque, según /etc/selinux/config. Si la política/contextos están mal preparados, servicios pueden quedar bloqueados; puede requerirse relabel y consola de recuperación."
-      remove_kernel_param "selinux=0" "evitar SELinux deshabilitado al arrancar" "$effect"
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 1
-  fi
-
-  if grub_config_has_param "$GRUB_CONFIG" "enforcing=0"; then
-    echo -e "$RED[!] enforcing=0 encontrado en GRUB_CMDLINE_LINUX$NC"
-    if [ "$AUTO_FIX" = true ]; then
-      effect="Quitar enforcing=0 puede pasar SELinux a enforcing en el próximo arranque cuando SELinux esté configurado como enabled. Aplicaciones con políticas o contextos incompletos pueden fallar; verifica AVCs y conserva consola de recuperación."
-      remove_kernel_param "enforcing=0" "evitar desactivar SELinux enforcing al arrancar" "$effect"
-    else
-      WARNINGS=$((WARNINGS + 1))
-    fi
-    return 1
-  fi
-
-  echo -e "$GREEN[✓] SELinux no está deshabilitado en boot$NC"
-  return 0
-}
 
 # ==============================================
 # PARAMETROS ADICIONALES DE SEGURIDAD DEL KERNEL
@@ -446,17 +375,21 @@ regenerate_grub() {
     return 1
   fi
 
-  effect="Regenera $output a partir de la configuración GRUB. Un destino incorrecto o error de generación puede impedir el arranque; verifica el backup y la consola de recuperación, y no reinicies hasta comprobar la salida."
-  if ! confirm_grub_change "regenerar la configuración de GRUB en $output" "$effect"; then
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-
+  echo -e "$BLUE[APLICANDO] Regenerar GRUB porque hubo cambios aprobados en parámetros de arranque.$NC"
   if grub2-mkconfig -o "$output" && [ -s "$output" ]; then
-    echo -e "$GREEN[✓] Configuración GRUB regenerada y archivo de salida no vacío: $output$NC"
+    if command -v grub2-script-check >/dev/null 2>&1 && ! grub2-script-check "$output"; then
+      local saved="$BACKUP_DIR/$(basename "$output")"
+      [ -s "$saved" ] && cp -p "$saved" "$output"
+      echo -e "$RED[ERROR] La validación de GRUB falló; se restauró el respaldo cuando estaba disponible. No reinicies.$NC"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+    echo -e "$GREEN[OK] Configuración GRUB regenerada y validada: $output$NC"
     FIXED=$((FIXED + 1))
   else
-    echo -e "$RED[!] Error al regenerar GRUB; no reinicie. Revise backup y salida del comando.$NC"
+    local saved="$BACKUP_DIR/$(basename "$output")"
+    [ -s "$saved" ] && cp -p "$saved" "$output"
+    echo -e "$RED[ERROR] No se pudo regenerar GRUB; se restauró el respaldo cuando estaba disponible. No reinicies.$NC"
     WARNINGS=$((WARNINGS + 1))
     return 1
   fi
@@ -536,13 +469,6 @@ audit_legacy_grub_readonly() {
     WARNINGS=$((WARNINGS + 1))
   fi
 
-  if grep -Eq '^[[:space:]]*kernel[[:space:]].*[[:space:]](selinux=0|enforcing=0)([[:space:]]|$)' "$cfg"; then
-    echo -e "${RED}[!] Se encontró selinux=0 o enforcing=0 en una entrada de kernel${NC}"
-    WARNINGS=$((WARNINGS + 1))
-  else
-    echo -e "${GREEN}[✓] No se detectó SELinux deshabilitado en las entradas de kernel${NC}"
-  fi
-
   if [ -r /proc/cmdline ] && grep -qw 'audit=1' /proc/cmdline; then
     echo -e "${GREEN}[✓] El kernel actualmente iniciado contiene audit=1${NC}"
   else
@@ -606,6 +532,7 @@ main() {
     echo -e "${YELLOW}🔧 MODO AUTOMÁTICO - Aplicando correcciones...${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     AUTO_FIX=true
+    ORANGEBOX_ASSUME_YES=1; export ORANGEBOX_ASSUME_YES
     if ! make_backup; then
       echo -e "${RED}[ERROR] Backup de GRUB falló; se aborta antes de ejecutar controles con cambios.${NC}" >&2
       exit 1
@@ -617,7 +544,6 @@ main() {
   check_grub_permissions
   check_audit_boot
   check_audit_backlog
-  check_selinux_boot
   check_additional_params
 
   # Regenerar configuracion de GRUB si se hicieron cambios

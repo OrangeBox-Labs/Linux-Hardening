@@ -64,22 +64,11 @@ Que previene: Incluso si un gateway esta en la lista de gateways conocidos, si e
 
 Impacto: El sistema ignora redirecciones ICMP incluso de gateways confiables. Previene que un router legitimo pero comprometido redirija trafico.
 
-### 3.3.4 - Loggear paquetes sospechosos (Martians)
+### 3.3.4 - Registro de paquetes sospechosos (Martians)
 
-**👽 Martian**: Un paquete que llegó de una dirección IP que no debería existir en tu red. Tu servidor lo mira y dice "esto es marciano" y lo bota.
+**Política OrangeBox: desactivado por defecto.** Registrar paquetes con direcciones de origen no enrutables puede generar un volumen excesivo de logs y consumir espacio rápidamente en servidores con tráfico alto.
 
-> ⚠️ **Ojo**: Loggear martians puede llenar /var en minutos. Mejor tener una partición separada o vas a amanecer con el disco lleno de basura espacial.
-
-Parametros modificados:
-```
-  net.ipv4.conf.all.log_martians = 1
-  net.ipv4.conf.default.log_martians = 1
-```
-
-Que previene: Registra en /var/log/messages los paquetes con direcciones origen no validas (spoofing). Permite detectar intentos de ataque.
-
-Impacto: Se generan entradas en los logs. No afecta el funcionamiento normal. Los logs pueden revisarse con: grep -i 'martian' /var/log/messages. En hosts con mucho tráfico conviene revisar volumen de logs y retención.
-
+El script conserva `net.ipv4.conf.all.log_martians = 0` y `net.ipv4.conf.default.log_martians = 0`. Si un servidor necesita esta telemetría para una investigación concreta, debe habilitarse como excepción operativa explícita y con límites/retención de logs revisados; no se activa como parte del baseline general.
 ### 3.3.5 - Ignorar peticiones ICMP broadcast
 
 Parametros modificados:
@@ -120,18 +109,18 @@ Impacto: El sistema descarta paquetes que llegan por una interfaz que no es la c
 
 ### 3.3.8 - Habilitar SYN Cookies y revisar las colas TCP
 
-Parametros que propone el baseline:
+Parametros del baseline para todas las distribuciones compatibles que expongan estos sysctls:
 ```
   net.ipv4.tcp_syncookies = 1
   net.ipv4.tcp_max_syn_backlog = 4096
   net.core.somaxconn = 4096
+  net.ipv4.tcp_synack_retries = 2
+  net.ipv4.tcp_syn_retries = 2
 ```
 
-El baseline **no modifica automáticamente** `net.ipv4.tcp_synack_retries` ni `net.ipv4.tcp_syn_retries`. Estos parámetros controlan los reintentos TCP y su valor adecuado depende de la tolerancia a pérdida/latencia, del patrón de conexiones y de la política del proveedor (por ejemplo, cPanel/CloudLinux). Se preservan los valores existentes; cualquier ajuste debe tratarse como tuning independiente, respaldado por métricas y validación operativa.
+Los cinco parámetros se auditan tanto en el baseline global como en `network-hardening.sh`. El helper compartido comprueba disponibilidad del kernel, valor activo y persistencia; conserva el mecanismo de backup y la política de aplicación del módulo. En kernels que no expongan una clave, el control se marca como no aplicable.
 
-Que previene: `tcp_syncookies=1` permite al kernel usar SYN cookies cuando la cola de conexiones pendientes se desborda; los parámetros de backlog ajustan las colas de conexiones pendientes y completadas.
-
-Impacto: No se debe asumir que un valor de backlog es óptimo para todas las cargas. Revise contadores TCP, límites de las aplicaciones y uso de recursos antes de cambiar valores. SYN cookies son un mecanismo de respaldo ante el desbordamiento de la cola, no un sustituto de diagnosticar una sobrecarga causada por tráfico legítimo.
+Impacto operativo: `tcp_synack_retries=2` reduce los reintentos SYN-ACK de conexiones entrantes y `tcp_syn_retries=2` reduce los reintentos SYN de conexiones salientes. Ambos pueden hacer que conexiones con pérdida de paquetes o latencia elevada fallen antes. `tcp_max_syn_backlog=4096` y `somaxconn=4096` elevan los límites de cola; la aplicación debe poder aprovecharlos y el servidor debe contar con recursos adecuados. `tcp_syncookies=1` permite al kernel usar SYN cookies cuando se satura la cola de conexiones pendientes. Valide contadores TCP y patrones de conexión después de aplicar el baseline, especialmente en redes de alta latencia o enlaces con pérdida.
 
 ### 3.3.9 - Deshabilitar anuncios de router IPv6
 

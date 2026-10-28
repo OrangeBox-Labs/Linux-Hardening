@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 NETWORK="$ROOT_DIR/network-hardening.sh"
 AUDITD="$ROOT_DIR/auditd-hardening.sh"
 RSYSLOG="$ROOT_DIR/rsyslog-hardening.sh"
@@ -18,7 +18,7 @@ grep -Fq 'no se descargará en caliente' "$NETWORK" || fail "la confirmación de
 grep -Fq 'if ! make_backup; then' "$NETWORK" || fail "network-hardening puede aplicar cambios si falla el backup"
 grep -Fq 'chmod 700 "$BACKUP_DIR"' "$NETWORK" || fail "backup de red no restringe permisos"
 grep -Fq 'if ! make_backup; then' "$AUDITD" || fail "auditd puede aplicar cambios si falla el backup"
-grep -Fq 'chmod 700 "$BACKUP_DIR"' "$AUDITD" || fail "backup auditd no restringe permisos"
+grep -Fq 'mkdir -m 700 "$BACKUP_DIR"' "$AUDITD" || fail "backup auditd no crea un directorio exclusivo con permisos restrictivos"
 grep -Fq 'if ! make_backup; then' "$RSYSLOG" || fail "rsyslog puede aplicar cambios si falla el backup"
 grep -Fq 'chmod 700 "$BACKUP_DIR"' "$RSYSLOG" || fail "backup logging no restringe permisos"
 grep -Fq 'if ! make_backup; then' "$BASH_HARDENING" || fail "Bash hardening puede aplicar cambios si falla el backup"
@@ -43,4 +43,15 @@ grep -Fq 'No se pudo respaldar $file' "$GRUB" || fail "GRUB no comprueba las cop
 grep -Fq 'KERNEL_BACKUP_DIR=' "$KERNEL" || fail "kernel hardening no define un backup de ejecución estable"
 grep -Fq 'if ! cp -p "$source" "$backup"' "$KERNEL" || fail "kernel hardening no comprueba la copia de seguridad antes del cambio"
 grep -Fq '[ -e "$backup" ] && return 0' "$KERNEL" || fail "kernel hardening puede sobrescribir la primera copia previa al cambio"
+# EL10 must explicitly require audit-rules, even when auditctl happens to be present.
+grep -Fq 'package="audit-rules"' "$AUDITD" || fail "auditd-hardening no selecciona audit-rules para EL10"
+grep -Fq 'rpm -q audit-rules' "$AUDITD" || fail "auditd-hardening no verifica el paquete audit-rules instalado"
+grep -Fq 'augenrules' "$AUDITD" || fail "auditd-hardening no verifica la herramienta de reglas augenrules"
+grep -Fq 'dnf install "$package" -y' "$AUDITD" || fail "auditd-hardening no puede instalar el paquete de reglas ausente con DNF"
+# cron/at must establish and verify allow-list before offering deny-list cleanup.
+allow_line="$(grep -nF 'crear $allow_file con solo root' "$CRON" | head -1 | cut -d: -f1)"
+deny_line="$(grep -nF 'eliminar $deny_file (allow-list ya verificado)' "$CRON" | head -1 | cut -d: -f1)"
+[ -n "$allow_line" ] && [ -n "$deny_line" ] && [ "$allow_line" -lt "$deny_line" ] || fail "cron/at podría eliminar deny-list antes de crear/verificar allow-list"
+grep -Fq 'se conserva $deny_file' "$CRON" || fail "cron/at no conserva deny-list cuando allow-list no puede verificarse"
+pass "audit-rules en EL10 y allow-lists cron/at se verifican antes de quitar restricciones previas"
 pass "network/auditd/rsyslog/Bash/cron/GRUB/kernel abortan si falla su respaldo; kernel conserva la copia original"

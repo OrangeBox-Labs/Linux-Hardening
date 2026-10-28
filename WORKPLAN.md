@@ -1,6 +1,6 @@
 # Plan de trabajo persistente — OrangeBox Linux-Hardening
 
-Última actualización: 2026-10-26
+Última actualización: 2026-10-27
 Rama de referencia: `main`
 Commit de partida en `main`: `707daa5f6c587acfb97d98d4d709362c9949d160`
 Rama de trabajo para auditoría CIS/estado: `cis-mount-audit-and-status` (fusionada mediante PR #20)
@@ -23,9 +23,11 @@ El control está validado por `tests/test_task_state.sh` y el workflow `.github/
 
 - El alcance es exclusivamente **hardening de un Linux genérico**. No crear perfiles por aplicación, servicio o combinaciones de software.
 - `linux-hardening.sh` sin `--fix` hace auditoría de solo lectura: muestra cada control, el objetivo recomendado, el valor/estado real y si cumple.
-- `linux-hardening.sh --fix` aplica únicamente controles pendientes; cualquier parámetro que pueda cortar conectividad, bloquear una cuenta, detener un servicio, romper cargas de trabajo o impedir el arranque debe explicar qué hace, describir el riesgo y pedir confirmación antes de cambiarlo.
-- Si no existe una terminal interactiva, un cambio sensible debe omitirse, no aprobarse automáticamente.
-- No modificar reglas de firewall ni vaciar/cambiar políticas de firewall desde los scripts de auditoría de listeners. El inventario y la comparación de listeners con el firewall son de solo lectura.
+- `linux-hardening.sh --fix` es totalmente automático: asume sí a las propuestas, manteniendo preflight, backups, validación y rollback. Las descripciones deben resumir qué protege cada parámetro y su riesgo operacional.
+- `--fix` también debe funcionar sin terminal interactiva: asume sí después de los preflight del módulo, conserva backups/validación/rollback y omite el cambio si esas validaciones fallan.
+- Los módulos de hardening no inspeccionan ni modifican CSF, iptables/nftables, Shorewall, Imunify ni otros firewalls. El inventario firewall/listeners es una herramienta independiente, solo de lectura.
+- SELinux solo se informa en `linux-hardening.sh`; pasar a Permissive corresponde exclusivamente a `selinux-secure-setup.sh`, que no se invoca desde el baseline.
+- `logrotate-hardening.sh` aplica `compress` y `rotate 5` a `/etc/logrotate.conf` y los archivos regulares de `/etc/logrotate.d`, sin confirmación, con backup y validación.
 - No editar ciegamente PAM/authselect, no deshabilitar funcionalidades sin explicar impacto, no descargar módulos de kernel en caliente si pueden estar en uso y no forzar cambios de fecha/contraseñas que puedan bloquear operaciones.
 - No considerar un comentario, un archivo presente o un paquete instalado como evidencia de que un control está activo. Comprobar la configuración efectiva cuando la interfaz disponible lo permita.
 - Preservar permisos Git: entrypoints ejecutables deben seguir en modo `100755`; pruebas, librerías y documentación normalmente en `100644`.
@@ -70,15 +72,12 @@ El control está validado por `tests/test_task_state.sh` y el workflow `.github/
 
 ### En curso
 
-- [ ] Revisar el orquestador `linux-hardening.sh`: el flujo global debe auditar primero los módulos complementarios, explicar su riesgo y después invocar sus modos `--fix` correctos sin duplicar confirmaciones ni omitir controles.
-- [ ] Revisar `auditd-hardening.sh`: cada parámetro/configuración y cada operación con impacto debe indicar efecto y riesgo y pedir aprobación; respaldar archivos antes de cambios. En especial, `admin_space_left_action=halt`, instalación de paquetes, inicio/reinicio de auditd y reglas inmutables pueden causar interrupción o dificultar recuperación.
-- [ ] Revisar `cron-hardening.sh`: permisos y listas allow/deny pueden impedir tareas de usuarios, hosting o cPanel; confirmar cada restricción antes de aplicarla y comprobar resultado real.
-- [ ] Revisar `grub-hardening.sh`: respaldar configuración; explicar que la regeneración de GRUB y los parámetros de arranque pueden impedir el boot y normalmente requieren consola/reinicio; confirmar individualmente y validar antes de terminar.
-- [ ] Revisar `rsyslog-hardening.sh`: cambios de persistencia y reinicios de logging deben explicar uso de disco, flujo de logs y riesgo de perder recepción/forwarding.
-- [ ] Revisar `ssh-hardening.sh` y `ssh-hardening-complete.sh`: validar con `sshd -t`/`sshd -T`, backup y rollback; evitar perder acceso remoto y explicar impacto de root-login, algoritmos, forwarding, timeout y reinicio/recarga.
-- [ ] Revisar `sudo-hardening.sh` y `password-hardening.sh`: confirmar parámetros individualmente, preservar backups originales, no modificar PAM/authselect a ciegas y proteger cuentas administrativas.
-- [ ] Continuar la revisión de `network-hardening.sh` y `kernel-hardening.sh`: asegurar explicación/confirmación por parámetro, preservar rutas/VPN/IPv6 si se rechaza deshabilitar forwarding/redirects, y convertir todo control no expuesto por kernels legacy en N/A, no FAIL.
-- [ ] Revisar el resto de módulos invocados por el baseline para que los cambios sean verdaderamente opt-in por confirmación, no por perfiles de aplicaciones, y que la auditoría no modifique el sistema.
+- [x] Verificar que `--fix` sea totalmente automático en todos los módulos y caminos de confirmación, conservando preflight, backups, validaciones y rollback.
+- [x] Verificar auditd con `ROTATE`, `SYSLOG`, `SUSPEND`; sin `keep_logs`, `email`, `halt` ni reglas SELinux; no activar `-e 2` hasta validar las reglas en memoria.
+- [ ] Verificar logrotate: `compress` y `rotate 5` en `logrotate.conf` y todos los archivos regulares de `logrotate.d`, backup, rollback y validación `logrotate -d`, sin preguntas.
+- [ ] Verificar que el módulo de red gestione solo sysctl y módulos del kernel, y que firewalls permanezcan completamente fuera del hardening.
+- [x] Verificar filesystem: mantener `noexec` en `/var`, agregarlo a `/home` y no proponer `hidepid=2`; SELinux solo informativo en el baseline y herramienta Permissive independiente.
+- [ ] Ejecutar CI de sintaxis/regresión y compatibilidad CentOS 6/7 y AlmaLinux 8/9/10. Después probar `--audit` y `--fix` de forma controlada en AlmaLinux 10.2 antes de integrar.
 
 ### Validación final pendiente
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 USB="$ROOT_DIR/disable-usb-storage.sh"
 CORE="$ROOT_DIR/linux-hardening.sh"
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }

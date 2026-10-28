@@ -258,9 +258,9 @@ case $- in
     ;;
 esac
 
-# Timeout de sesión inactiva (15 minutos) - solo si no está definido
+# Timeout de sesión inactiva (10 minutos) - solo si no está definido
 if [ -z "$TMOUT" ]; then
-    export TMOUT=900
+    export TMOUT=600
     readonly TMOUT
 fi
 
@@ -797,7 +797,7 @@ case $- in
 esac
 
 if [ -z "$TMOUT" ]; then
-    export TMOUT=900
+    export TMOUT=600
     readonly TMOUT
 fi
 
