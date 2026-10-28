@@ -7,9 +7,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\n' "$*"; }
 
-TEST_TMP_BASE="${HOME:-/root}/.cache/linux-hardening-tests"
-mkdir -p "$TEST_TMP_BASE"
-mockbin="$(mktemp -d "$TEST_TMP_BASE/service-compat.XXXXXX")"
+mockbin="$(mktemp -d "$ROOT_DIR/.test-service-compat.XXXXXX")"
 trap 'rm -rf "$mockbin"' EXIT
 cat >"$mockbin/chkconfig" <<'MOCK'
 #!/bin/sh
