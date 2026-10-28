@@ -280,3 +280,31 @@ grep -Fq 'Reglas persistentes escritas y filtradas' "$TMP_DIR/repair-output" ||
 pass "un baseline OrangeBox obsoleto se repara atómicamente sin cargar reglas al kernel"
 
 pass "la interpretación de enabled se prueba con auditctl simulado y sin cambios en el sistema"
+
+# Si add_audit_rules falla, main debe detenerse antes de recargar auditd o tocar inmutabilidad.
+main_test_dir="$TMP_DIR/main-preparation-failure"
+mkdir -p "$main_test_dir"
+get_os_version() { printf '10\\n'; }
+get_auditctl_path() { printf '%s\\n' "$TMP_DIR/bin/auditctl"; }
+get_auditd_enabled_state() { printf '1\\n'; }
+make_backup() { :; }
+check_auditd_installed() { :; }
+check_auditd_enabled() { :; }
+check_log_storage() { :; }
+check_log_retention() { :; }
+check_full_action() { :; }
+add_audit_rules() { return 1; }
+restart_auditd() { : > "$main_test_dir/restart-called"; }
+configure_audit_immutable() { : > "$main_test_dir/immutable-called"; }
+show_summary() { :; }
+AUDITD_REBOOT_REQUIRED=false
+set +e
+main --fix >"$main_test_dir/output" 2>&1
+main_rc=$?
+set -e
+[ "$main_rc" -eq 1 ] || fail "main debe devolver error si falla add_audit_rules"
+[ ! -e "$main_test_dir/restart-called" ] || fail "main no debe recargar/reiniciar auditd tras fallo de reglas"
+[ ! -e "$main_test_dir/immutable-called" ] || fail "main no debe configurar inmutabilidad tras fallo de reglas"
+grep -Fq 'Se aborta antes de recargar reglas' "$main_test_dir/output" ||
+  fail "main debe explicar que abortó antes de recargar reglas"
+pass "main aborta de forma segura si falla la preparación del baseline"
