@@ -2205,7 +2205,7 @@ network_module_reported_fixes() {
     /MODULOS DESHABILITADOS/ { if (in_network) in_network=0 }
     in_network && /Correcciones aplicadas:/ {
       line=$0
-      gsub(/\033\\[[0-9;]*[[:alpha:]]/, "", line)
+      gsub(/\033\[[0-9;]*[[:alpha:]]/, "", line)
       if (match(line, /Correcciones aplicadas:[[:space:]]*[0-9]+/)) {
         value=substr(line, RSTART, RLENGTH)
         sub(/^.*:[[:space:]]*/, "", value)
