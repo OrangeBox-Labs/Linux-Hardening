@@ -21,7 +21,7 @@ show_usage() {
 }
 
 normalize_file() {
-  local file="$1" tmp="$2"
+  local file="$1"
   awk '
     function trim(s) {
       sub(/^[ \t]+/, "", s)
@@ -71,7 +71,7 @@ normalize_file() {
         if (!top_rotate) print "rotate 5"
       }
     }
-  ' "$file" > "$tmp"
+  ' "$file"
 }
 
 make_backup_dir() {
@@ -109,28 +109,34 @@ process_file() {
     return 0
   }
 
-  tmp="$(mktemp "$(dirname "$file")/.logrotate-orangebox.XXXXXX")" || {
-    echo -e "${RED}[ERROR] No se pudo crear un temporal para $file${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  }
-  if ! normalize_file "$file" "$tmp"; then
-    rm -f "$tmp"
-    echo -e "${RED}[ERROR] No se pudo procesar $file${NC}"
-    WARNINGS=$((WARNINGS + 1))
-    return 1
-  fi
-
-  if cmp -s "$file" "$tmp"; then
-    rm -f "$tmp"
-    echo -e "${GREEN}[OK] $file: compress y rotate 5 ya están configurados${NC}"
-    return 0
-  fi
-
-  if [ "$AUTO_FIX" != true ]; then
+  if [ "$AUTO_FIX" = true ]; then
+    # En modo fix, el temporal debe estar junto al destino para permitir
+    # reemplazo atómico dentro del mismo filesystem.
+    tmp="$(mktemp "$(dirname "$file")/.logrotate-orangebox.XXXXXX")" || {
+      echo -e "${RED}[ERROR] No se pudo crear un temporal para $file${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    }
+    if ! normalize_file "$file" > "$tmp"; then
+      rm -f "$tmp"
+      echo -e "${RED}[ERROR] No se pudo procesar $file${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 1
+    fi
+    if cmp -s "$file" "$tmp"; then
+      rm -f "$tmp"
+      echo -e "${GREEN}[OK] $file: compress y rotate 5 ya están configurados${NC}"
+      return 0
+    fi
+  else
+    # La auditoría compara el resultado por stdout; no crea archivos temporales
+    # ni escribe dentro de /etc/logrotate.conf o /etc/logrotate.d.
+    if cmp -s "$file" <(normalize_file "$file"); then
+      echo -e "${GREEN}[OK] $file: compress y rotate 5 ya están configurados${NC}"
+      return 0
+    fi
     echo -e "${YELLOW}[PENDIENTE] $file: aplicar compress y rotate 5; se revisan también directivas locales nocompress/rotate.${NC}"
     WARNINGS=$((WARNINGS + 1))
-    rm -f "$tmp"
     return 0
   fi
 
