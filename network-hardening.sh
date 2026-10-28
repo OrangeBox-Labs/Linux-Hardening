@@ -314,13 +314,11 @@ disable_secure_redirects() {
 # 3.3.4 - LOG SUSPICIOUS PACKETS (MARTIANS)
 # ==============================================
 log_martians() {
-  echo -e "\n${BLUE}[*] CIS 3.3.4 - Habilitando logging de paquetes sospechosos${NC}"
-  echo -e "${YELLOW}    Registra paquetes con direcciones origen no enrutables (martians)${NC}"
-  echo -e "${RED}    NOTA: Esto puede llenar logs rapidamente en entornos con mucho trafico${NC}"
+  echo -e "\n${BLUE}[*] CIS 3.3.4 - Política de logging de paquetes sospechosos${NC}"
+  echo -e "${YELLOW}    Política OrangeBox: mantener log_martians=0 para evitar volumen excesivo de logs.${NC}"
 
-  set_sysctl "net.ipv4.conf.all.log_martians" "1" "net.ipv4.conf.all.log_martians"
-  set_sysctl "net.ipv4.conf.default.log_martians" "1" "net.ipv4.conf.default.log_martians"
-  flush_routes
+  set_sysctl "net.ipv4.conf.all.log_martians" "0" "net.ipv4.conf.all.log_martians"
+  set_sysctl "net.ipv4.conf.default.log_martians" "0" "net.ipv4.conf.default.log_martians"
 }
 
 # ==============================================
