@@ -40,10 +40,15 @@ ProcessSizeMax=2G
 COREDUMP_CONFIG
 
 PATH="$TMP_DIR/bin:$PATH"
+hash -r
 FAKE_SYSTEMD_CONFIG="$TMP_DIR/coredump-effective.conf"
 export PATH FAKE_SYSTEMD_CONFIG
+command -v systemd-analyze | grep -F "$TMP_DIR/bin/systemd-analyze" >/dev/null || fail "no se está usando el mock systemd-analyze"
 # shellcheck source=/dev/null
 source "$TMP_DIR/effective-config-helpers.sh"
+
+mock_output="$(systemd-analyze cat-config systemd/coredump.conf)" || fail "el mock systemd-analyze falló"
+[ "$mock_output" = "$(cat "$FAKE_SYSTEMD_CONFIG")" ] || fail "el mock systemd-analyze no devolvió la configuración esperada"
 
 actual="$(cis_systemd_config_value systemd/coredump.conf /etc/systemd/coredump.conf Coredump Storage)" || fail "no se pudo calcular Storage efectivo"
 [ "$actual" = "external" ] || fail "se ignoró el override de Storage (actual=$actual)"
