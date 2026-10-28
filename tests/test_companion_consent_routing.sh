@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CORE="$ROOT_DIR/linux-hardening.sh"
 SYSCTL="$ROOT_DIR/lib/sysctl-safe.sh"
 CONFIRM="$ROOT_DIR/lib/hardening-confirm.sh"
