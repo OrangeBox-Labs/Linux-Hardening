@@ -221,6 +221,47 @@ if [ ! -e /etc/network ] && grep -Eq '^[[:space:]]*-w[[:space:]]+/etc/network([[
 fi
 pass "reglas completas staged en ruta aislada sin tocar reglas en memoria ni generar stime"
 
+# El validador estático acepta el baseline generado y rechaza reglas peligrosas/malformadas.
+validate_staged_audit_rules "$AUDIT_RULES" ||
+  fail "el validador debe aceptar el baseline staged correcto"
+printf '%s\n' '# OrangeBox hardening audit rules' '-a always,exit -F arch=b32 -S stime -k time-change' > "$TMP_DIR/invalid-stime.rules"
+if validate_staged_audit_rules "$TMP_DIR/invalid-stime.rules" >"$TMP_DIR/invalid-stime-output" 2>&1; then
+  fail "el validador debe rechazar stime"
+fi
+printf '%s\n' '# OrangeBox hardening audit rules' '-w /ob-test-missing-path-xyz -p wa -k identity' > "$TMP_DIR/invalid-watch.rules"
+if validate_staged_audit_rules "$TMP_DIR/invalid-watch.rules" >"$TMP_DIR/invalid-watch-output" 2>&1; then
+  fail "el validador debe rechazar watches a rutas inexistentes"
+fi
+cp "$AUDIT_RULES" "$TMP_DIR/invalid-immutable.rules"
+printf '%s\n' '-e 2' >> "$TMP_DIR/invalid-immutable.rules"
+if validate_staged_audit_rules "$TMP_DIR/invalid-immutable.rules" >"$TMP_DIR/invalid-immutable-output" 2>&1; then
+  fail "el validador debe rechazar -e 2 dentro del baseline"
+fi
+cp "$AUDIT_RULES" "$TMP_DIR/invalid-directive.rules"
+printf '%s\n' '-z this-is-not-an-audit-rule' >> "$TMP_DIR/invalid-directive.rules"
+if validate_staged_audit_rules "$TMP_DIR/invalid-directive.rules" >"$TMP_DIR/invalid-directive-output" 2>&1; then
+  fail "el validador debe rechazar directivas desconocidas"
+fi
+pass "el validador estático acepta reglas válidas y rechaza stime, watches ausentes, -e 2 y directivas inválidas"
+
+# Un fallo de escritura del heredoc debe conservar el baseline anterior.
+write_failure_dir="$TMP_DIR/write-failure-rules"
+mkdir -p "$write_failure_dir"
+AUDIT_RULES_DIR="$write_failure_dir"
+AUDIT_RULES="$write_failure_dir/98-orangebox-baseline.rules"
+printf '%s\n' '# OrangeBox hardening audit rules' '-a always,exit -F arch=b32 -S stime -k time-change' > "$AUDIT_RULES"
+cp "$AUDIT_RULES" "$TMP_DIR/baseline-before-write-failure"
+cat() { return 1; }
+if add_audit_rules >"$TMP_DIR/write-failure-output" 2>&1; then
+  fail "add_audit_rules debe fallar si falla la escritura del staging"
+fi
+unset -f cat
+cmp -s "$AUDIT_RULES" "$TMP_DIR/baseline-before-write-failure" ||
+  fail "un fallo de escritura no debe modificar el baseline anterior"
+grep -Fq 'No se pudo escribir el staging de reglas' "$TMP_DIR/write-failure-output" ||
+  fail "el fallo de escritura debe generar un diagnóstico explícito"
+pass "fallo de escritura en staging conserva el baseline previo"
+
 # Un archivo OrangeBox existente con reglas obsoletas debe repararse en staging,
 # incluso si las categorías requeridas ya están presentes. No se carga al kernel.
 printf '%s\n' '-a always,exit -F arch=b32 -S stime -k time-change' '-w /ob-test-nonexistent-audit-watch-path -p wa -k logins' >> "$AUDIT_RULES"
