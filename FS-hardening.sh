@@ -81,10 +81,26 @@ persist_mount_options() {
   local -a existing=()
   [ -f /etc/fstab ] || { echo "[ERROR] /etc/fstab no existe."; return 1; }
 
-  # /dev/shm debe tener una única entrada canónica. No se puede editar solo
-  # el campo 4 si la línea previa está mal formada (p. ej. "defaults, noexec"),
-  # porque awk conservaría los campos sobrantes y fstab seguiría siendo inválido.
+  # /dev/shm debe tener una única entrada canónica, conservando opciones
+  # preexistentes como mode=1777 o size=..., incluso si la línea estaba mal formada.
   if [ "$mount_point" = "/dev/shm" ] && [ -n "$spec" ]; then
+    local old_opts="" requested_opts="" merged_opts="" base_spec=""
+    old_opts="$(awk -v mp="$mount_point" '$0 !~ /^[[:space:]]*#/ && NF>=4 && $2==mp {print $4; exit}' /etc/fstab)"
+    requested_opts="$(printf '%s\n' "$spec" | awk '{print $4}')"
+    base_spec="$(printf '%s\n' "$spec" | awk '{print $1, $2, $3}')"
+    merged_opts="$old_opts"
+    # Limpiar comas sobrantes de entradas dañadas y preservar opciones previas.
+    merged_opts="${merged_opts#,}"
+    merged_opts="${merged_opts%,}"
+    for opt in $(printf '%s' "$requested_opts" | tr ',' ' '); do
+      case ",$merged_opts," in
+        *",$opt,"*) ;;
+        *) if [ -n "$merged_opts" ]; then merged_opts+=",${opt}"; else merged_opts="$opt"; fi ;;
+      esac
+    done
+    [ -n "$merged_opts" ] || merged_opts="defaults"
+    spec="$base_spec $merged_opts 0 0"
+
     tmp="$(mktemp /etc/.fstab.orangebox.XXXXXX)" || return 1
     awk -v mp="$mount_point" -v spec="$spec" '
       /^[[:space:]]*#/ {print; next}
