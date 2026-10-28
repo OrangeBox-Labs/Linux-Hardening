@@ -64,22 +64,11 @@ Que previene: Incluso si un gateway esta en la lista de gateways conocidos, si e
 
 Impacto: El sistema ignora redirecciones ICMP incluso de gateways confiables. Previene que un router legitimo pero comprometido redirija trafico.
 
-### 3.3.4 - Loggear paquetes sospechosos (Martians)
+### 3.3.4 - Registro de paquetes sospechosos (Martians)
 
-**👽 Martian**: Un paquete que llegó de una dirección IP que no debería existir en tu red. Tu servidor lo mira y dice "esto es marciano" y lo bota.
+**Política OrangeBox: desactivado por defecto.** Registrar paquetes con direcciones de origen no enrutables puede generar un volumen excesivo de logs y consumir espacio rápidamente en servidores con tráfico alto.
 
-> ⚠️ **Ojo**: Loggear martians puede llenar /var en minutos. Mejor tener una partición separada o vas a amanecer con el disco lleno de basura espacial.
-
-Parametros modificados:
-```
-  net.ipv4.conf.all.log_martians = 1
-  net.ipv4.conf.default.log_martians = 1
-```
-
-Que previene: Registra en /var/log/messages los paquetes con direcciones origen no validas (spoofing). Permite detectar intentos de ataque.
-
-Impacto: Se generan entradas en los logs. No afecta el funcionamiento normal. Los logs pueden revisarse con: grep -i 'martian' /var/log/messages. En hosts con mucho tráfico conviene revisar volumen de logs y retención.
-
+El script conserva `net.ipv4.conf.all.log_martians = 0` y `net.ipv4.conf.default.log_martians = 0`. Si un servidor necesita esta telemetría para una investigación concreta, debe habilitarse como excepción operativa explícita y con límites/retención de logs revisados; no se activa como parte del baseline general.
 ### 3.3.5 - Ignorar peticiones ICMP broadcast
 
 Parametros modificados:
