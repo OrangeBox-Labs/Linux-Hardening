@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression test: the generic SYN flood baseline must preserve platform TCP retry tuning.
 set -eu
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 NETWORK_SCRIPT="$ROOT_DIR/network-hardening.sh"
 ORCHESTRATOR="$ROOT_DIR/linux-hardening.sh"
 
