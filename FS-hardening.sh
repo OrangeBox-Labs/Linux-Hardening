@@ -39,7 +39,7 @@ show_usage() {
   echo "  # Revisar el estado sin modificar el servidor"
   echo "  ./FS-hardening.sh"
   echo ""
-  echo "  # Aplicar correcciones automáticamente tras el preflight"
+  echo "  # Aplicar correcciones con confirmación individual por cambio"
   echo "  ./FS-hardening.sh --fix"
   echo ""
 }
@@ -80,6 +80,39 @@ persist_mount_options() {
   local entry="" current="" merged="" opt="" tmp="" has_entry=false
   local -a existing=()
   [ -f /etc/fstab ] || { echo "[ERROR] /etc/fstab no existe."; return 1; }
+
+  # /dev/shm debe tener una única entrada canónica. No se puede editar solo
+  # el campo 4 si la línea previa está mal formada (p. ej. "defaults, noexec"),
+  # porque awk conservaría los campos sobrantes y fstab seguiría siendo inválido.
+  if [ "$mount_point" = "/dev/shm" ] && [ -n "$spec" ]; then
+    tmp="$(mktemp /etc/.fstab.orangebox.XXXXXX)" || return 1
+    awk -v mp="$mount_point" -v spec="$spec" '
+      /^[[:space:]]*#/ {print; next}
+      NF>=2 && $2==mp {
+        if (!done) print spec
+        done=1
+        next
+      }
+      {print}
+      END {
+        if (!done) {
+          print ""
+          print "# OrangeBox filesystem hardening: /dev/shm"
+          print spec
+        }
+      }
+    ' /etc/fstab > "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod --reference=/etc/fstab "$tmp" 2>/dev/null || chmod 644 "$tmp"
+    chown --reference=/etc/fstab "$tmp" 2>/dev/null || chown root:root "$tmp"
+    if ! mv "$tmp" /etc/fstab; then
+      rm -f "$tmp"
+      echo "[ERROR] No se pudo actualizar /etc/fstab para /dev/shm."
+      return 1
+    fi
+    echo "[✓] /etc/fstab normalizado para /dev/shm: $spec"
+    return 0
+  fi
+
   entry="$(awk -v mp="$mount_point" '$0 !~ /^[[:space:]]*#/ && NF>=4 && $2==mp {print; exit}' /etc/fstab)"
   if [ -n "$entry" ]; then
     has_entry=true
