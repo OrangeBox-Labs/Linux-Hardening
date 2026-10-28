@@ -140,6 +140,71 @@ persist_mount_options() {
   if ! mv "$tmp" /etc/fstab; then rm -f "$tmp"; echo "[ERROR] No se pudo actualizar /etc/fstab."; return 1; fi
   echo "[✓] /etc/fstab actualizado para $mount_point"
 }
+
+# Actualiza FSTAB primero y usa el montaje sin opciones adicionales como validación.
+# Si algo falla, restaura FSTAB y recarga systemd; nunca deja el cambio solo en runtime.
+apply_mount_options_from_fstab() {
+  local mount_point="$1" add_if_missing="$2" spec="$3"
+  shift 3
+  local rollback="" restore_tmp="" opt="" active_opts="" restore_failed=false
+  local -a approved=("$@")
+
+  backup_fs_file /etc/fstab || return 1
+  rollback="$(mktemp /etc/.fstab.orangebox.rollback.XXXXXX)" || return 1
+  if ! cp -p /etc/fstab "$rollback"; then
+    rm -f "$rollback"
+    echo "[ERROR] No se pudo preparar rollback de /etc/fstab."
+    return 1
+  fi
+
+  if ! persist_mount_options "$mount_point" "$add_if_missing" "$spec" "${approved[@]}"; then
+    rm -f "$rollback"
+    echo "[ERROR] No se pudo persistir las opciones de $mount_point; no se intenta el remount."
+    return 1
+  fi
+
+  if ! systemctl daemon-reload; then
+    echo "[ERROR] systemctl daemon-reload falló; se restaura /etc/fstab."
+    restore_failed=true
+  elif ! mount -o remount "$mount_point"; then
+    echo "[ERROR] mount -o remount $mount_point falló usando las opciones de FSTAB."
+    restore_failed=true
+  else
+    active_opts="$(findmnt -n -o OPTIONS "$mount_point" 2>/dev/null || true)"
+    for opt in "${approved[@]}"; do
+      case ",$active_opts," in
+        *",$opt,"*) ;;
+        *)
+          echo "[ERROR] $mount_point no refleja la opción aprobada '$opt' tras el remount."
+          restore_failed=true
+          break
+          ;;
+      esac
+    done
+  fi
+
+  if [ "$restore_failed" = true ]; then
+    restore_tmp="$(mktemp /etc/.fstab.orangebox.restore.XXXXXX)" || {
+      echo "[CRITICAL] No se pudo crear archivo para restaurar /etc/fstab; respaldo temporal: $rollback"
+      return 1
+    }
+    if cp -p "$rollback" "$restore_tmp" && mv -f "$restore_tmp" /etc/fstab; then
+      systemctl daemon-reload || echo "[WARN] No se pudo recargar systemd tras restaurar /etc/fstab."
+      mount -o remount "$mount_point" || echo "[WARN] No se pudo reestablecer el montaje anterior de $mount_point."
+    else
+      rm -f "$restore_tmp"
+      echo "[CRITICAL] Falló la restauración automática de /etc/fstab. Conservado respaldo temporal: $rollback"
+      return 1
+    fi
+    rm -f "$rollback"
+    return 1
+  fi
+
+  rm -f "$rollback"
+  echo "[✓] systemd recargado y $mount_point validado mediante mount -o remount sin opciones adicionales."
+  return 0
+}
+
 # ==============================================
 # DEFINICION DE PUNTOS DE MONTAJE CRITICOS
 # ==============================================
@@ -341,8 +406,8 @@ check_separated_partitions() {
 # FUNCION PARA VERIFICAR OPCIONES DE MONTAJE
 # ==============================================
 check_mount_options() {
-  local mount_point="$1" required_opts="$2" current_opts="" opt="" missing_opts="" approved_opts="" new_opts="" effect=""
-  local -a required_array=()
+  local mount_point="$1" required_opts="$2" current_opts="" opt="" missing_opts="" approved_opts="" effect=""
+  local -a required_array=() approved_array=()
   echo -e "\n${BLUE}[*] Verificando opciones de montaje de $mount_point...${NC}"
 
   if ! findmnt -n "$mount_point" >/dev/null 2>&1; then
@@ -360,7 +425,7 @@ check_mount_options() {
         effect=""
         case "$opt" in
           nodev) effect="Qué hace: impide usar nodos de dispositivo en este montaje. Riesgo: puede afectar herramientas que los necesiten." ;;
-          nosuid) effect="Qué hace: ignora bits SUID/SGID en este montaje. Riesgo: programas que dependan de esos bits no podrán elevar privilegios." ;;
+          nosuid) effect="Qué hace: ignora bits SUID/SGID en este montaje. Riesgo: programas que dependan de estos bits no podrán elevar privilegios." ;;
           noexec) effect="Qué hace: bloquea la ejecución directa de binarios en $mount_point. Riesgo: puede impedir ejecutar aplicaciones o scripts legítimos desde ese montaje." ;;
           *) effect="restringe una capacidad del montaje; valida las aplicaciones que usen $mount_point." ;;
         esac
@@ -385,26 +450,15 @@ check_mount_options() {
   fi
   [ -n "$approved_opts" ] || { echo "[INFO] No se aprobaron cambios para $mount_point."; return 0; }
 
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS + 1)); return 1; }
-  new_opts="$current_opts"
-  for opt in $approved_opts; do
-    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
-  done
-  if mount -o remount,"$new_opts" "$mount_point"; then
-    echo -e "${GREEN}[✓] $mount_point remontado con opciones aprobadas: $approved_opts${NC}"
-    local -a approved_array=()
-    IFS=' ' read -r -a approved_array <<< "$approved_opts"
-    if ! persist_mount_options "$mount_point" false "" "${approved_array[@]}"; then
-      echo -e "${YELLOW}[WARN] El montaje está protegido en runtime, pero no se pudo hacer persistente en /etc/fstab; revise manualmente.${NC}"
-      WARNINGS=$((WARNINGS + 1))
-    fi
+  IFS=' ' read -r -a approved_array <<< "$approved_opts"
+  if apply_mount_options_from_fstab "$mount_point" false "" "${approved_array[@]}"; then
+    echo -e "${GREEN}[✓] $mount_point actualizado desde /etc/fstab con opciones aprobadas: $approved_opts${NC}"
     FIXED=$((FIXED + 1))
   else
-    echo -e "${RED}[ERROR] No se pudo remontar $mount_point; no se modificó fstab.${NC}"
+    echo -e "${RED}[ERROR] No se pudo aplicar de forma persistente la configuración de $mount_point.${NC}"
     WARNINGS=$((WARNINGS + 1))
   fi
 }
-
 # ==============================================
 # APLICAR STICKY BIT
 # ==============================================
@@ -499,7 +553,7 @@ configure_dev_shm() {
     return 0
   fi
 
-  local current_opts="" opt="" approved_opts="" new_opts="" effect
+  local current_opts="" opt="" approved_opts="" effect=""
   local -a required=("noexec" "nosuid" "nodev") approved_array=()
   current_opts="$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null | tr ',' '\n' | sort -u | paste -sd, -)"
   for opt in "${required[@]}"; do
@@ -522,25 +576,16 @@ configure_dev_shm() {
     esac
   done
   [ -n "$approved_opts" ] || return 0
-  backup_fs_file /etc/fstab || { WARNINGS=$((WARNINGS+1)); return 1; }
-  new_opts="$current_opts"
-  for opt in $approved_opts; do
-    case ",$new_opts," in *",$opt,"*) ;; *) new_opts="$new_opts,$opt" ;; esac
-  done
-  if ! mount -o remount,"$new_opts" /dev/shm; then
-    echo -e "${RED}[ERROR] No se pudo remontar /dev/shm.${NC}"
-    WARNINGS=$((WARNINGS+1))
-    return 1
-  fi
-  IFS=' ' read -r -a approved_array <<< "$approved_opts"
-  if ! persist_mount_options /dev/shm true "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" "${approved_array[@]}"; then
-    echo -e "${YELLOW}[WARN] /dev/shm está corregido en runtime, pero no se pudo persistir la configuración.${NC}"
-    WARNINGS=$((WARNINGS+1))
-  fi
-  echo -e "${GREEN}[✓] /dev/shm actualizado con opciones aprobadas: $approved_opts${NC}"
-  FIXED=$((FIXED+1))
-}
 
+  IFS=' ' read -r -a approved_array <<< "$approved_opts"
+  if apply_mount_options_from_fstab /dev/shm true "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" "${approved_array[@]}"; then
+    echo -e "${GREEN}[✓] /dev/shm actualizado desde /etc/fstab con opciones aprobadas: $approved_opts${NC}"
+    FIXED=$((FIXED+1))
+  else
+    echo -e "${RED}[ERROR] No se pudo aplicar de forma persistente la configuración de /dev/shm.${NC}"
+    WARNINGS=$((WARNINGS+1))
+  fi
+}
 # ==============================================
 # ==============================================
 # ==============================================
