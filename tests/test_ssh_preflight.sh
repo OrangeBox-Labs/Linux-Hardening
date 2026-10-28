@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression tests for SSH preflight, visible audit state, and safe remediation.
 set -eu
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 ORCHESTRATOR="$ROOT_DIR/linux-hardening.sh"
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
