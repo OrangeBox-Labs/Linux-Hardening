@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pruebas unitarias aisladas: no consultan ni modifican el host.
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 # shellcheck source=../audit-listening-services.sh
 source "$ROOT_DIR/audit-listening-services.sh"
 
