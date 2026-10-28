@@ -446,6 +446,67 @@ check_full_action() {
 # ==============================================
 # AGREGAR TODAS LAS REGLAS DE AUDITORIA
 # ==============================================
+# Validación estática defensiva del baseline staged. No carga reglas al kernel.
+# La aceptación real del parser/kernel debe probarse en una VM desechable.
+validate_staged_audit_rules() {
+  local file="${1:-}" line path key
+  local required_keys=(time-change identity system-locale perm_mod access mounts delete modules)
+  [ -n "$file" ] && [ -f "$file" ] && [ -s "$file" ] || {
+    echo "[ERROR] El baseline staged no existe o está vacío." >&2
+    return 1
+  }
+  if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$file"; then
+    echo "[ERROR] El staging contiene el syscall no soportado stime." >&2
+    return 1
+  fi
+  if grep -Eq '^[[:space:]]*-e([[:space:]]|$)' "$file"; then
+    echo "[ERROR] El baseline no debe controlar la directiva de inmutabilidad -e." >&2
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*-w[[:space:]]+([^[:space:]]+)[[:space:]]+-p[[:space:]]+([rwa]+)[[:space:]]+-k[[:space:]]+([[:alnum:]_.-]+)[[:space:]]*$ ]]; then
+      path="${BASH_REMATCH[1]}"
+      [ -e "$path" ] || {
+        echo "[ERROR] Watch sobre ruta inexistente en staging: $path" >&2
+        return 1
+      }
+      continue
+    fi
+    if [[ "$line" =~ ^[[:space:]]*-a[[:space:]]+always,exit[[:space:]] ]] &&
+       [[ "$line" =~ -F[[:space:]]+arch=(b32|b64)([[:space:]]|$) ]] &&
+       [[ "$line" =~ -S[[:space:]]+[[:alnum:]_]+ ]] &&
+       [[ "$line" =~ -k[[:space:]]+[[:alnum:]_.-]+([[:space:]]|$) ]]; then
+      continue
+    fi
+    echo "[ERROR] Directiva o formato no reconocido en staging: $line" >&2
+    return 1
+  done < "$file"
+
+  for key in "${required_keys[@]}"; do
+    grep -Eq "^[[:space:]]*[^#].*-k[[:space:]]+$key([[:space:]]|$)" "$file" || {
+      echo "[ERROR] Falta la categoría obligatoria '$key' en staging." >&2
+      return 1
+    }
+  done
+  if audit_key_has_existing_watch_path logins &&
+     ! grep -Eq '^[[:space:]]*[^#].*-k[[:space:]]+logins([[:space:]]|$)' "$file"; then
+    echo "[ERROR] Hay rutas de login existentes pero falta la categoría logins." >&2
+    return 1
+  fi
+  if audit_key_has_existing_watch_path session &&
+     ! grep -Eq '^[[:space:]]*[^#].*-k[[:space:]]+session([[:space:]]|$)' "$file"; then
+    echo "[ERROR] Hay rutas de sesión existentes pero falta la categoría session." >&2
+    return 1
+  fi
+  if audit_key_has_existing_watch_path scope &&
+     ! grep -Eq '^[[:space:]]*[^#].*-k[[:space:]]+scope([[:space:]]|$)' "$file"; then
+    echo "[ERROR] Hay rutas sudoers existentes pero falta la categoría scope." >&2
+    return 1
+  fi
+  return 0
+}
+
 # Detecta reglas OrangeBox obsoletas sin tocar el kernel ni archivos ajenos.
 # Los watches sobre rutas inexistentes y syscalls no soportadas deben corregirse
 # antes de permitir que el archivo se considere listo para el próximo arranque.
@@ -490,7 +551,7 @@ add_audit_rules() {
       fi
       staged_rules="$(mktemp "$AUDIT_RULES_DIR/.98-orangebox-baseline.XXXXXX")" || { echo "[ERROR] No se pudo crear un temporal para las reglas; se aborta sin modificar el archivo actual." >&2; WARNINGS=$((WARNINGS+1)); return 1; }
       filtered_rules="$(mktemp "$AUDIT_RULES_DIR/.98-orangebox-filtered.XXXXXX")" || { rm -f "$staged_rules"; echo "[ERROR] No se pudo crear un temporal de validación; se aborta sin modificar el archivo actual." >&2; WARNINGS=$((WARNINGS+1)); return 1; }
-      cat > "$staged_rules" <<'EOF'
+      if ! cat > "$staged_rules" <<'EOF'
 # OrangeBox hardening audit rules (review volume and workload before deployment)
 -a always,exit -F arch=b32 -S adjtimex -S settimeofday -k time-change
 -a always,exit -F arch=b64 -S adjtimex -S settimeofday -k time-change
@@ -535,6 +596,12 @@ add_audit_rules() {
 -w /sbin/modprobe -p x -k modules
 -a always,exit -F arch=b64 -S init_module -S delete_module -k modules
 EOF
+      then
+        echo "[ERROR] No se pudo escribir el staging de reglas; se conserva el baseline actual." >&2
+        rm -f "$staged_rules" "$filtered_rules"
+        WARNINGS=$((WARNINGS+1))
+        return 1
+      fi
       # Descarta watches sobre rutas ausentes en ESTE host (EL7-10 difieren).
       # No se escribe sobre el archivo activo hasta que el staging esté listo.
       while IFS= read -r line || [ -n "$line" ]; do
@@ -547,8 +614,8 @@ EOF
         fi
         printf '%s\n' "$line" >> "$filtered_rules" || { rm -f "$staged_rules" "$filtered_rules"; WARNINGS=$((WARNINGS+1)); return 1; }
       done < "$staged_rules"
-      if grep -Eq '(^|[[:space:]])-S[[:space:]]+stime([[:space:]]|$)' "$filtered_rules"; then
-        echo "[ERROR] El staging contiene el syscall no soportado stime; se aborta sin reemplazar reglas." >&2
+      if ! validate_staged_audit_rules "$filtered_rules"; then
+        echo "[ERROR] La validación estática del baseline falló; no se reemplaza el archivo existente." >&2
         rm -f "$staged_rules" "$filtered_rules"
         WARNINGS=$((WARNINGS+1))
         return 1
@@ -923,7 +990,11 @@ main() {
   check_log_storage
   check_log_retention
   check_full_action
-  add_audit_rules
+  if ! add_audit_rules; then
+    echo -e "${RED}[ERROR] Falló la preparación/verificación de reglas auditd. Se aborta antes de recargar reglas, cambiar inmutabilidad o recomendar un reinicio.${NC}" >&2
+    show_summary
+    return 1
+  fi
   restart_auditd
   configure_audit_immutable
   if [ "$AUDITD_REBOOT_REQUIRED" = true ]; then
