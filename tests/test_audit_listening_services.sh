@@ -77,7 +77,19 @@ udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd
 OUT
 MOCK
 chmod +x "$mockbin/ss" "$mockbin/netstat"
-fallback_output="$(PATH="$mockbin:$PATH" bash -c 'source "$1"; audit_listening_ports' _ "$ROOT_DIR/audit-listening-services.sh")" || fail "empty ss did not recover netstat"
+fallback_output="$(bash -c '
+  ss() { return 0; }
+  netstat() {
+    cat <<'"'"'OUT'"'"'
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address Foreign Address State PID/Program name
+tcp 0 0 0.0.0.0:22 0.0.0.0:* LISTEN 123/sshd
+udp 0 0 0.0.0.0:161 0.0.0.0:* 321/snmpd
+OUT
+  }
+  source "$1"
+  audit_listening_ports
+' _ "$ROOT_DIR/audit-listening-services.sh")" || fail "empty ss did not recover netstat"
 printf '%s\n' "$fallback_output" | grep -Fq 'Fuente: netstat (compatibilidad legacy)' || fail "netstat source not reported"
 printf '%s\n' "$fallback_output" | grep -Fq 'Sockets procesados: 2' || fail "netstat fallback did not process both sockets"
 pass "fallback to netstat when ss exists but returns empty output"
