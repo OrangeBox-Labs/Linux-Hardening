@@ -14,6 +14,9 @@ sed -n '/^network_module_reported_fixes() {/,/^}/p' "$CORE" > "$TMP_DIR/helper.s
 # shellcheck source=/dev/null
 source "$TMP_DIR/helper.sh"
 
+grep -Fq 'FIXED=$((FIXED + network_fixes))' "$CORE" || fail "network-full no aporta sus correcciones al resumen global"
+grep -Fq 'Correcciones reportadas por network-full: $NETWORK_FIXED' "$CORE" || fail "el resumen global no muestra el subtotal de network-full"
+
 # The child module wraps the number in ANSI color codes; the global summary must
 # still count exactly the value from the dedicated NETWORK HARDENING section.
 printf 'Correcciones: 99\nNETWORK HARDENING\nRESUMEN:\n  • Correcciones aplicadas: \033[0;32m2\033[0m\n  • Advertencias pendientes: 0\nMODULOS DESHABILITADOS:\nCorrecciones aplicadas: 88\n' > "$TMP_DIR/network-two.log"
