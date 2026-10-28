@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SELINUX="$ROOT_DIR/selinux-secure-setup.sh"
 CORE="$ROOT_DIR/linux-hardening.sh"
 GRUB="$ROOT_DIR/grub-hardening.sh"
