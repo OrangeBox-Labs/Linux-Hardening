@@ -553,7 +553,7 @@ configure_dev_shm() {
     return 0
   fi
 
-  local current_opts="" opt="" approved_opts="" effect=""
+  local current_opts="" opt="" approved_opts="" effect="" spec_opts="defaults" shm_spec=""
   local -a required=("noexec" "nosuid" "nodev") approved_array=()
   current_opts="$(findmnt -n -o OPTIONS /dev/shm 2>/dev/null | tr ',' '\n' | sort -u | paste -sd, -)"
   for opt in "${required[@]}"; do
@@ -578,7 +578,17 @@ configure_dev_shm() {
   [ -n "$approved_opts" ] || return 0
 
   IFS=' ' read -r -a approved_array <<< "$approved_opts"
-  if apply_mount_options_from_fstab /dev/shm true "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0" "${approved_array[@]}"; then
+  # Conserva las opciones de seguridad ya activas y agrega únicamente las aprobadas.
+  for opt in "${required[@]}"; do
+    case ",$current_opts," in
+      *",$opt,"*) spec_opts+=",${opt}" ;;
+      *)
+        case " $approved_opts " in *" $opt "*) spec_opts+=",${opt}" ;; esac
+        ;;
+    esac
+  done
+  shm_spec="tmpfs /dev/shm tmpfs $spec_opts 0 0"
+  if apply_mount_options_from_fstab /dev/shm true "$shm_spec" "${approved_array[@]}"; then
     echo -e "${GREEN}[✓] /dev/shm actualizado desde /etc/fstab con opciones aprobadas: $approved_opts${NC}"
     FIXED=$((FIXED+1))
   else
