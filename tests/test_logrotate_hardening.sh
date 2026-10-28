@@ -13,6 +13,7 @@ grep -Fq 'find "$LOGROTATE_DIR" -type f -print0' "$LOGROTATE" || fail "debe reco
 grep -Fq 'backup_one' "$LOGROTATE" || fail "debe respaldar antes de editar"
 grep -Fq 'logrotate -d' "$LOGROTATE" || fail "debe validar sintaxis"
 grep -Fq 'restore_changed_files' "$LOGROTATE" || fail "debe poder revertir"
+grep -Fq 'cmp -s "$file" <(normalize_file "$file")' "$LOGROTATE" || fail "audit debe comparar por stdout sin crear temporales en /etc"
 grep -Fq 'logrotate-full' "$CORE" || fail "el baseline debe invocar logrotate"
 ! grep -Fq '¿Aplicar' "$LOGROTATE" || fail "logrotate no debe pedir confirmación"
 pass "logrotate aplica compress + rotate 5 con backup y validación"
