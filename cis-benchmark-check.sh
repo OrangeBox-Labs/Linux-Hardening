@@ -1354,15 +1354,63 @@ check_ftp_client() {
 # 3.1.3 - ASEGURAR TIPC DESHABILITADO
 # ==============================================
 check_tipc() {
-  if modprobe -n -v tipc 2>&1 | grep -q "install /bin/true\|not found"; then
-    if ! lsmod | grep -q "^tipc"; then
-      log_result "PASS" "3.1.3 - Asegurar TIPC deshabilitado" "" "" "$GREEN"
-      return 0
-    fi
+  local module="tipc"
+  local simulation=""
+  local simulation_rc=0
+  local runtime_loaded=0
+  local install_blocked=0
+  local blacklist_effective=0
+
+  # /sys/module also detects a module built into the kernel, which does not
+  # appear in /proc/modules. A module merely present under /lib/modules is
+  # not considered loaded or enabled.
+  if [ -d "/sys/module/$module" ]; then
+    runtime_loaded=1
   fi
-  log_result "FAIL" "3.1.3 - Asegurar TIPC deshabilitado" "El modulo tipc esta habilitado" "Crear archivo /etc/modprobe.d/tipc.conf con: install tipc /bin/false y blacklist tipc. Ejecutar: rmmod tipc" "$RED"
+  if [ -r /proc/modules ] && awk -v module="$module" '$1 == module { found=1 } END { exit(found ? 0 : 1) }' /proc/modules; then
+    runtime_loaded=1
+  fi
+
+  if [ "$runtime_loaded" -eq 1 ]; then
+    log_result "FAIL" "3.1.3 - Asegurar TIPC deshabilitado" "TIPC está presente en el kernel activo; la configuración persistente no elimina un módulo ya cargado." "Investigar el servicio que lo utiliza y descargarlo en una ventana segura con: modprobe -r tipc" "$RED"
+    return 1
+  fi
+
+  if ! command -v modprobe >/dev/null 2>&1; then
+    log_result "WARN" "3.1.3 - Asegurar TIPC deshabilitado" "No se puede consultar la política efectiva: modprobe no está disponible." "Verificar kmod/modprobe y repetir la auditoría." "$YELLOW"
+    return 2
+  fi
+
+  simulation="$(modprobe -n -v "$module" 2>&1)"
+  simulation_rc=$?
+
+  # modprobe -n prints the effective install command after resolving aliases
+  # and dependencies. Both false and true are accepted as a no-op blocker.
+  if printf '%s\n' "$simulation" | grep -Eq '^[[:space:]]*install[[:space:]]+(/bin/false|/usr/bin/false|/bin/true|/usr/bin/true)([[:space:]]|$)'; then
+    install_blocked=1
+  fi
+
+  if modprobe -c 2>/dev/null | awk -v module="$module" '$1 == "blacklist" && $2 == module { found=1 } END { exit(found ? 0 : 1) }'; then
+    blacklist_effective=1
+  fi
+
+  if [ "$install_blocked" -eq 1 ] && [ "$blacklist_effective" -eq 1 ]; then
+    log_result "PASS" "3.1.3 - Asegurar TIPC deshabilitado" "El módulo no está cargado; modprobe aplica una regla install que bloquea su carga y una blacklist efectiva. La presencia de tipc.ko en disco no implica que esté habilitado." "" "$GREEN"
+    return 0
+  fi
+
+  if printf '%s\n' "$simulation" | grep -Eqi 'Module tipc not found|FATAL: Module tipc not found|module tipc not found'; then
+    log_result "PASS" "3.1.3 - Asegurar TIPC deshabilitado" "El módulo no está cargado y no está disponible en el árbol de módulos." "" "$GREEN"
+    return 0
+  fi
+
+  if [ "$simulation_rc" -ne 0 ] && [ -z "$simulation" ]; then
+    log_result "WARN" "3.1.3 - Asegurar TIPC deshabilitado" "modprobe no pudo determinar la política efectiva de TIPC." "Revisar modprobe -n -v tipc y modprobe -c." "$YELLOW"
+    return 2
+  fi
+
+  log_result "FAIL" "3.1.3 - Asegurar TIPC deshabilitado" "TIPC no está cargado, pero la política efectiva está incompleta: install_blocked=$install_blocked; blacklist=$blacklist_effective." "Configurar install tipc /bin/false y blacklist tipc en /etc/modprobe.d/, ejecutar depmod y repetir la auditoría." "$RED"
   return 1
-}
 
 # ==============================================
 # 3.4.1.1 - ASEGURAR NFTABLES INSTALADO
