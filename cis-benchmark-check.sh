@@ -1593,9 +1593,23 @@ check_audit_log_size() {
 # ==============================================
 # Check the locally approved time-based rotation policy. It intentionally
 # retains compressed audit archives for seven days instead of keep_logs forever.
+# Cron must actually run daily jobs for the local seven-day audit policy to be valid.
+cis_audit_cron_ready() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet crond.service &&
+      systemctl is-enabled crond.service >/dev/null 2>&1
+    return $?
+  fi
+  command -v service >/dev/null 2>&1 || return 1
+  service crond status >/dev/null 2>&1 || return 1
+  command -v chkconfig >/dev/null 2>&1 || return 1
+  chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
+}
+
 audit_time_rotation_ready() {
   local script="/etc/cron.daily/orangebox-audit-logrotate"
   [ -f "$script" ] && [ -x "$script" ] && [ ! -L "$script" ] || return 1
+  cis_audit_cron_ready || return 1
   grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
     grep -Eq '^KEEP_DAYS=7$' "$script" &&
     grep -Fq 'auditd rotate' "$script" &&
