@@ -92,23 +92,23 @@ backup_one() {
   dest="$BACKUP_DIR$file"
 
   mkdir -p "$(dirname "$dest")" || {
-    echo -e "${RED}[ERROR] No se pudo crear el directorio del backup para $file: $(dirname "$dest")" ${NC}" >&2
+    echo -e "${RED}[ERROR] No se pudo crear el directorio del backup para $file: $(dirname "$dest")${NC}" >&2
     return 1
   }
   cp -p "$file" "$dest" || {
-    echo -e "${RED}[ERROR] No se pudo copiar $file al backup $dest" ${NC}" >&2
+    echo -e "${RED}[ERROR] No se pudo copiar $file al backup $dest${NC}" >&2
     return 1
   }
   source_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')" || {
-    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del origen $file" ${NC}" >&2
+    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del origen $file${NC}" >&2
     return 1
   }
   backup_hash="$(sha256sum "$dest" 2>/dev/null | awk '{print $1}')" || {
-    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del backup $dest" ${NC}" >&2
+    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del backup $dest${NC}" >&2
     return 1
   }
   if [ -z "$source_hash" ] || [ "$source_hash" != "$backup_hash" ]; then
-    echo -e "${RED}[ERROR] El backup no coincide con el archivo original: $file -> $dest" ${NC}" >&2
+    echo -e "${RED}[ERROR] El backup no coincide con el archivo original: $file -> $dest${NC}" >&2
     return 1
   fi
 }
@@ -450,11 +450,12 @@ configure_audit_rotation() {
         print
       }
       END { if (!written) print "max_log_file_action = ignore" }
-    ' "$AUDITD_CONF" > "$tmp" || { rm -f "$tmp"; return 1; }
+    ' "$AUDITD_CONF" > "$tmp" || { echo -e "${RED}[ERROR] No se pudo generar la configuración temporal de auditd.${NC}" >&2; rm -f "$tmp"; return 1; }
     mode="$(stat -c '%a' "$AUDITD_CONF" 2>/dev/null || echo 640)"
     owner_group="$(stat -c '%u:%g' "$AUDITD_CONF" 2>/dev/null || echo 0:0)"
-    chmod "$mode" "$tmp" && chown "$owner_group" "$tmp" || { rm -f "$tmp"; return 1; }
-    mv -f "$tmp" "$AUDITD_CONF" || { rm -f "$tmp"; return 1; }
+    chmod "$mode" "$tmp" || { echo -e "${RED}[ERROR] No se pudieron conservar los permisos $mode en el temporal de auditd.conf.${NC}" >&2; rm -f "$tmp"; return 1; }
+    chown "$owner_group" "$tmp" || { echo -e "${RED}[ERROR] No se pudo conservar el propietario $owner_group en el temporal de auditd.conf.${NC}" >&2; rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$AUDITD_CONF" || { echo -e "${RED}[ERROR] No se pudo reemplazar $AUDITD_CONF con el temporal validado.${NC}" >&2; rm -f "$tmp"; return 1; }
     CHANGED_FILES+=("$AUDITD_CONF")
     FIXED=$((FIXED + 1))
     changed_action=1
