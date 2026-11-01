@@ -1355,6 +1355,8 @@ check_ftp_client() {
 # ==============================================
 check_tipc() {
   local module="tipc"
+  local proc_modules="${CIS_MODULE_PROC:-/proc/modules}"
+  local sys_module_root="${CIS_MODULE_SYSROOT:-/sys/module}"
   local simulation=""
   local simulation_rc=0
   local runtime_loaded=0
@@ -1364,10 +1366,10 @@ check_tipc() {
   # /sys/module also detects a module built into the kernel, which does not
   # appear in /proc/modules. A module merely present under /lib/modules is
   # not considered loaded or enabled.
-  if [ -d "/sys/module/$module" ]; then
+  if [ -d "$sys_module_root/$module" ]; then
     runtime_loaded=1
   fi
-  if [ -r /proc/modules ] && awk -v module="$module" '$1 == module { found=1 } END { exit(found ? 0 : 1) }' /proc/modules; then
+  if [ -r "$proc_modules" ] && awk -v module="$module" '$1 == module { found=1 } END { exit(found ? 0 : 1) }' "$proc_modules"; then
     runtime_loaded=1
   fi
 
