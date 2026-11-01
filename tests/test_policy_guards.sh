@@ -14,6 +14,7 @@ grep -Fq 'kernel_param_effect()' "$GRUB" || fail "GRUB debe describir el efecto 
 grep -Fq 'grub2-script-check' "$GRUB" || fail "GRUB debe validar el archivo cuando la herramienta exista"
 ! grep -Eiq 'selinux=0|enforcing=0|selinux' "$GRUB" || fail "GRUB no debe inspeccionar SELinux"
 grep -Fq 'audit_rotation_policy_ready()' "$AUDITD" || fail "auditd debe verificar la rotación diaria y retención de siete días"
+grep -Fq 'audit_cron_scheduler_ready()' "$AUDITD" || fail "auditd debe exigir crond activo para validar la retención diaria"
 grep -Fq '[ "$action" = "ignore" ]' "$AUDITD" || fail "auditd solo debe desactivar la rotación por tamaño con la política diaria instalada"
 ! grep -Fq 'configure_auditd_param "max_log_file_action" "ROTATE"' "$AUDITD" || fail "auditd no debe reactivar la rotación automática por tamaño"
 grep -Fq 'configure_auditd_param "space_left_action" "SYSLOG"' "$AUDITD" || fail "auditd debe registrar aviso en SYSLOG"
