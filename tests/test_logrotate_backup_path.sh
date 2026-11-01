@@ -7,7 +7,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
-pass() { printf '[PASS] %s\\n' "$*"; }
+pass() { printf '[PASS] %s\n' "$*"; }
 
 BACKUP_FUNCTION="$TMP_DIR/backup-one.sh"
 awk '
@@ -27,7 +27,7 @@ mkdir -p "$BACKUP_DIR"
 file="$TMP_DIR/outer-scope-file"
 SOURCE="$TMP_DIR/source/auditd.conf"
 mkdir -p "$(dirname "$SOURCE")"
-printf 'max_log_file = 50\\nmax_log_file_action = ROTATE\\n' > "$SOURCE"
+printf 'max_log_file = 50\nmax_log_file_action = ROTATE\n' > "$SOURCE"
 chmod 640 "$SOURCE"
 
 # Source the actual production function in the test process.
