@@ -310,6 +310,20 @@ exit 0
 AUDIT_ROTATION
 }
 
+# Cron must be running and enabled before auditd's size-based rotation is disabled.
+# EL7+ uses systemd; EL6 falls back to service/chkconfig.
+audit_cron_scheduler_ready() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet crond.service &&
+      systemctl is-enabled crond.service >/dev/null 2>&1
+    return $?
+  fi
+  command -v service >/dev/null 2>&1 || return 1
+  service crond status >/dev/null 2>&1 || return 1
+  command -v chkconfig >/dev/null 2>&1 || return 1
+  chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
+}
+
 # Reconciles auditd time-based rotation only when no other active audit rotator exists.
 configure_audit_rotation() {
   local conflict="" action="" tmp="" mode="" owner_group="" changed_action=0
@@ -343,6 +357,12 @@ configure_audit_rotation() {
   if [ -e "$AUDIT_ROTATION_SCRIPT" ] && ! grep -Fq "$script_marker" "$AUDIT_ROTATION_SCRIPT"; then
     AUDIT_ROTATION_CONFLICT_FOUND=true
     echo -e "${YELLOW}[WARN] $AUDIT_ROTATION_SCRIPT ya existe y no pertenece a OrangeBox; se conserva sin cambios.${NC}"
+    WARNINGS=$((WARNINGS + 1))
+    return 0
+  fi
+
+  if ! audit_cron_scheduler_ready; then
+    echo -e "${YELLOW}[WARN] crond no está activo y habilitado; no se instala la tarea diaria ni se cambia max_log_file_action. Configure el scheduler y vuelva a ejecutar logrotate-hardening.sh --fix.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
