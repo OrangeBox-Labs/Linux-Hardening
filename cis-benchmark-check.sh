@@ -1411,6 +1411,7 @@ check_tipc() {
 
   log_result "FAIL" "3.1.3 - Asegurar TIPC deshabilitado" "TIPC no está cargado, pero la política efectiva está incompleta: install_blocked=$install_blocked; blacklist=$blacklist_effective." "Configurar install tipc /bin/false y blacklist tipc en /etc/modprobe.d/, ejecutar depmod y repetir la auditoría." "$RED"
   return 1
+}
 
 # ==============================================
 # 3.4.1.1 - ASEGURAR NFTABLES INSTALADO
@@ -1628,6 +1629,7 @@ check_audit_log_keep() {
   [ -n "$action" ] || action="no definido"
   log_result "FAIL" "4.1.2.2 - Asegurar logs de auditoria no eliminados automaticamente" "max_log_file_action=$action; no se encontró una política OrangeBox de rotación diaria y retención validada." "Configurar keep_logs para retención indefinida, o instalar la política OrangeBox de rotación diaria de siete días con logrotate-hardening.sh --fix." "$RED"
   return 1
+}
 
 # ==============================================
 # 4.1.2.3 - ASEGURAR SISTEMA DESHABILITADO CUANDO LOGS LLENOS
