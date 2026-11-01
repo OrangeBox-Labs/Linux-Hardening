@@ -31,6 +31,7 @@ grep -Fq 'sys_module_root="${CIS_MODULE_SYSROOT:-/sys/module}"' "$CIS" || fail "
 grep -Fq 'audit_time_rotation_ready()' "$CIS" || fail "CIS debe reconocer la excepción operacional de retención de siete días"
 grep -Fq 'CIS_MODULE_PROC' "$CIS" || fail "TIPC debe permitir pruebas aisladas de estado runtime sin modificar el host"
 grep -Fq 'CIS_MODULE_SYSROOT' "$CIS" || fail "TIPC debe consultar /sys/module para detectar el runtime"
+grep -Fq 'cis_audit_cron_ready()' "$CIS" || fail "la excepción de retención auditd debe exigir crond activo y habilitado"
 grep -Fq 'return 2' "$CIS" || fail "la retención local de siete días no debe presentarse como PASS CIS";
 
 
