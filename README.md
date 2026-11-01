@@ -272,6 +272,10 @@ No calcula ni incorpora el porcentaje CIS, no ejecuta `cis-benchmark-check.sh` y
 
 Los módulos de preparación, eliminación interactiva de paquetes/servicios y generación destructiva de reglas de firewall quedan excluidos.
 
+### TIPC: runtime frente a disponibilidad del módulo
+
+El control 3.1.3 distingue el módulo cargado en el kernel (`/proc/modules` y `/sys/module`), la política efectiva de `modprobe` (`install` y `blacklist`) y la mera presencia del archivo `.ko` en disco. La disponibilidad en `/lib/modules` por sí sola no produce FAIL. La suite incluye una prueba funcional de bloqueo persistente, módulo cargado, política incompleta y módulo ausente.
+
 ## 🏆 Benchmark CIS independiente
 
 El benchmark CIS es una evaluación separada de los chequeos operacionales de los módulos.
