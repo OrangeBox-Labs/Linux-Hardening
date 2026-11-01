@@ -7,6 +7,7 @@ LOGROTATE_CONF="/etc/logrotate.conf"
 LOGROTATE_DIR="/etc/logrotate.d"
 AUDITD_CONF="/etc/audit/auditd.conf"
 AUDIT_ROTATION_SCRIPT="/etc/cron.daily/orangebox-audit-logrotate"
+AUDIT_ROTATION_CONFLICT_FOUND=false
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$BASHPID"
 BACKUP_DIR="/var/backups/orangebox-logrotate-hardening/$RUN_ID"
 FIXED=0
@@ -113,6 +114,20 @@ process_file() {
     WARNINGS=$((WARNINGS + 1))
     return 0
   }
+
+  # Si existe una política específica de audit, no reescribir ni esa regla ni logrotate.conf
+  # (sus directivas globales pueden heredarse desde la regla incluida).
+  if [ "$AUDIT_ROTATION_CONFLICT_FOUND" = true ]; then
+    if [ "$file" = "$LOGROTATE_CONF" ] || awk '
+      /^[[:space:]]*#/ { next }
+      /\/var\/log\/audit/ { found=1 }
+      END { exit(found ? 0 : 1) }
+    ' "$file" 2>/dev/null; then
+      echo -e "${YELLOW}[WARN] Se conserva $file porque participa en una política de rotación de audit existente.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+      return 0
+    fi
+  fi
 
   if [ "$AUTO_FIX" = true ]; then
     # En modo fix, el temporal debe estar junto al destino para permitir
@@ -313,17 +328,20 @@ configure_audit_rotation() {
 
   conflict="$(audit_rotation_conflict || true)"
   if [ -n "$conflict" ]; then
+    AUDIT_ROTATION_CONFLICT_FOUND=true
     echo -e "${YELLOW}[WARN] Se detectó otra política de rotación de audit en $conflict; no se crea una segunda política ni se modifica auditd.conf.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
   if [ -L "$AUDIT_ROTATION_SCRIPT" ]; then
+    AUDIT_ROTATION_CONFLICT_FOUND=true
     echo -e "${YELLOW}[WARN] $AUDIT_ROTATION_SCRIPT es un enlace simbólico; no se modifica.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
   if [ -e "$AUDIT_ROTATION_SCRIPT" ] && ! grep -Fq "$script_marker" "$AUDIT_ROTATION_SCRIPT"; then
+    AUDIT_ROTATION_CONFLICT_FOUND=true
     echo -e "${YELLOW}[WARN] $AUDIT_ROTATION_SCRIPT ya existe y no pertenece a OrangeBox; se conserva sin cambios.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
@@ -452,6 +470,13 @@ main() {
     echo -e "${YELLOW}[WARN] $LOGROTATE_DIR no existe; se procesa solo $LOGROTATE_CONF${NC}"
   fi
 
+  # Auditd conflict checks happen before any logrotate file is normalized.
+  if ! configure_audit_rotation; then
+    echo -e "${RED}[ERROR] Falló la configuración de retención de auditd; se restauran los cambios realizados.${NC}"
+    restore_changed_files
+    exit 1
+  fi
+
   local file
   for file in "${FILES[@]}"; do
     if ! process_file "$file"; then
@@ -460,12 +485,6 @@ main() {
       exit 1
     fi
   done
-
-  if ! configure_audit_rotation; then
-    echo -e "${RED}[ERROR] Falló la configuración de retención de auditd; se restauran los cambios realizados.${NC}"
-    restore_changed_files
-    exit 1
-  fi
 
   if [ "$AUTO_FIX" = true ] && [ "$FIXED" -gt 0 ]; then
     local validation="$BACKUP_DIR/logrotate-validation.txt"
