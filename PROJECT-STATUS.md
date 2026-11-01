@@ -85,3 +85,15 @@ Una tarea pasa a **terminada** cuando el comportamiento está implementado, los 
 - Rocky Linux: https://www.cisecurity.org/benchmark/rocky_linux
 - Oracle Linux: https://www.cisecurity.org/benchmark/oracle_linux
 - Actualización CIS de septiembre de 2026: https://www.cisecurity.org/insights/blog/cis-benchmarks-september-2026-update
+
+## Actualización — TIPC CIS y retención auditd (2026-11-01)
+
+- [x] CIS 3.1.3 ahora separa runtime de disponibilidad en disco y verifica la política efectiva de modprobe (`install /bin/false`/`/bin/true` y blacklist).
+- [x] Regresión funcional TIPC cubre módulo no cargado y bloqueado, módulo cargado, política incompleta y módulo ausente.
+- [x] Se añadió retención local auditd de siete días: rotación solicitada al daemon, gzip sobre generaciones cerradas y purga limitada a archivos OrangeBox.
+- [x] Se detectan políticas logrotate/cron preexistentes y se conservan. La tarea solo se instala cuando crond está activo y habilitado; no se cambia max_log_file_action si scheduler no está listo.
+- [x] Instalador Wazuh y repositorio espejo incorporan helper, preflight y verificación final; pruebas de rotación y contrato pasan.
+- [x] CI: Linux-Hardening run 41256352081 pasó bash-syntax y smoke CentOS 6/7 + AlmaLinux 8/9/10. Wazuh-OrangeBox run 41256369864 y Wazuh run 41256392898 pasaron regresiones.
+- [ ] Pendiente validación operativa manual en AlmaLinux 9 recién instalado, con --audit primero, snapshot/consola antes de --fix y verificación de recepción central Wazuh antes de purgar archivos locales.
+
+El control CIS de retención indefinida sigue separado: la política de siete días es una excepción operacional y debe mostrarse WARN, no PASS CIS.
