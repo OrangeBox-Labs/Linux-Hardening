@@ -85,12 +85,32 @@ make_backup_dir() {
 }
 
 backup_one() {
-  local file="$1" dest="$BACKUP_DIR$file" source_hash backup_hash
-  mkdir -p "$(dirname "$dest")" || return 1
-  cp -p "$file" "$dest" || return 1
-  source_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
-  backup_hash="$(sha256sum "$dest" 2>/dev/null | awk '{print $1}')"
-  [ -n "$source_hash" ] && [ "$source_hash" = "$backup_hash" ]
+  local file="$1" dest="" source_hash="" backup_hash=""
+
+  # Assign the destination only after file has been initialized. In Bash,
+  # expansions in one local declaration can see the caller's file variable.
+  dest="$BACKUP_DIR$file"
+
+  mkdir -p "$(dirname "$dest")" || {
+    echo -e "${RED}[ERROR] No se pudo crear el directorio del backup para $file: $(dirname "$dest")" ${NC}" >&2
+    return 1
+  }
+  cp -p "$file" "$dest" || {
+    echo -e "${RED}[ERROR] No se pudo copiar $file al backup $dest" ${NC}" >&2
+    return 1
+  }
+  source_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')" || {
+    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del origen $file" ${NC}" >&2
+    return 1
+  }
+  backup_hash="$(sha256sum "$dest" 2>/dev/null | awk '{print $1}')" || {
+    echo -e "${RED}[ERROR] No se pudo calcular SHA256 del backup $dest" ${NC}" >&2
+    return 1
+  }
+  if [ -z "$source_hash" ] || [ "$source_hash" != "$backup_hash" ]; then
+    echo -e "${RED}[ERROR] El backup no coincide con el archivo original: $file -> $dest" ${NC}" >&2
+    return 1
+  fi
 }
 
 restore_changed_files() {
@@ -406,8 +426,14 @@ configure_audit_rotation() {
   fi
 
   if [ "$action" != "ignore" ]; then
-    backup_one "$AUDITD_CONF" || return 1
-    tmp="$(mktemp "$(dirname "$AUDITD_CONF")/.auditd.conf.orangebox.XXXXXX")" || return 1
+    backup_one "$AUDITD_CONF" || {
+      echo -e "${RED}[ERROR] No se pudo respaldar $AUDITD_CONF; no se modifica auditd.conf ni se cambia la política de auditd.${NC}" >&2
+      return 1
+    }
+    tmp="$(mktemp "$(dirname "$AUDITD_CONF")/.auditd.conf.orangebox.XXXXXX")" || {
+      echo -e "${RED}[ERROR] No se pudo crear el temporal junto a $AUDITD_CONF.${NC}" >&2
+      return 1
+    }
     awk '
       function trim(s) { sub(/^[ \\t]+/, "", s); sub(/[ \\t]+$/, "", s); return s }
       /^[ \\t]*#/ || /^[ \\t]*$/ { print; next }
