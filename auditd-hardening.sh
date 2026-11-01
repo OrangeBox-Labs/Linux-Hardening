@@ -429,9 +429,43 @@ check_log_storage() {
 # ==============================================
 # 4.1.1.4 - ENSURE AUDIT LOGS NOT AUTOMATICALLY DELETED
 # ==============================================
+audit_rotation_policy_ready() {
+  local script="/etc/cron.daily/orangebox-audit-logrotate"
+  local action=""
+  [ -f "$script" ] && [ -x "$script" ] && [ ! -L "$script" ] || return 1
+  grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
+    grep -Eq '^KEEP_DAYS=7$' "$script" &&
+    grep -Fq 'auditd rotate' "$script" &&
+    grep -Fq 'gzip' "$script" || return 1
+  action="$(awk -F= '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    {
+      key=$1; gsub(/[[:space:]]/, "", key)
+      if (key == "max_log_file_action") {
+        value=$2; sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        current=tolower(value)
+      }
+    }
+    END { print current }
+  ' "$AUDIT_CONF" 2>/dev/null)"
+  [ "$action" = "ignore" ]
+}
+
 check_log_retention() {
-  echo -e "\n${BLUE}[*] CIS 4.1.1.4 - Verificando retencion de logs audit...${NC}"
-  configure_auditd_param "max_log_file_action" "ROTATE" "max_log_file_action"
+  echo -e "\\n${BLUE}[*] CIS 4.1.1.4 - Verificando política de rotación/retención de logs audit... ${NC}"
+
+  if audit_rotation_policy_ready; then
+    echo -e "${GREEN}[✓] Auditd usa rotación diaria OrangeBox, compresión gzip y retención local de siete días.${NC}"
+    echo -e "${YELLOW}[!] Esta política reemplaza la rotación por tamaño; no conserva indefinidamente los logs locales.${NC}"
+    return 0
+  fi
+
+  echo -e "${YELLOW}[WARN] No está instalada la política OrangeBox de rotación diaria y retención de auditd.${NC}"
+  echo "Ejecute ./logrotate-hardening.sh --fix para instalar el rotador seguro, comprimir archivos y conservar siete días."
+  echo "El control no cambiará max_log_file_action mientras no exista el rotador validado."
+  WARNINGS=$((WARNINGS + 1))
+  return 0
 }
 
 # ==============================================
