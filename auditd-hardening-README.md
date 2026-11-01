@@ -79,7 +79,7 @@ Configura auditd para iniciar automaticamente y asegura que este corriendo
 Configura max_log_file = 50 MB
 
 ### 4.1.1.4 - Rotación de logs
-Configura `max_log_file_action = ROTATE`. La retención se administra con la política operativa del servidor.
+La política OrangeBox instala `/etc/cron.daily/orangebox-audit-logrotate`, configura `max_log_file_action = ignore` y solicita a auditd una rotación diaria. Los archivos cerrados se comprimen con gzip y se conservan siete días; no se modifica directamente el archivo activo. El control se aplica solo cuando no existe otra política de rotación.
 
 ### 4.1.1.5 - Acciones por falta de espacio
 Configura `space_left_action = SYSLOG` y `admin_space_left_action = SUSPEND`; no apaga el host automáticamente.
