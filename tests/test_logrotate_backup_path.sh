@@ -6,12 +6,12 @@ SCRIPT="$ROOT_DIR/logrotate-hardening.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-fail() { printf '[FAIL] %s\\n' "$*" >&2; exit 1; }
+fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 pass() { printf '[PASS] %s\\n' "$*"; }
 
 BACKUP_FUNCTION="$TMP_DIR/backup-one.sh"
 awk '
-  /^backup_one\\(\\) \\{$/ { inside=1 }
+  /^backup_one\(\) \{$/ { inside=1 }
   inside { print }
   inside && /^}$/ { exit }
 ' "$SCRIPT" > "$BACKUP_FUNCTION"
