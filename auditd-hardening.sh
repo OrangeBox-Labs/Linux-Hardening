@@ -429,10 +429,24 @@ check_log_storage() {
 # ==============================================
 # 4.1.1.4 - ENSURE AUDIT LOGS NOT AUTOMATICALLY DELETED
 # ==============================================
+# Verifies that the scheduler which runs /etc/cron.daily is enabled and active.
+audit_cron_scheduler_ready() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet crond.service &&
+      systemctl is-enabled crond.service >/dev/null 2>&1
+    return $?
+  fi
+  command -v service >/dev/null 2>&1 || return 1
+  service crond status >/dev/null 2>&1 || return 1
+  command -v chkconfig >/dev/null 2>&1 || return 1
+  chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
+}
+
 audit_rotation_policy_ready() {
   local script="/etc/cron.daily/orangebox-audit-logrotate"
   local action=""
   [ -f "$script" ] && [ -x "$script" ] && [ ! -L "$script" ] || return 1
+  audit_cron_scheduler_ready || return 1
   grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
     grep -Eq '^KEEP_DAYS=7$' "$script" &&
     grep -Fq 'auditd rotate' "$script" &&
