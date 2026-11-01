@@ -80,6 +80,8 @@ jobs:
         run: bash tests/test_fs_safety_guard.sh
       - name: Test automatic logrotate policy
         run: bash tests/test_logrotate_hardening.sh
+      - name: Test logrotate backup destination scope
+        run: bash tests/test_logrotate_backup_path.sh
       - name: Test auditd rotation, gzip and seven-day retention
         run: bash tests/test_audit_rotation_helper.sh
       - name: Test companion module consent routing
