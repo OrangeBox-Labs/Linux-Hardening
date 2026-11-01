@@ -25,6 +25,11 @@ grep -Fq 'disk_full_action' "$CIS" || fail "auditd debe comprobar las acciones a
 grep -Fq 'check_audit_low_space_warning' "$CIS" || fail "falta comprobar umbrales y acciones cuando el espacio audit es bajo"
 grep -Fq 'systemctl is-enabled rpcbind.socket' "$CIS" || fail "rpcbind debe comprobar servicio y socket"
 grep -Fq 'max_log_file activo no existe o no es un entero positivo' "$CIS" || fail "max_log_file debe validar un valor activo numérico";
+grep -Fq 'install_blocked=1' "$CIS" || fail "TIPC debe aceptar install /bin/false como mecanismo de bloqueo"
+grep -Fq 'blacklist_effective=1' "$CIS" || fail "TIPC debe verificar blacklist efectiva de modprobe"
+grep -Fq '/sys/module/$module' "$CIS" || fail "TIPC debe detectar el estado runtime sin usar modinfo"
+grep -Fq 'audit_time_rotation_ready()' "$CIS" || fail "CIS debe reconocer la excepción operacional de retención de siete días"
+grep -Fq 'return 2' "$CIS" || fail "la retención local de siete días no debe presentarse como PASS CIS";
 
 
 [ -f "$ROOT_DIR/cis-profile-versions.md" ] || fail "no existe el mapa versionado CIS"
