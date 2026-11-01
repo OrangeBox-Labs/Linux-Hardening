@@ -72,7 +72,7 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 
 El módulo `logrotate-hardening.sh --fix` mantiene `compress` y `rotate 5` en la configuración global de logrotate. Para `/var/log/audit/audit.log` utiliza la interfaz de rotación del propio daemon: instala `/etc/cron.daily/orangebox-audit-logrotate`, configura `max_log_file_action = ignore`, solicita `service auditd rotate`, comprime los archivos cerrados y elimina solo los archivos OrangeBox con más de siete días. No usa `copytruncate` ni renombra directamente el log activo.
 
-Antes de aplicar, comprueba si existe una regla de logrotate que apunte a audit o un cron que ya rote auditd. Ante una política externa o un archivo de destino ajeno a OrangeBox, no lo sobrescribe ni crea una segunda rotación; muestra una advertencia para revisión. El instalador unificado de Wazuh aplica la misma política y la verifica al finalizar.
+Antes de aplicar, comprueba si existe una regla de logrotate que apunte a audit o un cron que ya rote auditd. Ante una política externa o un archivo de destino ajeno a OrangeBox, no lo sobrescribe ni crea una segunda rotación; muestra una advertencia para revisión. También exige que crond esté activo y habilitado antes de instalar la tarea o cambiar max_log_file_action; si el scheduler no está listo, no desactiva la rotación por tamaño. El instalador unificado de Wazuh aplica la misma política y la verifica al finalizar.
 
 La retención local de siete días es una decisión operacional, no el equivalente al control CIS de conservación indefinida. El benchmark CIS la informa como excepción/WARN, no como PASS. La retención centralizada de alertas/eventos en Wazuh debe estar operativa antes de eliminar los archivos locales antiguos.
 
