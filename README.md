@@ -51,9 +51,9 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
 | `sudo-hardening.sh` | Preflight de sudoers; `use_pty` se omite en cPanel y `--fix` aprueba automáticamente los cambios propuestos. |
-| `auditd-hardening.sh` | Reglas persistentes verificadas antes de inmutabilidad; conserva rotación `ROTATE`, `space_left_action=SYSLOG` y `admin_space_left_action=SUSPEND`. |
+| `auditd-hardening.sh` | Verifica reglas persistentes antes de inmutabilidad y valida la política de rotación diaria auditd de siete días; conserva `space_left_action=SYSLOG` y `admin_space_left_action=SUSPEND`. |
 | `rsyslog-hardening.sh` | Configura persistencia de journald cuando corresponde; no fuerza `ForwardToSyslog=yes` y reinicia servicios automáticamente tras cambios aplicados. |
-| `logrotate-hardening.sh` | Normaliza `compress` y `rotate 5` en `/etc/logrotate.conf` y todos los archivos regulares de `/etc/logrotate.d`, con backup y validación. |
+| `logrotate-hardening.sh` | Normaliza `compress` y `rotate 5` en la configuración general y gestiona auditd con rotación diaria segura, gzip y siete días de retención; detecta configuraciones externas antes de escribir. |
 | `aide-install.sh` | AIDE es opcional y se ejecuta por selección explícita; bajo `--fix` las propuestas se aprueban automáticamente y se advierte el posible solapamiento con Wazuh FIM. |
 | `selinux-secure-setup.sh` | Herramienta independiente para cambiar explícitamente a Permissive con confirmación, respaldo de `/etc/selinux/config` y sin reinicio automático. No se ejecuta desde el baseline. |
 | `cron-hardening.sh` | Política conservadora con `cron.allow`/`at.allow` para evitar romper cPanel y otros entornos de hosting. |
@@ -67,6 +67,14 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 | `post-install.sh` | Preparación inicial; queda fuera de la auditoría agregada porque puede instalar paquetes o modificar configuración incluso sin `--fix`. |
 | `cis-benchmark-check.sh` | Benchmark CIS independiente de la auditoría operacional de los módulos. |
 | `linux-hardening-audit.sh` | Auditoría agregada de solo lectura; no ejecuta `--fix` ni mezcla su resultado con el porcentaje CIS. |
+
+## Rotación y retención de auditd
+
+El módulo `logrotate-hardening.sh --fix` mantiene `compress` y `rotate 5` en la configuración global de logrotate. Para `/var/log/audit/audit.log` utiliza la interfaz de rotación del propio daemon: instala `/etc/cron.daily/orangebox-audit-logrotate`, configura `max_log_file_action = ignore`, solicita `service auditd rotate`, comprime los archivos cerrados y elimina solo los archivos OrangeBox con más de siete días. No usa `copytruncate` ni renombra directamente el log activo.
+
+Antes de aplicar, comprueba si existe una regla de logrotate que apunte a audit o un cron que ya rote auditd. Ante una política externa o un archivo de destino ajeno a OrangeBox, no lo sobrescribe ni crea una segunda rotación; muestra una advertencia para revisión. El instalador unificado de Wazuh aplica la misma política y la verifica al finalizar.
+
+La retención local de siete días es una decisión operacional, no el equivalente al control CIS de conservación indefinida. El benchmark CIS la informa como excepción/WARN, no como PASS. La retención centralizada de alertas/eventos en Wazuh debe estar operativa antes de eliminar los archivos locales antiguos.
 
 ## 🧠 Hardening idempotente
 
