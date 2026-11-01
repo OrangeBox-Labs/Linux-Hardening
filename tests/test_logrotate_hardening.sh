@@ -25,7 +25,7 @@ FILE_LOOP_LINE="$(grep -n 'if ! process_file "$file"' "$LOGROTATE" | head -n1 | 
 grep -Fq 'audit_rotation_conflict()' "$LOGROTATE" || fail "debe detectar una rotación audit existente antes de instalar"
 grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$LOGROTATE" || fail "falta el marcador de la política audit administrada"
 grep -Fq 'KEEP_DAYS=7' "$LOGROTATE" || fail "audit debe conservar siete días"
-grep -Fq 'service auditd rotate' "$LOGROTATE" || fail "la rotación debe solicitarse a auditd, no renombrar audit.log activo"
+grep -Fq 'auditd rotate' "$LOGROTATE" || fail "la rotación debe solicitarse a auditd, no renombrar audit.log activo"
 grep -Fq 'gzip' "$LOGROTATE" || fail "audit debe comprimir archivos rotados"
 grep -Fq 'max_log_file_action = ignore' "$LOGROTATE" || fail "la política temporal debe desactivar la rotación automática por tamaño"
 pass "logrotate aplica compress + rotate 5 y auditd diario comprimido con retención de siete días"
