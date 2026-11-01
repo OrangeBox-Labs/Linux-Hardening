@@ -105,3 +105,14 @@ Al retomar, primero consultar el HEAD de `main` y los últimos workflows de GitH
 - [ ] Validación real en AlmaLinux 9 recién instalado con --audit, snapshot y consola de recuperación antes de aplicar cambios. Confirmar especialmente el forwarding/retención central de Wazuh antes de la purga local de siete días.
 
 Nota de cumplimiento: siete días de retención local es una política OrangeBox y no equivale a keep_logs ni a PASS del control CIS de conservación indefinida; el checker la informa como WARN/excepción documentada.
+
+
+### Seguimiento live test auditd — 2026-11-01
+
+- [x] Verificar preflight real AlmaLinux 9: crond, auditd, ausencia de conflicto, TIPC runtime/política.
+- [x] Corregir asignación de destino en backup_one y agregar diagnóstico explícito de fallos.
+- [x] Añadir prueba de regresión de la ruta espejo del backup.
+- [ ] Confirmar CI del cambio y ejecutar regresión en AlmaLinux 9.
+- [ ] Revisar espacio en /var/log y /var/backups, configuración firewalld y respaldos del intento anterior.
+- [ ] Reintentar --fix y validar el estado de auditd.conf, helper diario, backups y logrotate -d.
+- [ ] Realizar una rotación auditd real y comprobar gzip/retención después de asegurar la ingesta central en Wazuh.
