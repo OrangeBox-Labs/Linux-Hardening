@@ -29,6 +29,8 @@ grep -Fq 'install_blocked=1' "$CIS" || fail "TIPC debe aceptar install /bin/fals
 grep -Fq 'blacklist_effective=1' "$CIS" || fail "TIPC debe verificar blacklist efectiva de modprobe"
 grep -Fq '/sys/module/$module' "$CIS" || fail "TIPC debe detectar el estado runtime sin usar modinfo"
 grep -Fq 'audit_time_rotation_ready()' "$CIS" || fail "CIS debe reconocer la excepción operacional de retención de siete días"
+grep -Fq 'CIS_MODULE_PROC' "$CIS" || fail "TIPC debe permitir pruebas aisladas de estado runtime sin modificar el host"
+grep -Fq 'CIS_MODULE_SYSROOT' "$CIS" || fail "TIPC debe consultar /sys/module para detectar el runtime"
 grep -Fq 'return 2' "$CIS" || fail "la retención local de siete días no debe presentarse como PASS CIS";
 
 
