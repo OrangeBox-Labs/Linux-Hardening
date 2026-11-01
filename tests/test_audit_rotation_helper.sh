@@ -11,7 +11,7 @@ pass() { printf '[PASS] %s\n' "$*"; }
 
 HELPER="$TMP_DIR/auditd-logrotate.sh"
 awk '
-  /cat <<\x27AUDIT_ROTATION\x27/ { inside=1; next }
+  /cat <<.AUDIT_ROTATION./ { inside=1; next }
   inside && /^AUDIT_ROTATION$/ { exit }
   inside { print }
 ' "$MODULE" > "$HELPER"
