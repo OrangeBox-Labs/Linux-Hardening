@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CIS="$ROOT_DIR/cis-benchmark-check.sh"
-TMP_DIR="$(mktemp -d)"
+# Test mocks are executable files; /tmp may be mounted noexec on hardened hosts.
+TMP_DIR="$(mktemp -d "$ROOT_DIR/.orangebox-test-cis-tipc.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
