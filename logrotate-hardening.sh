@@ -6,7 +6,7 @@ AUTO_FIX=false
 LOGROTATE_CONF="/etc/logrotate.conf"
 LOGROTATE_DIR="/etc/logrotate.d"
 AUDITD_CONF="/etc/audit/auditd.conf"
-AUDIT_ROTATION_SCRIPT="/etc/cron.daily/orangebox-audit-logrotate"
+AUDIT_RETENTION_SCRIPT="/etc/cron.daily/orangebox-audit-logrotate"
 AUDIT_ROTATION_CONFLICT_FOUND=false
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$BASHPID"
 BACKUP_DIR="/var/backups/orangebox-logrotate-hardening/$RUN_ID"
@@ -203,31 +203,13 @@ process_file() {
 }
 
 
-# Reads the last active max_log_file_action value without treating comments as configuration.
-auditd_rotation_action() {
-  [ -r "$AUDITD_CONF" ] || return 1
-  awk -F= '
-    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-    {
-      key=$1; gsub(/[[:space:]]/, "", key)
-      if (key == "max_log_file_action") {
-        value=$2
-        sub(/[[:space:]]*#.*/, "", value)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-        current=tolower(value)
-      }
-    }
-    END { if (current != "") print current; else exit 1 }
-  ' "$AUDITD_CONF"
-}
-
 # Detects an existing independent audit.log rotator before installing OrangeBox policy.
 # Direct logrotate handling of audit.log is not replaced because auditd owns the open file.
 audit_rotation_conflict() {
   local candidate=""
   for candidate in "$LOGROTATE_CONF" "$LOGROTATE_DIR"/*; do
     [ -f "$candidate" ] || continue
-    [ "$candidate" = "$AUDIT_ROTATION_SCRIPT" ] && continue
+    [ "$candidate" = "$AUDIT_RETENTION_SCRIPT" ] && continue
     if awk '
       /^[[:space:]]*#/ { next }
       /\/var\/log\/audit([/[:space:]]|$|\*)/ { found=1 }
@@ -241,7 +223,7 @@ audit_rotation_conflict() {
   # Also detect packaged or administrator-created cron jobs that already signal auditd to rotate.
   for candidate in /etc/cron.daily/* /etc/cron.hourly/* /etc/cron.weekly/* /etc/cron.d/*; do
     [ -f "$candidate" ] || continue
-    [ "$candidate" = "$AUDIT_ROTATION_SCRIPT" ] && continue
+    [ "$candidate" = "$AUDIT_RETENTION_SCRIPT" ] && continue
     if awk '
       /^[[:space:]]*#/ { next }
       /service[[:space:]]+auditd[[:space:]]+rotate/ ||
@@ -255,82 +237,48 @@ audit_rotation_conflict() {
   return 1
 }
 
-# Creates the Red Hat-supported time-based auditd rotation helper.
-# auditd rotates its own active file on request; this helper then timestamps,
-# compresses and removes only OrangeBox archives older than seven days.
-write_audit_rotation_script() {
-  cat <<'AUDIT_ROTATION'
+# Creates a retention-only helper. auditd keeps its configured native rotation.
+# The daily job removes only closed generations older than seven days and legacy OrangeBox archives.
+write_audit_retention_script() {
+  cat <<'AUDIT_RETENTION'
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
-# ORANGEBOX_AUDIT_LOG_ROTATION
-# Rotate auditd once per day, compress archives and retain seven days.
+# ORANGEBOX_AUDIT_LOG_RETENTION
+# Preserve auditd's native rotation; purge only closed generations older than seven days.
 export PATH="/sbin:/bin:/usr/sbin:/usr/bin:$PATH"
 AUDIT_LOG_DIR="${ORANGEBOX_AUDIT_LOG_DIR:-/var/log/audit}"
 KEEP_DAYS=7
 KEEP_MINUTES=$((KEEP_DAYS * 1440))
-SERVICE_BIN="${ORANGEBOX_AUDIT_SERVICE_BIN:-service}"
 
 log_message() {
   if command -v logger >/dev/null 2>&1; then
-    logger -t orangebox-audit-rotation -- "$*"
+    logger -t orangebox-audit-retention -- "$*"
   fi
 }
 
-# Compress numbered auditd rotations without touching the active audit.log.
-archive_rotated_logs() {
-  local file suffix timestamp epoch archive staging
-  for file in "$AUDIT_LOG_DIR"/audit.log.[0-9]*; do
-    [ -f "$file" ] || continue
-    suffix="${file##*.}"
-    [[ "$suffix" =~ ^[0-9]+$ ]] || continue
-
-    timestamp="$(date -r "$file" '+%Y%m%d_%H%M%S')" || return 1
-    epoch="$(date -r "$file" '+%s')" || return 1
-    archive="$AUDIT_LOG_DIR/audit.log.orangebox.$timestamp.$epoch.$suffix.gz"
-    staging="$archive.tmp"
-
-    [ ! -e "$archive" ] || archive="$AUDIT_LOG_DIR/audit.log.orangebox.$timestamp.$epoch.$suffix.$$.gz"
-    staging="$archive.tmp"
-
-    mv -- "$file" "$staging" || return 1
-    if ! gzip -f -- "$staging"; then
-      mv -- "$staging" "$file" 2>/dev/null || true
-      return 1
-    fi
-    mv -- "$staging.gz" "$archive" || return 1
-  done
+[ -d "$AUDIT_LOG_DIR" ] || exit 0
+command -v find >/dev/null 2>&1 || {
+  log_message "ERROR: find no está disponible; no se aplicó la retención."
+  exit 1
 }
 
-[ -d "$AUDIT_LOG_DIR" ] || exit 0
-command -v gzip >/dev/null 2>&1 || { log_message "ERROR: gzip no está disponible"; exit 1; }
-command -v "$SERVICE_BIN" >/dev/null 2>&1 || { log_message "ERROR: service no está disponible"; exit 1; }
-
-# Preserve archives from the previous rotation before auditd reuses audit.log.1.
-archive_rotated_logs || { log_message "ERROR: no se pudieron comprimir logs audit anteriores"; exit 1; }
-
-# Request rotation through auditd; never rename or truncate the active file ourselves.
-"$SERVICE_BIN" auditd rotate
-rotate_status=$?
-if [ "$rotate_status" -ne 0 ]; then
-  log_message "ERROR: auditd rotate terminó con código $rotate_status"
-  exit "$rotate_status"
+# Solo borra generaciones cerradas audit.log.N y archivos del helper OrangeBox anterior.
+# El archivo activo audit.log nunca coincide con estos patrones.
+if ! deleted_count="$(find "$AUDIT_LOG_DIR" -regextype posix-extended -maxdepth 1 -type f \
+  \( -regex '.*/audit\.log\.[0-9]+' -o -name 'audit.log.orangebox.*.gz' \) \
+  -mmin "+$KEEP_MINUTES" -print -delete | wc -l)"; then
+  log_message "ERROR: falló la purga de generaciones auditd antiguas."
+  exit 1
 fi
 
-# Allow auditd to finish closing the previous file and creating the new active log.
-sleep 2
-archive_rotated_logs || { log_message "ERROR: no se pudieron comprimir los logs audit rotados"; exit 1; }
-
-# Delete only archives created by this policy after seven full days.
-find "$AUDIT_LOG_DIR" -maxdepth 1 -type f -name 'audit.log.orangebox.*.gz' \
-  -mmin "+$KEEP_MINUTES" -exec rm -f -- {} +
-
-log_message "Rotación diaria completada; compresión gzip y retención de siete días."
+deleted_count="$(printf '%s' "$deleted_count" | tr -d '[:space:]')"
+log_message "Retención diaria completada: archivos con más de siete días eliminados: ${deleted_count:-0}. La rotación nativa de auditd no fue modificada."
 exit 0
-AUDIT_ROTATION
+AUDIT_RETENTION
 }
 
-# Cron must be running and enabled before auditd's size-based rotation is disabled.
+# Cron must be running and enabled so the daily retention cleanup actually executes.
 # EL7+ uses systemd; EL6 falls back to service/chkconfig.
 audit_cron_scheduler_ready() {
   if command -v systemctl >/dev/null 2>&1; then
@@ -344,18 +292,19 @@ audit_cron_scheduler_ready() {
   chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
 }
 
-# Reconciles auditd time-based rotation only when no other active audit rotator exists.
-configure_audit_rotation() {
-  local conflict="" action="" tmp="" mode="" owner_group="" changed_action=0
-  local script_marker="# ORANGEBOX_AUDIT_LOG_ROTATION"
+# Installs daily cleanup without replacing auditd's native size-based rotation.
+configure_audit_retention() {
+  local conflict="" tmp="" mode="" owner_group=""
+  local script_marker="# ORANGEBOX_AUDIT_LOG_RETENTION"
+  local legacy_marker="# ORANGEBOX_AUDIT_LOG_ROTATION"
 
   if [ ! -f "$AUDITD_CONF" ] || [ -L "$AUDITD_CONF" ] || [ ! -d /var/log/audit ]; then
     echo -e "${BLUE}[INFO] auditd no está instalado/configurado; se omite la retención de sus logs.${NC}"
     return 0
   fi
 
-  if ! command -v gzip >/dev/null 2>&1 || ! command -v service >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARN] No se instala la rotación audit: se requiere gzip y service.${NC}"
+  if ! command -v find >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN] No se instala la retención audit: find no está disponible.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
@@ -363,116 +312,67 @@ configure_audit_rotation() {
   conflict="$(audit_rotation_conflict || true)"
   if [ -n "$conflict" ]; then
     AUDIT_ROTATION_CONFLICT_FOUND=true
-    echo -e "${YELLOW}[WARN] Se detectó otra política de rotación de audit en $conflict; no se crea una segunda política ni se modifica auditd.conf.${NC}"
+    echo -e "${YELLOW}[WARN] Se detectó otra política de rotación de audit en $conflict; no se instala una limpieza paralela.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
-  if [ -L "$AUDIT_ROTATION_SCRIPT" ]; then
+  if [ -L "$AUDIT_RETENTION_SCRIPT" ]; then
     AUDIT_ROTATION_CONFLICT_FOUND=true
-    echo -e "${YELLOW}[WARN] $AUDIT_ROTATION_SCRIPT es un enlace simbólico; no se modifica.${NC}"
+    echo -e "${YELLOW}[WARN] $AUDIT_RETENTION_SCRIPT es un enlace simbólico; no se modifica.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
-  if [ -e "$AUDIT_ROTATION_SCRIPT" ] && ! grep -Fq "$script_marker" "$AUDIT_ROTATION_SCRIPT"; then
+  if [ -e "$AUDIT_RETENTION_SCRIPT" ] &&
+     ! grep -Fq "$script_marker" "$AUDIT_RETENTION_SCRIPT" &&
+     ! grep -Fq "$legacy_marker" "$AUDIT_RETENTION_SCRIPT"; then
     AUDIT_ROTATION_CONFLICT_FOUND=true
-    echo -e "${YELLOW}[WARN] $AUDIT_ROTATION_SCRIPT ya existe y no pertenece a OrangeBox; se conserva sin cambios.${NC}"
+    echo -e "${YELLOW}[WARN] $AUDIT_RETENTION_SCRIPT ya existe y no pertenece a OrangeBox; se conserva sin cambios.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
   if ! audit_cron_scheduler_ready; then
-    echo -e "${YELLOW}[WARN] crond no está activo y habilitado; no se instala la tarea diaria ni se cambia max_log_file_action. Configure el scheduler y vuelva a ejecutar logrotate-hardening.sh --fix.${NC}"
+    echo -e "${YELLOW}[WARN] crond no está activo y habilitado; no se instala la limpieza diaria. Configure el scheduler y vuelva a ejecutar logrotate-hardening.sh --fix.${NC}"
     WARNINGS=$((WARNINGS + 1))
     return 0
   fi
 
-  action="$(auditd_rotation_action 2>/dev/null || true)"
-  case "$action" in
-    ""|rotate|ignore) ;;
-    *)
-      echo -e "${YELLOW}[WARN] max_log_file_action=$action parece una política personalizada; no se reemplaza por ignore.${NC}"
-      WARNINGS=$((WARNINGS + 1))
-      return 0
-      ;;
-  esac
-
   [ "$AUTO_FIX" = true ] || {
-    if [ "$action" = "ignore" ] && [ -f "$AUDIT_ROTATION_SCRIPT" ] && grep -Fq "$script_marker" "$AUDIT_ROTATION_SCRIPT"; then
-      echo -e "${GREEN}[OK] Auditd: rotación diaria, compresión y retención de siete días ya configuradas.${NC}"
+    if [ -f "$AUDIT_RETENTION_SCRIPT" ] &&
+       grep -Fq "$script_marker" "$AUDIT_RETENTION_SCRIPT" &&
+       grep -Eq '^KEEP_DAYS=7$' "$AUDIT_RETENTION_SCRIPT" &&
+       grep -Fq "audit\\.log\\.[0-9]+" "$AUDIT_RETENTION_SCRIPT" &&
+       grep -Fq -- '-delete' "$AUDIT_RETENTION_SCRIPT" &&
+       ! grep -Fq 'auditd rotate' "$AUDIT_RETENTION_SCRIPT" &&
+       ! grep -Eq '(^|[[:space:]])gzip([[:space:]]|$)' "$AUDIT_RETENTION_SCRIPT"; then
+      echo -e "${GREEN}[OK] Auditd: rotación nativa preservada y purga diaria de generaciones con más de siete días.${NC}"
     else
-      echo -e "${YELLOW}[PENDIENTE] Auditd: falta configurar la rotación diaria con compresión y retención de siete días.${NC}"
+      echo -e "${YELLOW}[PENDIENTE] Auditd: falta instalar/actualizar la limpieza diaria de generaciones con más de siete días.${NC}"
       WARNINGS=$((WARNINGS + 1))
     fi
     return 0
   }
 
   mkdir -p /etc/cron.daily || return 1
-  tmp="$(mktemp /etc/cron.daily/.orangebox-audit-rotation.XXXXXX)" || return 1
-  write_audit_rotation_script > "$tmp" || { rm -f "$tmp"; return 1; }
-  bash -n "$tmp" || { rm -f "$tmp"; echo -e "${RED}[ERROR] Sintaxis inválida en el rotador auditd.${NC}"; return 1; }
+  tmp="$(mktemp /etc/cron.daily/.orangebox-audit-retention.XXXXXX)" || return 1
+  write_audit_retention_script > "$tmp" || { rm -f "$tmp"; return 1; }
+  bash -n "$tmp" || { rm -f "$tmp"; echo -e "${RED}[ERROR] Sintaxis inválida en el helper de retención auditd.${NC}"; return 1; }
 
-  if [ -f "$AUDIT_ROTATION_SCRIPT" ] && cmp -s "$tmp" "$AUDIT_ROTATION_SCRIPT"; then
+  if [ -f "$AUDIT_RETENTION_SCRIPT" ] && cmp -s "$tmp" "$AUDIT_RETENTION_SCRIPT"; then
     rm -f "$tmp"
   else
-    if [ -f "$AUDIT_ROTATION_SCRIPT" ]; then
-      backup_one "$AUDIT_ROTATION_SCRIPT" || { rm -f "$tmp"; return 1; }
+    if [ -f "$AUDIT_RETENTION_SCRIPT" ]; then
+      backup_one "$AUDIT_RETENTION_SCRIPT" || { rm -f "$tmp"; return 1; }
     fi
     chmod 750 "$tmp" && chown root:root "$tmp" || { rm -f "$tmp"; return 1; }
-    mv -f "$tmp" "$AUDIT_ROTATION_SCRIPT" || { rm -f "$tmp"; return 1; }
-    CHANGED_FILES+=("$AUDIT_ROTATION_SCRIPT")
+    mv -f "$tmp" "$AUDIT_RETENTION_SCRIPT" || { rm -f "$tmp"; return 1; }
+    CHANGED_FILES+=("$AUDIT_RETENTION_SCRIPT")
     FIXED=$((FIXED + 1))
-    echo -e "${GREEN}[OK] Rotador auditd instalado/actualizado en $AUDIT_ROTATION_SCRIPT.${NC}"
+    echo -e "${GREEN}[OK] Helper diario de retención auditd instalado/actualizado en $AUDIT_RETENTION_SCRIPT.${NC}"
   fi
 
-  if [ "$action" != "ignore" ]; then
-    backup_one "$AUDITD_CONF" || {
-      echo -e "${RED}[ERROR] No se pudo respaldar $AUDITD_CONF; no se modifica auditd.conf ni se cambia la política de auditd.${NC}" >&2
-      return 1
-    }
-    tmp="$(mktemp "$(dirname "$AUDITD_CONF")/.auditd.conf.orangebox.XXXXXX")" || {
-      echo -e "${RED}[ERROR] No se pudo crear el temporal junto a $AUDITD_CONF.${NC}" >&2
-      return 1
-    }
-    awk '
-      function trim(s) { sub(/^[ \\t]+/, "", s); sub(/[ \\t]+$/, "", s); return s }
-      /^[ \\t]*#/ || /^[ \\t]*$/ { print; next }
-      {
-        line=$0
-        sub(/[ \\t]+#.*/, "", line)
-        equal=index(line, "=")
-        key=equal ? trim(substr(line, 1, equal-1)) : ""
-        if (key == "max_log_file_action") {
-          if (!written) print "max_log_file_action = ignore"
-          written=1
-          next
-        }
-        print
-      }
-      END { if (!written) print "max_log_file_action = ignore" }
-    ' "$AUDITD_CONF" > "$tmp" || { echo -e "${RED}[ERROR] No se pudo generar la configuración temporal de auditd.${NC}" >&2; rm -f "$tmp"; return 1; }
-    mode="$(stat -c '%a' "$AUDITD_CONF" 2>/dev/null || echo 640)"
-    owner_group="$(stat -c '%u:%g' "$AUDITD_CONF" 2>/dev/null || echo 0:0)"
-    chmod "$mode" "$tmp" || { echo -e "${RED}[ERROR] No se pudieron conservar los permisos $mode en el temporal de auditd.conf.${NC}" >&2; rm -f "$tmp"; return 1; }
-    chown "$owner_group" "$tmp" || { echo -e "${RED}[ERROR] No se pudo conservar el propietario $owner_group en el temporal de auditd.conf.${NC}" >&2; rm -f "$tmp"; return 1; }
-    mv -f "$tmp" "$AUDITD_CONF" || { echo -e "${RED}[ERROR] No se pudo reemplazar $AUDITD_CONF con el temporal validado.${NC}" >&2; rm -f "$tmp"; return 1; }
-    CHANGED_FILES+=("$AUDITD_CONF")
-    FIXED=$((FIXED + 1))
-    changed_action=1
-    echo -e "${GREEN}[OK] max_log_file_action actualizado a ignore para usar rotación diaria.${NC}"
-  fi
-
-  if [ "$changed_action" -eq 1 ]; then
-    local auditd_pid=""
-    auditd_pid="$(pidof auditd 2>/dev/null || true)"
-    if [ -n "$auditd_pid" ]; then
-      # Red Hat documents SIGHUP as the portable way to reload auditd.conf.
-      kill -HUP $auditd_pid || return 1
-      echo -e "${GREEN}[OK] auditd recibió SIGHUP para aplicar la nueva política.${NC}"
-    fi
-  fi
-
-  echo -e "${GREEN}[OK] Auditd: gzip + siete días; el archivo activo sigue bajo control de auditd.${NC}"
+  echo -e "${GREEN}[OK] Retención auditd: siete días. No se solicita rotación adicional, no se comprimen las generaciones nuevas y no se modifica auditd.conf.${NC}"
 }
 
 main() {
@@ -518,8 +418,8 @@ main() {
   fi
 
   # Auditd conflict checks happen before any logrotate file is normalized.
-  if ! configure_audit_rotation; then
-    echo -e "${RED}[ERROR] Falló la configuración de retención de auditd; se restauran los cambios realizados.${NC}"
+  if ! configure_audit_retention; then
+    echo -e "${RED}[ERROR] Falló la instalación de la retención de auditd; se restauran los cambios realizados.${NC}"
     restore_changed_files
     exit 1
   fi

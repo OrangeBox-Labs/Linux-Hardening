@@ -1591,9 +1591,8 @@ check_audit_log_size() {
 # ==============================================
 # 4.1.2.2 - ASEGURAR LOGS NO ELIMINADOS AUTOMATICAMENTE
 # ==============================================
-# Check the locally approved time-based rotation policy. It intentionally
-# retains compressed audit archives for seven days instead of keep_logs forever.
-# Cron must actually run daily jobs for the local seven-day audit policy to be valid.
+# Check the local seven-day cleanup policy. It does not rotate auditd.
+# A daily scheduler is required because this helper only prunes closed files.
 cis_audit_cron_ready() {
   if command -v systemctl >/dev/null 2>&1; then
     systemctl is-active --quiet crond.service &&
@@ -1606,15 +1605,24 @@ cis_audit_cron_ready() {
   chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
 }
 
-audit_time_rotation_ready() {
+audit_time_retention_ready() {
   local script="/etc/cron.daily/orangebox-audit-logrotate"
   [ -f "$script" ] && [ -x "$script" ] && [ ! -L "$script" ] || return 1
   cis_audit_cron_ready || return 1
-  grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
+  grep -Fq '# ORANGEBOX_AUDIT_LOG_RETENTION' "$script" &&
     grep -Eq '^KEEP_DAYS=7$' "$script" &&
-    grep -Fq 'auditd rotate' "$script" &&
-    grep -Fq 'gzip' "$script" || return 1
-  [ ! -e /etc/logrotate.d/audit ] && [ ! -L /etc/logrotate.d/audit ]
+    grep -Fq "audit\\.log\\.[0-9]+" "$script" &&
+    grep -Fq 'audit.log.orangebox.*.gz' "$script" &&
+    grep -Fq -- '-delete' "$script" &&
+    ! grep -Fq 'auditd rotate' "$script" &&
+    ! grep -Eq '(^|[[:space:]])gzip([[:space:]]|$)' "$script"
+}
+
+audit_legacy_time_rotation_present() {
+  local script="/etc/cron.daily/orangebox-audit-logrotate"
+  [ -f "$script" ] && [ -x "$script" ] &&
+    grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
+    grep -Eq '^KEEP_DAYS=7$' "$script"
 }
 
 check_audit_log_keep() {
@@ -1632,18 +1640,23 @@ check_audit_log_keep() {
     END { print current }
   ' /etc/audit/auditd.conf 2>/dev/null)"
 
-  if [ "$action" = "keep_logs" ]; then
-    log_result "PASS" "4.1.2.2 - Asegurar logs de auditoria no eliminados automaticamente" "max_log_file_action=keep_logs; auditd no elimina automáticamente las generaciones rotadas." "" "$GREEN"
-    return 0
-  fi
-
-  if [ "$action" = "ignore" ] && audit_time_rotation_ready; then
-    log_result "WARN" "4.1.2.2 - Retención temporal de logs de auditoría (política OrangeBox)" "Rotación diaria mediante auditd, compresión gzip y retención de siete días. Es una política operacional explícita y no equivale al control CIS keep_logs: los archivos con más de siete días se eliminan." "Mantener esta excepción documentada y asegurar la copia/retención centralizada de eventos en Wazuh antes de eliminar archivos locales." "$YELLOW"
+  if audit_time_retention_ready; then
+    log_result "WARN" "4.1.2.2 - Retención local temporal de logs de auditoría (política OrangeBox)" "La tarea diaria conserva la rotación nativa de auditd y elimina solo generaciones audit.log.N y archivos OrangeBox heredados con más de siete días. max_log_file_action=$action. Esto no equivale a keep_logs." "Mantener esta excepción documentada y asegurar la retención centralizada de eventos en Wazuh antes de purgar archivos locales." "$YELLOW"
     return 2
   fi
 
+  if audit_legacy_time_rotation_present; then
+    log_result "WARN" "4.1.2.2 - Política heredada de rotación/retención auditd" "Se detectó el helper OrangeBox anterior, que forzaba rotación diaria y compresión. Actualícelo con logrotate-hardening.sh --fix para conservar la rotación nativa y aplicar limpieza por antigüedad." "Revisar crond y ejecutar logrotate-hardening.sh --fix; confirmar que max_log_file_action conserva la política local requerida." "$YELLOW"
+    return 2
+  fi
+
+  if [ "$action" = "keep_logs" ]; then
+    log_result "PASS" "4.1.2.2 - Asegurar logs de auditoria no eliminados automaticamente" "max_log_file_action=keep_logs y no se detecta una tarea local OrangeBox que purgue los archivos." "" "$GREEN"
+    return 0
+  fi
+
   [ -n "$action" ] || action="no definido"
-  log_result "FAIL" "4.1.2.2 - Asegurar logs de auditoria no eliminados automaticamente" "max_log_file_action=$action; no se encontró una política OrangeBox de rotación diaria y retención validada." "Configurar keep_logs para retención indefinida, o instalar la política OrangeBox de rotación diaria de siete días con logrotate-hardening.sh --fix." "$RED"
+  log_result "FAIL" "4.1.2.2 - Asegurar logs de auditoria no eliminados automaticamente" "max_log_file_action=$action; no se encontró keep_logs ni la política local de retención de siete días." "Configurar keep_logs para retención indefinida, o instalar la política local OrangeBox de siete días con logrotate-hardening.sh --fix." "$RED"
   return 1
 }
 

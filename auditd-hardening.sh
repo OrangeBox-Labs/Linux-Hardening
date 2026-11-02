@@ -206,7 +206,7 @@ configure_auditd_param() {
     max_log_file)
       effect="Define el tamaño máximo de cada archivo de log de auditd en MB. Un valor bajo genera rotación frecuente; uno alto consume más espacio por archivo. No cambia por sí solo la retención total." ;;
     max_log_file_action)
-      effect="Rota los logs cuando alcanzan el tamaño límite. La retención queda controlada por num_logs y evita conservar archivos indefinidamente." ;;
+      effect="Define qué hace auditd al alcanzar max_log_file. La retención OrangeBox se administra aparte: elimina solo generaciones cerradas con más de siete días y no cambia esta directiva." ;;
     space_left_action)
       effect="Define la acción al quedar poco espacio; SYSLOG registra un aviso. La disponibilidad del disco se supervisa externamente con Zabbix." ;;
     action_mail_acct)
@@ -442,42 +442,31 @@ audit_cron_scheduler_ready() {
   chkconfig --list crond 2>/dev/null | grep -Eq '3:on.*5:on'
 }
 
-audit_rotation_policy_ready() {
+audit_retention_policy_ready() {
   local script="/etc/cron.daily/orangebox-audit-logrotate"
-  local action=""
   [ -f "$script" ] && [ -x "$script" ] && [ ! -L "$script" ] || return 1
   audit_cron_scheduler_ready || return 1
-  grep -Fq '# ORANGEBOX_AUDIT_LOG_ROTATION' "$script" &&
+  grep -Fq '# ORANGEBOX_AUDIT_LOG_RETENTION' "$script" &&
     grep -Eq '^KEEP_DAYS=7$' "$script" &&
-    grep -Fq 'auditd rotate' "$script" &&
-    grep -Fq 'gzip' "$script" || return 1
-  action="$(awk -F= '
-    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-    {
-      key=$1; gsub(/[[:space:]]/, "", key)
-      if (key == "max_log_file_action") {
-        value=$2; sub(/[[:space:]]*#.*/, "", value)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-        current=tolower(value)
-      }
-    }
-    END { print current }
-  ' "$AUDIT_CONF" 2>/dev/null)"
-  [ "$action" = "ignore" ]
+    grep -Fq "audit\\.log\\.[0-9]+" "$script" &&
+    grep -Fq 'audit.log.orangebox.*.gz' "$script" &&
+    grep -Fq -- '-delete' "$script" &&
+    ! grep -Fq 'auditd rotate' "$script" &&
+    ! grep -Eq '(^|[[:space:]])gzip([[:space:]]|$)' "$script"
 }
 
 check_log_retention() {
-  echo -e "\\n${BLUE}[*] CIS 4.1.1.4 - Verificando política de rotación/retención de logs audit... ${NC}"
+  echo -e "\n${BLUE}[*] CIS 4.1.1.4 - Verificando retención de logs audit... ${NC}"
 
-  if audit_rotation_policy_ready; then
-    echo -e "${GREEN}[✓] Auditd usa rotación diaria OrangeBox, compresión gzip y retención local de siete días.${NC}"
-    echo -e "${YELLOW}[!] Esta política reemplaza la rotación por tamaño; no conserva indefinidamente los logs locales.${NC}"
+  if audit_retention_policy_ready; then
+    echo -e "${GREEN}[✓] Auditd conserva su rotación nativa; la tarea diaria elimina generaciones cerradas con más de siete días.${NC}"
+    echo -e "${YELLOW}[!] La retención local de siete días no equivale a conservar indefinidamente los logs (keep_logs).${NC}"
     return 0
   fi
 
-  echo -e "${YELLOW}[WARN] No está instalada la política OrangeBox de rotación diaria y retención de auditd.${NC}"
-  echo "Ejecute ./logrotate-hardening.sh --fix para instalar el rotador seguro, comprimir archivos y conservar siete días."
-  echo "El control no cambiará max_log_file_action mientras no exista el rotador validado."
+  echo -e "${YELLOW}[WARN] No está instalada la política OrangeBox de limpieza diaria para auditd.${NC}"
+  echo "Ejecute ./logrotate-hardening.sh --fix para instalar la retención de siete días."
+  echo "La política no modifica max_log_file_action ni solicita una rotación adicional."
   WARNINGS=$((WARNINGS + 1))
   return 0
 }
