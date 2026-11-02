@@ -51,9 +51,9 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 | `ssh-hardening.sh` | Preflight de configuración efectiva antes de modificar parámetros SSH. |
 | `ssh-hardening-complete.sh` | Hardening SSH avanzado con la misma política de comprobación previa y aplicación conservadora. |
 | `sudo-hardening.sh` | Preflight de sudoers; `use_pty` se omite en cPanel y `--fix` aprueba automáticamente los cambios propuestos. |
-| `auditd-hardening.sh` | Verifica reglas persistentes antes de inmutabilidad y valida la política de rotación diaria auditd de siete días; conserva `space_left_action=SYSLOG` y `admin_space_left_action=SUSPEND`. |
+| `auditd-hardening.sh` | Verifica reglas persistentes antes de inmutabilidad y comprueba la limpieza diaria de generaciones auditd con más de siete días; conserva `space_left_action=SYSLOG` y `admin_space_left_action=SUSPEND`. |
 | `rsyslog-hardening.sh` | Configura persistencia de journald cuando corresponde; no fuerza `ForwardToSyslog=yes` y reinicia servicios automáticamente tras cambios aplicados. |
-| `logrotate-hardening.sh` | Normaliza `compress` y `rotate 5` en la configuración general y gestiona auditd con rotación diaria segura, gzip y siete días de retención; detecta configuraciones externas antes de escribir. |
+| `logrotate-hardening.sh` | Normaliza `compress` y `rotate 5` en la configuración general e instala una purga diaria de auditd por antigüedad, sin reemplazar su rotación nativa; detecta configuraciones externas antes de escribir. |
 | `aide-install.sh` | AIDE es opcional y se ejecuta por selección explícita; bajo `--fix` las propuestas se aprueban automáticamente y se advierte el posible solapamiento con Wazuh FIM. |
 | `selinux-secure-setup.sh` | Herramienta independiente para cambiar explícitamente a Permissive con confirmación, respaldo de `/etc/selinux/config` y sin reinicio automático. No se ejecuta desde el baseline. |
 | `cron-hardening.sh` | Política conservadora con `cron.allow`/`at.allow` para evitar romper cPanel y otros entornos de hosting. |
@@ -70,11 +70,13 @@ Al iniciar o retomar una tarea de este repositorio, lee primero el estado, despu
 
 ## Rotación y retención de auditd
 
-El módulo `logrotate-hardening.sh --fix` mantiene `compress` y `rotate 5` en la configuración global de logrotate. Para `/var/log/audit/audit.log` utiliza la interfaz de rotación del propio daemon: instala `/etc/cron.daily/orangebox-audit-logrotate`, configura `max_log_file_action = ignore`, solicita `service auditd rotate`, comprime los archivos cerrados y elimina solo los archivos OrangeBox con más de siete días. No usa `copytruncate` ni renombra directamente el log activo.
+El archivo activo `/var/log/audit/audit.log` y sus generaciones (`audit.log.1`, `audit.log.2`, etc.) siguen bajo el control de **la rotación nativa de auditd**, según los valores locales de `max_log_file`, `max_log_file_action` y `num_logs`. OrangeBox no cambia esas directivas ni solicita una segunda rotación.
 
-Antes de aplicar, comprueba si existe una regla de logrotate que apunte a audit o un cron que ya rote auditd. Ante una política externa o un archivo de destino ajeno a OrangeBox, no lo sobrescribe ni crea una segunda rotación; muestra una advertencia para revisión. También exige que crond esté activo y habilitado antes de instalar la tarea o cambiar max_log_file_action; si el scheduler no está listo, no desactiva la rotación por tamaño. El instalador unificado de Wazuh aplica la misma política y la verifica al finalizar.
+`logrotate-hardening.sh --fix` instala `/etc/cron.daily/orangebox-audit-logrotate` como tarea de **retención solamente**. Una vez al día elimina únicamente archivos cerrados con nombres numéricos `audit.log.N` y archivos `.gz` generados por el helper OrangeBox anterior cuando superan siete días (`10.080` minutos). No toca `audit.log`, no renombra ni comprime las generaciones recientes y no modifica `auditd.conf`.
 
-La retención local de siete días es una decisión operacional, no el equivalente al control CIS de conservación indefinida. El benchmark CIS la informa como excepción/WARN, no como PASS. La retención centralizada de alertas/eventos en Wazuh debe estar operativa antes de eliminar los archivos locales antiguos.
+Antes de instalar la tarea detecta políticas externas de rotación y conserva cualquier helper existente que no pertenezca a OrangeBox. También exige que `crond` esté activo y habilitado; si el scheduler no está listo, no instala la limpieza ni modifica la política de auditd. La auditoría de `auditd-hardening.sh` verifica el helper y el benchmark CIS informa la retención local de siete días como WARN, porque no equivale a `keep_logs` indefinido.
+
+La retención centralizada de eventos en Wazuh debe estar operativa antes de eliminar archivos locales antiguos.
 
 ## 🧠 Hardening idempotente
 

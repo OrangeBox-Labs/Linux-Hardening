@@ -97,9 +97,9 @@ Al retomar, primero consultar el HEAD de `main` y los últimos workflows de GitH
 
 - [x] Corregir 3.1.3 para evaluar estado runtime y política efectiva de modprobe; no confundir .ko disponible con módulo cargado/habilitado.
 - [x] Añadir pruebas funcionales TIPC para PASS/FAIL según runtime y política.
-- [x] Añadir rotación diaria de auditd usando service auditd rotate, gzip y siete días de archivos OrangeBox.
-- [x] Detectar reglas y cron preexistentes antes de modificar la rotación; preservar políticas externas.
-- [x] Exigir que crond esté activo y habilitado antes de usar max_log_file_action=ignore; no habilitar servicios automáticamente.
+- [x] Añadir limpieza diaria de generaciones auditd `audit.log.N` con más de siete días, preservando la rotación nativa del daemon.
+- [x] Detectar reglas y cron externos antes de instalar la limpieza; preservar políticas externas.
+- [x] Exigir crond activo y habilitado para la purga diaria; no modificar max_log_file_action ni habilitar servicios automáticamente.
 - [x] Sincronizar el comportamiento con el instalador Wazuh y sus repositorios principal/espejo.
 - [x] CI verde en Linux-Hardening para CentOS 6/7 y AlmaLinux 8/9/10; CI verde en Wazuh-OrangeBox y Wazuh.
 - [ ] Validación real en AlmaLinux 9 recién instalado con --audit, snapshot y consola de recuperación antes de aplicar cambios. Confirmar especialmente el forwarding/retención central de Wazuh antes de la purga local de siete días.
