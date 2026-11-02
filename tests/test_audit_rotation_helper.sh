@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 MODULE="$ROOT_DIR/logrotate-hardening.sh"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/.orangebox-test-audit-retention.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
