@@ -28,7 +28,7 @@ grep -Fq 'max_log_file activo no existe o no es un entero positivo' "$CIS" || fa
 grep -Fq 'install_blocked=1' "$CIS" || fail "TIPC debe aceptar install /bin/false como mecanismo de bloqueo"
 grep -Fq 'blacklist_effective=1' "$CIS" || fail "TIPC debe verificar blacklist efectiva de modprobe"
 grep -Fq 'sys_module_root="${CIS_MODULE_SYSROOT:-/sys/module}"' "$CIS" || fail "TIPC debe detectar el estado runtime sin usar modinfo"
-grep -Fq 'audit_time_rotation_ready()' "$CIS" || fail "CIS debe reconocer la excepción operacional de retención de siete días"
+grep -Fq 'audit_time_retention_ready()' "$CIS" || fail "CIS debe reconocer la excepción operacional de retención de siete días"
 grep -Fq 'CIS_MODULE_PROC' "$CIS" || fail "TIPC debe permitir pruebas aisladas de estado runtime sin modificar el host"
 grep -Fq 'CIS_MODULE_SYSROOT' "$CIS" || fail "TIPC debe consultar /sys/module para detectar el runtime"
 grep -Fq 'cis_audit_cron_ready()' "$CIS" || fail "la excepción de retención auditd debe exigir crond activo y habilitado"

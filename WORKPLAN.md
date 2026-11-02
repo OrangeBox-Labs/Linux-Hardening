@@ -114,5 +114,5 @@ Nota de cumplimiento: siete días de retención local es una política OrangeBox
 - [x] Añadir prueba de regresión de la ruta espejo del backup.
 - [ ] Confirmar CI del cambio y ejecutar regresión en AlmaLinux 9.
 - [ ] Revisar espacio en /var/log y /var/backups, configuración firewalld y respaldos del intento anterior.
-- [ ] Reintentar --fix y validar el estado de auditd.conf, helper diario, backups y logrotate -d.
-- [ ] Realizar una rotación auditd real y comprobar gzip/retención después de asegurar la ingesta central en Wazuh.
+- [ ] Reintentar --fix y validar que auditd.conf conserva sus valores, que se instala el helper de retención diaria y que los backups/logrotate -d siguen correctos.
+- [ ] Confirmar la rotación nativa por tamaño y probar la purga de generaciones antiguas después de asegurar la ingesta central en Wazuh; no añadir una segunda rotación ni compresión.
