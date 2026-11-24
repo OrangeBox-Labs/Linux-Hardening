@@ -1,7 +1,7 @@
 # 🛡️ bash-hardening.sh
 
 
-Script de hardening para Bash que fortalece la seguridad del shell y el entorno de usuario en sistemas Linux. Configura historial con fecha/hora, prompt mejorado, timeout de sesión, umask segura, alias útiles, auditoría en syslog y protecciones adicionales.
+Script de hardening para Bash que fortalece la seguridad del shell y el entorno de usuario en sistemas Linux. Configura historial con fecha/hora, prompt mejorado, timeout de sesión, umask segura, alias útiles y auditoría opcional de comandos a syslog. La auditoría syslog se omite cuando detecta CSF con `RESTRICT_SYSLOG=3`, para respetar la restricción del socket.
 
 ## Tabla de Contenidos
 
@@ -24,8 +24,8 @@ Script de hardening para Bash que fortalece la seguridad del shell y el entorno 
 - Modo automático - aplica todas las correcciones de una vez
 - Backup automático - guarda copia de seguridad antes de modificar
 - Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
-- Auditoría de comandos - envía todos los comandos a syslog
-- Historial por usuario - guarda ~/.bash_history con permisos 0600; la auditoría central por syslog es independiente
+- Auditoría opcional de comandos a syslog; se omite automáticamente con CSF `RESTRICT_SYSLOG=3`
+- Historial por usuario - guarda ~/.bash_history con permisos 0600 y funciona independientemente de la auditoría central por syslog
 - Timeout de sesión - cierra sesiones inactivas
 - Prompt personalizado - muestra hora, usuario, hostname FQDN (`hostname -f`) y directorio
 
@@ -116,12 +116,16 @@ sudo ./bash-hardening.sh
 | Sistema | ps, ports, myip | Monitoreo rápido |
 | Logs | syslog, secure, audit | Tailing de logs comunes |
 
-### 3. Auditoría a Syslog (/etc/profile.d/syslog_history.sh)
+### 3. Auditoría opcional a Syslog (/etc/profile.d/syslog_history.sh)
 
-- Envía eventos de comandos a syslog con nivel `local1.notice`
+- Cuando la política local lo permite, envía eventos de comandos a syslog con nivel `local1.notice`
 - Registra usuario, directorio de trabajo y el texto de `BASH_COMMAND`
-- Configura `/var/log/bash_commands.log` para almacenar los eventos
-- **Advertencia:** `BASH_COMMAND` puede contener argumentos sensibles (tokens, contraseñas u otros secretos). No pases secretos como argumentos de línea de comandos si esta captura está habilitada; root también puede modificar los logs, por lo que no sustituyen una auditoría inmutable
+- Configura `/var/log/bash_commands.log` mediante `/etc/rsyslog.d/30-bash.conf`
+- Detecta `/etc/csf/csf.conf` y el valor efectivo de `RESTRICT_SYSLOG`
+- Si CSF tiene `RESTRICT_SYSLOG=3`, **no instala el trap DEBUG**. Este modo restringe el socket syslog al grupo definido por CSF y el trap fallaría para los usuarios que no pertenecen a ese grupo
+- Al ejecutar `--fix` con esa política, retira solamente los archivos de auditoría que identifica como generados por OrangeBox; conserva `~/.bash_history`, `history_secure.sh` y el log histórico existente
+- Si encuentra archivos con contenido distinto al generado por OrangeBox, los deja intactos y muestra una advertencia
+- **Advertencia de privacidad:** `BASH_COMMAND` puede contener argumentos sensibles (tokens, contraseñas u otros secretos). No pases secretos como argumentos de línea de comandos si esta captura está habilitada; root también puede modificar los logs, por lo que no sustituyen una auditoría inmutable
 
 ### 4. Historial Seguro por Usuario (/etc/profile.d/history_secure.sh)
 
@@ -188,11 +192,11 @@ bash-hardening.sh
 | /etc/profile.d/orangebox.sh | Prompt, historial, timeout y umask |
 | /etc/profile.d/99-orangebox-motd.sh | Logo FIGlet/ASCII y ficha de sesión ordenada con colores uniformes |
 | /etc/profile.d/aliases.sh | Alias de comandos |
-| /etc/profile.d/syslog_history.sh | Envío de comandos a syslog |
+| /etc/profile.d/syslog_history.sh | Envío opcional de comandos a syslog; no se instala con CSF `RESTRICT_SYSLOG=3` |
 | /etc/profile.d/history_secure.sh | Historial por usuario |
 | /root/.bashrc | Configuración específica para root |
 | /etc/skel/.bashrc | Configuración para nuevos usuarios |
-| /etc/rsyslog.d/30-bash.conf | Configuración de logging |
+| /etc/rsyslog.d/30-bash.conf | Regla opcional para los comandos Bash; no se instala con CSF `RESTRICT_SYSLOG=3` |
 | `$HOME/.bash_history` | Historial individual por usuario, protegido con permisos `0600` |
 | /var/log/bash_commands.log | Log de comandos ejecutados |
 
@@ -237,7 +241,14 @@ El modo Emacs asigna `Ctrl+A` al inicio de la línea y `Ctrl+E` al final. El har
 
 ### Los comandos no se registran en syslog
 
-Verificar que rsyslog esté corriendo:
+Primero revisar si CSF restringe el socket:
+```
+grep -E '^[[:space:]]*RESTRICT_SYSLOG[[:space:]]*=' /etc/csf/csf.conf
+```
+
+Si el valor es `3`, la auditoría Bash central se omite intencionalmente. El historial local `~/.bash_history` continúa funcionando. No agregues indiscriminadamente usuarios al grupo `mysyslog` ni reduzcas la protección de CSF solo para habilitar este trap.
+
+Si CSF no aplica la restricción, verificar que rsyslog esté corriendo:
 ```
 systemctl status rsyslog
 ```
