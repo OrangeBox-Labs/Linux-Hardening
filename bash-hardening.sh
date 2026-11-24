@@ -24,7 +24,7 @@ fi
 # Email: froman@orangebox.cl
 # Descripcion: Hardening de Bash shell y entorno de usuario
 #              Configura historial con fecha/hora, prompt mejorado,
-#              timeout, umask segura, alias útiles, auditoría en syslog
+#              timeout, umask segura, alias útiles, auditoría opcional en syslog
 #              y protecciones adicionales
 #              Compatible con RHEL/CentOS/Rocky/AlmaLinux/Oracle 7,8,9,10
 #              NO requiere paquetes adicionales (usa solo herramientas base)
@@ -412,20 +412,101 @@ EOF
 }
 
 # ==============================================
+# DETECTAR RESTRICCION SYSLOG DE CSF
+# ==============================================
+csf_restricts_syslog() {
+  local conf="/etc/csf/csf.conf" value
+  [ -r "$conf" ] || return 1
+
+  value="$(awk -F= '
+    /^[[:space:]]*RESTRICT_SYSLOG[[:space:]]*=/ {
+      value=$2
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", value)
+      print value
+      exit
+    }
+  ' "$conf")"
+
+  [ "$value" = "3" ]
+}
+
+# ==============================================
 # CONFIGURAR ENVIO DE COMANDOS A SYSLOG
 # ==============================================
 configure_syslog_history() {
-  echo -e "\n${BLUE}[*] Configurando envio de comandos a syslog...${NC}"
+  echo -e "\n${BLUE}[*] Configurando envío de comandos a syslog... ${NC}"
 
-  if [ -f "$HISTORY_SYSLOG" ] && grep -q "OrangeBox" "$HISTORY_SYSLOG" 2>/dev/null; then
-    echo -e "${GREEN}[✓] Envio a syslog ya configurado${NC}"
+  # CSF recomienda RESTRICT_SYSLOG=3 para limitar el acceso al socket
+  # syslog al grupo RESTRICT_SYSLOG_GROUP. No instalamos un DEBUG trap
+  # que fallaría para usuarios fuera de ese grupo.
+  if csf_restricts_syslog; then
+    echo -e "${YELLOW}[!] CSF RESTRICT_SYSLOG=3 detectado; se omite la auditoría Bash vía logger.${NC}"
+
+    if [ "$AUTO_FIX" = true ]; then
+      if [ -f "$HISTORY_SYSLOG" ]; then
+        if grep -Fq '# Envio de comandos ejecutados a syslog - OrangeBox Labs' "$HISTORY_SYSLOG" 2>/dev/null &&
+           grep -Fq 'trap log_command DEBUG' "$HISTORY_SYSLOG" 2>/dev/null; then
+          if rm -f "$HISTORY_SYSLOG"; then
+            echo -e "${GREEN}[✓] Retirado el trap DEBUG de OrangeBox (backup disponible en $BACKUP_DIR).${NC}"
+            FIXED=$((FIXED + 1))
+          else
+            echo -e "${YELLOW}[WARN] No se pudo retirar $HISTORY_SYSLOG.${NC}"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+        else
+          echo -e "${YELLOW}[WARN] $HISTORY_SYSLOG existe pero no coincide con el archivo administrado por OrangeBox; no se modifica.${NC}"
+          WARNINGS=$((WARNINGS + 1))
+        fi
+      fi
+
+      local rsyslog_removed=false
+      if [ -f "$RSYSLOG_CONF" ]; then
+        if grep -Fq '# Logs de comandos bash - OrangeBox Labs' "$RSYSLOG_CONF" 2>/dev/null &&
+           grep -Eq '^[[:space:]]*local1\.notice[[:space:]]+/var/log/bash_commands\.log[[:space:]]*$' "$RSYSLOG_CONF" &&
+           [ "$(awk 'NF { n++ } END { print n+0 }' "$RSYSLOG_CONF")" -eq 2 ]; then
+          if rm -f "$RSYSLOG_CONF"; then
+            echo -e "${GREEN}[✓] Retirada la regla rsyslog de auditoría Bash (backup disponible en $BACKUP_DIR).${NC}"
+            FIXED=$((FIXED + 1))
+            rsyslog_removed=true
+          else
+            echo -e "${YELLOW}[WARN] No se pudo retirar $RSYSLOG_CONF.${NC}"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+        else
+          echo -e "${YELLOW}[WARN] $RSYSLOG_CONF contiene una configuración distinta; no se modifica.${NC}"
+          WARNINGS=$((WARNINGS + 1))
+        fi
+      fi
+
+      if [ "$rsyslog_removed" = true ] && command -v rsyslogd >/dev/null 2>&1; then
+        if rsyslogd -N1 >/dev/null 2>&1; then
+          if ob_service_restart rsyslog 2>/dev/null; then
+            echo -e "${GREEN}[✓] Rsyslog recargado sin la regla de auditoría Bash.${NC}"
+          else
+            echo -e "${YELLOW}[WARN] La regla fue retirada, pero rsyslog no pudo reiniciarse; revisar su estado.${NC}"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+        else
+          echo -e "${YELLOW}[WARN] La regla fue retirada, pero rsyslogd -N1 detectó otros errores; no se reinició rsyslog.${NC}"
+          WARNINGS=$((WARNINGS + 1))
+        fi
+      fi
+    else
+      echo -e "${YELLOW}[INFO] Ejecute $0 --fix para retirar únicamente los archivos de auditoría generados por OrangeBox; se conserva ~/.bash_history.${NC}"
+      WARNINGS=$((WARNINGS + 1))
+    fi
     return 0
   fi
 
-  echo -e "${RED}[!] Envio a syslog NO configurado${NC}"
+  if [ -f "$HISTORY_SYSLOG" ] && grep -q "OrangeBox" "$HISTORY_SYSLOG" 2>/dev/null; then
+    echo -e "${GREEN}[✓] Envío a syslog ya configurado${NC}"
+    return 0
+  fi
+
+  echo -e "${RED}[!] Envío a syslog NO configurado${NC}"
 
   if [ "$AUTO_FIX" = true ]; then
-    # Crear el script de logging
     cat >"$HISTORY_SYSLOG" <<'EOF'
 # ==============================================
 # Envio de comandos ejecutados a syslog - OrangeBox Labs
@@ -436,19 +517,16 @@ log_command() {
 }
 trap log_command DEBUG
 EOF
-    echo -e "${GREEN}[✓] Envio de comandos a syslog configurado${NC}"
+    echo -e "${GREEN}[✓] Envio a syslog configurado${NC}"
     FIXED=$((FIXED + 1))
 
-    # Configurar rsyslog si existe
     if command -v rsyslogd >/dev/null 2>&1; then
-      # Crear directorio si no existe
       mkdir -p /etc/rsyslog.d/
 
       cat >"$RSYSLOG_CONF" <<'EOF'
 # Logs de comandos bash - OrangeBox Labs
 local1.notice    /var/log/bash_commands.log
 EOF
-      # Intentar reiniciar rsyslog
       if ob_service_restart rsyslog 2>/dev/null; then
         echo -e "${GREEN}[✓] Rsyslog configurado para recibir comandos${NC}"
         FIXED=$((FIXED + 1))
@@ -897,7 +975,13 @@ check_status() {
   fi
 
   echo -e "\n${BLUE}Syslog history:${NC}"
-  [ -f "$HISTORY_SYSLOG" ] && echo -e "  ${GREEN}✓${NC} Configurado" || echo -e "  ${RED}✗${NC} No configurado"
+  if csf_restricts_syslog; then
+    echo -e "  ${YELLOW}Omitido: CSF RESTRICT_SYSLOG=3 restringe el socket a su grupo autorizado${NC}"
+  elif [ -f "$HISTORY_SYSLOG" ]; then
+    echo -e "  ${GREEN}✓${NC} Configurado"
+  else
+    echo -e "  ${RED}✗${NC} No configurado"
+  fi
 
   echo -e "\n${BLUE}Historial seguro por usuario:${NC}"
   [ -f "$HISTORY_SECURE" ] && echo -e "  ${GREEN}✓${NC} Configurado" || echo -e "  ${RED}✗${NC} No configurado"
@@ -927,8 +1011,13 @@ show_summary() {
   echo -e "\n${YELLOW}PARA VERIFICAR HISTORIAL CON FECHA:${NC}"
   echo -e "  history | tail -20"
 
-  echo -e "\n${YELLOW}PARA VER LOG DE COMANDOS:${NC}"
-  echo -e "  tail -f /var/log/bash_commands.log"
+  if [ -f "$HISTORY_SYSLOG" ]; then
+    echo -e "\n${YELLOW}PARA VER LOG DE COMANDOS:${NC}"
+    echo -e "  tail -f /var/log/bash_commands.log"
+  else
+    echo -e "\n${YELLOW}AUDITORÍA CENTRAL DE COMANDOS:${NC}"
+    echo -e "  No está habilitada en este host (el historial local ~/.bash_history se conserva)."
+  fi
 
   echo -e "\n${GREEN}============================================${NC}"
   echo -e "${GREEN}  🌐 https://www.orangebox.cl${NC}"
